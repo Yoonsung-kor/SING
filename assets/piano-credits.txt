@@ -1,0 +1,14 @@
+Piano recordings: Salamander Grand Piano, Alexander Holm, Yamaha C5.
+Source MP3 files: https://github.com/Tonejs/audio/tree/master/salamander
+Source hosting: https://tonejs.github.io/audio/salamander/
+Author: https://rytmenpinne.wordpress.com/sounds-and-such/salamander-grandpiano/
+
+The distributed source README states Creative Commons Attribution 3.0:
+https://creativecommons.org/licenses/by/3.0/
+The author's page also declares the library public domain as of 4 March 2022.
+We retain attribution and the original CC BY 3.0 reference.
+
+This app bundles 17 unmodified MP3 files from C2 to C6 at minor-third intervals.
+Runtime changes: nearest-note playback-rate transposition, gain adjustment,
+and a short fade out. No endorsement by the sample author is implied.
+Retrieved 2026-09-28. No third-party requests occur during app playback.

@@ -1,0 +1,31 @@
+# Local dependencies, caches, and generated output
+node_modules/
+dist/
+coverage/
+tmp/
+*.log
+.DS_Store
+Thumbs.db
+
+# Credentials and local tool configuration
+.env
+.env.*
+!.env.example
+.aws/
+.agents/
+.codex/
+.vscode/
+.idea/
+
+# Personal exports and recordings (bundled piano assets are tracked)
+sing-backup*.json
+recordings/
+backups/
+
+# Private working notes; public documentation lives in docs/*.md below
+docs/product-discovery.md
+docs/lesson-01-draft.md
+docs/user-flow-review.md
+docs/implementation-log.md
+docs/superpowers/
+docs/notion-update-local.md
