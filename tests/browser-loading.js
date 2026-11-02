@@ -119,7 +119,9 @@ try {
     click('exit-demo');
     assert(document.querySelector('#app')?.textContent.includes('이어서 연습하기'), '실제 레슨 초안이 보이지 않음');
     click('songs');
-    assert(document.querySelector('#song-results')?.textContent.includes(title), '실제 곡이 보이지 않음');
+    // Layout A keeps every song under the '모든 곡' card rather than on the tab's first screen.
+    click('all-songs');
+    assert(document.querySelector('#main')?.textContent.includes(title), '실제 곡이 보이지 않음');
     assert(!document.querySelector('.demo-banner'), '체험 배너가 남음');
   });
 } catch (error) {
