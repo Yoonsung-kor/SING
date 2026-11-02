@@ -4,7 +4,7 @@ import { AudioEngine, microphoneError } from './audio.js';
 import { noteName, frequencyToMidi } from './pitch.js';
 import { renderView } from './views.js';
 import { createSong, updateSong } from './songs.js';
-import { createPlaylist, renamePlaylist, removeSong } from './playlists.js';
+import { createPlaylist, renamePlaylist, removeSong, applyMembership, removeSongEverywhere } from './playlists.js';
 import { playlistHomeResults } from './playlist-views.js';
 
 const root = document.querySelector('#app');
@@ -270,7 +270,8 @@ function exitDemo() {
 }
 
 function readSongForm(form) {
-  songDraft = { ...songDraft, ...Object.fromEntries(new FormData(form)) };
+  const data = new FormData(form);
+  songDraft = { ...songDraft, ...Object.fromEntries(data), playlistIds: data.getAll('playlistIds') };
 }
 
 async function saveSong(form) {
@@ -281,35 +282,39 @@ async function saveSong(form) {
   try {
     const fields = { ...songDraft, keyOffset: Number(songDraft.keyOffset), lowestMidi: songDraft.lowestMidi === '' ? null : Number(songDraft.lowestMidi), highestMidi: songDraft.highestMidi === '' ? null : Number(songDraft.highestMidi) };
     const existing = state.songs.find(s => s.id === songDraft.id);
+    // Saving the form makes every value the user's own; a hand-edited range no longer matches its source.
+    fields.origin = 'user';
+    if (fields.lowestMidi === null || (existing && (existing.lowestMidi !== fields.lowestMidi || existing.highestMidi !== fields.highestMidi))) fields.rangeSourceUrl = '';
     song = existing ? updateSong(existing, fields) : createSong(fields);
-    if (!existing && state.songs.length >= 500) throw new Error('노래장은 500곡까지 담을 수 있어요.');
+    if (!existing && state.songs.length >= 500) throw new Error('곡은 500곡까지 담을 수 있어요.');
   } catch (err) {
     songError = err.message;
     render();
     document.querySelector('#song-form [role="alert"]')?.scrollIntoView({ block: 'nearest' });
     return;
   }
-  songDraft = song;
+  songDraft = { ...song, playlistIds: songDraft.playlistIds };
   busy = 'saving'; render();
   const exists = state.songs.some(s => s.id === song.id);
-  const saved = await persist({ ...state, songs: exists ? state.songs.map(s => s.id === song.id ? song : s) : [...state.songs, song] });
+  const playlists = applyMembership(state.playlists, song.id, songDraft.playlistIds || [], new Date());
+  const saved = await persist({ ...state, songs: exists ? state.songs.map(s => s.id === song.id ? song : s) : [...state.songs, song], playlists });
   busy = false;
-  if (saved) { selectedSongId = song.id; navigate('song-detail'); toast('노래장에 저장했어요.'); }
+  if (saved) { selectedSongId = song.id; navigate('song-detail'); toast('곡을 저장했어요.'); }
   else render();
 }
 
 async function deleteSong(id) {
   const song = state.songs.find(s => s.id === id);
-  if (!song || !confirm(`‘${song.title}’을 노래장에서 삭제할까요?`)) return;
+  if (!song || !confirm(`‘${song.title}’을(를) 삭제할까요? 담긴 플레이리스트에서도 빠져요.`)) return;
   busy = 'saving'; render();
-  const next = { ...state, songs: state.songs.filter(s => s.id !== id) };
+  const next = { ...state, songs: state.songs.filter(s => s.id !== id), playlists: removeSongEverywhere(state.playlists, id) };
   try {
     if (!demo) await store.saveState(next);
     state = next;
     storageError = '';
     busy = false;
-    navigate('songs');
-    toast('노래장에서 삭제했어요.');
+    navigate(state.playlists.some(p => p.id === selectedPlaylistId) ? 'playlist' : 'songs');
+    toast('곡을 삭제했어요.');
   } catch {
     busy = false;
     render();
@@ -433,11 +438,14 @@ async function handle(action, id) {
   if (action === 'playlist-remove-song') return removeFromPlaylist(id);
   if (action === 'song-add' || action === 'song-edit') {
     if (!initialized && !demo) return toast('저장소가 준비되지 않았어요. 체험 모드에서 먼저 둘러볼 수 있어요.');
-    songDraft = action === 'song-edit' ? { ...state.songs.find(s => s.id === id) } : { status: 'want', keyOffset: 0, lowestMidi: null, highestMidi: null };
+    songDraft = action === 'song-edit'
+      ? { ...state.songs.find(s => s.id === id), playlistIds: state.playlists.filter(p => p.songIds.includes(id)).map(p => p.id) }
+      : { status: 'want', keyOffset: 0, lowestMidi: null, highestMidi: null, playlistIds: state.playlists.some(p => p.id === id) ? [id] : [] };
     songError = '';
     return navigate('song-form');
   }
   if (action === 'song-detail') { selectedSongId = id; return navigate('song-detail'); }
+  if (action === 'song-back') return navigate(state.playlists.some(p => p.id === selectedPlaylistId) ? 'playlist' : 'songs');
   if (action === 'song-delete') return deleteSong(id);
   if (action === 'demo') return enterDemo();
   if (action === 'exit-demo') return exitDemo();
@@ -476,7 +484,7 @@ async function handle(action, id) {
   if (action === 'export') return exportBackup();
   if (action === 'import') return document.querySelector('#backup-file').click();
   if (action === 'clear') {
-    if (!confirm('이 기기의 모든 연습 기록, 녹음, 노래장을 지울까요? 이 작업은 되돌릴 수 없어요.')) return;
+    if (!confirm('이 기기의 모든 연습 기록, 녹음, 곡과 플레이리스트를 지울까요? 이 작업은 되돌릴 수 없어요.')) return;
     await store.clear(); state = defaultState(); session = null; navigate('history'); return toast('모든 기록을 삭제했어요.');
   }
   if (action === 'retry-storage') {
