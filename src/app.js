@@ -4,7 +4,8 @@ import { AudioEngine, microphoneError } from './audio.js';
 import { noteName, frequencyToMidi } from './pitch.js';
 import { renderView } from './views.js';
 import { createSong, updateSong } from './songs.js';
-import { songResults } from './song-views.js';
+import { createPlaylist, renamePlaylist, removeSong } from './playlists.js';
+import { playlistHomeResults } from './playlist-views.js';
 
 const root = document.querySelector('#app');
 const audio = new AudioEngine();
@@ -24,10 +25,12 @@ let storageError = '';
 let initialized = false;
 let operation = 0;
 let songQuery = '';
-let songFilter = 'all';
 let songDraft = null;
 let songError = '';
 let selectedSongId = null;
+let selectedPlaylistId = null;
+let playlistDraft = null;
+let playlistError = '';
 let toastTimer;
 
 function toast(message) {
@@ -39,7 +42,7 @@ function toast(message) {
 }
 
 function render(focus = false) {
-  root.innerHTML = renderView({ page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songFilter, songDraft, songError, selectedSongId, loading: !initialized && !demo });
+  root.innerHTML = renderView({ page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, loading: !initialized && !demo });
   if (focus) { document.querySelector('#main')?.focus({ preventScroll: true }); window.scrollTo(0, 0); }
 }
 
@@ -260,8 +263,9 @@ function exitDemo() {
   session = null;
   songDraft = null;
   selectedSongId = null;
+  selectedPlaylistId = null;
+  playlistDraft = null;
   songQuery = '';
-  songFilter = 'all';
   navigate('home');
 }
 
@@ -311,6 +315,55 @@ async function deleteSong(id) {
     render();
     toast('삭제를 저장하지 못해 곡을 그대로 두었어요. 잠시 후 다시 시도해 주세요.');
   }
+}
+
+async function savePlaylist(form) {
+  if (busy) return;
+  const name = String(new FormData(form).get('name') ?? '');
+  playlistDraft = { ...playlistDraft, name };
+  let playlists;
+  let id = playlistDraft.id;
+  try {
+    if (id) playlists = renamePlaylist(state.playlists, id, name);
+    else {
+      const created = createPlaylist(state.playlists, name);
+      id = created.id;
+      playlists = [...state.playlists, created];
+    }
+  } catch (err) {
+    playlistError = err.message;
+    render();
+    return;
+  }
+  const renamed = Boolean(playlistDraft.id);
+  playlistError = '';
+  busy = 'saving'; render();
+  const saved = await persist({ ...state, playlists });
+  busy = false;
+  if (!saved) return render();
+  selectedPlaylistId = id;
+  playlistDraft = null;
+  navigate('playlist');
+  toast(renamed ? '이름을 바꿨어요.' : '플레이리스트를 만들었어요.');
+}
+
+async function deletePlaylist(id) {
+  const playlist = state.playlists.find(p => p.id === id);
+  if (!playlist || !confirm(`‘${playlist.name}’ 플레이리스트를 삭제할까요? 담긴 곡은 ‘모든 곡’에 남아요.`)) return;
+  busy = 'saving'; render();
+  const saved = await persist({ ...state, playlists: state.playlists.filter(p => p.id !== id) });
+  busy = false;
+  if (!saved) return render();
+  selectedPlaylistId = null;
+  navigate('songs');
+  toast('플레이리스트를 삭제했어요.');
+}
+
+async function removeFromPlaylist(songId) {
+  busy = 'saving'; render();
+  await persist({ ...state, playlists: state.playlists.map(p => p.id === selectedPlaylistId ? removeSong(p, songId) : p) });
+  busy = false;
+  render();
 }
 
 async function deleteSession(id) {
@@ -367,7 +420,17 @@ async function playSaved(id) {
 async function handle(action, id) {
   // Persistence writes must finish before navigating or changing their source state.
   if (busy === 'saving') return;
-  if (['home', 'learn', 'history', 'songs'].includes(action)) return navigate(action);
+  if (action === 'songs') selectedPlaylistId = null;
+  if (['home', 'learn', 'history', 'songs', 'all-songs'].includes(action)) return navigate(action);
+  if (action === 'playlist-new' || action === 'playlist-rename') {
+    if (!initialized && !demo) return toast('저장소가 준비되지 않았어요. 체험 모드에서 먼저 둘러볼 수 있어요.');
+    playlistDraft = action === 'playlist-rename' ? { id, name: state.playlists.find(p => p.id === id)?.name ?? '' } : { name: '' };
+    playlistError = '';
+    return navigate('playlist-form');
+  }
+  if (action === 'playlist-open') { selectedPlaylistId = id; return navigate('playlist'); }
+  if (action === 'playlist-delete') return deletePlaylist(id);
+  if (action === 'playlist-remove-song') return removeFromPlaylist(id);
   if (action === 'song-add' || action === 'song-edit') {
     if (!initialized && !demo) return toast('저장소가 준비되지 않았어요. 체험 모드에서 먼저 둘러볼 수 있어요.');
     songDraft = action === 'song-edit' ? { ...state.songs.find(s => s.id === id) } : { status: 'want', keyOffset: 0, lowestMidi: null, highestMidi: null };
@@ -375,7 +438,6 @@ async function handle(action, id) {
     return navigate('song-form');
   }
   if (action === 'song-detail') { selectedSongId = id; return navigate('song-detail'); }
-  if (action === 'song-filter') { songFilter = id; return render(); }
   if (action === 'song-delete') return deleteSong(id);
   if (action === 'demo') return enterDemo();
   if (action === 'exit-demo') return exitDemo();
@@ -447,12 +509,17 @@ root.addEventListener('change', async event => {
 root.addEventListener('input', event => {
   if (event.target.id === 'song-search') {
     songQuery = event.target.value;
-    document.querySelector('#song-results').innerHTML = songResults(state.songs, songQuery, songFilter);
+    document.querySelector('#song-results').innerHTML = playlistHomeResults(state, songQuery);
   }
   if (event.target.closest('#song-form')) readSongForm(event.target.form);
 });
 
 root.addEventListener('submit', async event => {
+  if (event.target.id === 'playlist-form') {
+    event.preventDefault();
+    await savePlaylist(event.target);
+    return;
+  }
   if (event.target.id !== 'song-form') return;
   event.preventDefault();
   await saveSong(event.target);
