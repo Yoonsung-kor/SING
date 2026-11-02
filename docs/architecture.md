@@ -15,11 +15,17 @@ flowchart TD
     UI -->|편안함 응답| Lesson
     Lesson -->|결과 · 다음 과제| UI
     UI <--> Songs[플레이리스트 · 곡 입력 / 검색 / AI 추천]
+    UI <--> Voice[내 음역 온보딩 · 오선지 · 음역 막대]
+    Songs -->|동의 후| Server[로컬 서버 · /api/recommend · /api/song-range · /api/song-search]
+    Voice -->|동의 후| Server
+    Server --> OpenAI[OpenAI · 웹 검색]
+    Server --> Check[출처 페이지 확인 · 인용 문장과 음 표기 대조]
+    Server --> MB[MusicBrainz · 곡 검색]
     UI <--> Store[storage.js · IndexedDB]
     Store <--> Backup[사용자 백업 파일]
 ```
 
-서버는 HTML·JavaScript·CSS·동봉 자산을 제공한다. 음높이 계산과 저장은 브라우저 안에서 수행하며, 음성 업로드 API와 회원 서버는 없다. 곡 추천만 `POST /api/recommend`로 서버를 거쳐 OpenAI를 호출한다(키는 서버의 `.env`, 사용자 동의 후 요청).
+서버는 HTML·JavaScript·CSS·동봉 자산을 제공한다. 음높이 계산과 저장은 브라우저 안에서 수행하며, 음성 업로드 API와 회원 서버는 없다. 곡 추천(`POST /api/recommend`)과 최고음 찾기(`POST /api/song-range`)는 서버를 거쳐 OpenAI를 호출하고, 곡 검색(`GET /api/song-search`)은 서버가 MusicBrainz에 대신 묻는다. 키는 서버의 `.env`에만 있고, 모두 사용자 동의(버전 2) 후에만 요청한다. AI가 준 최고음은 서버가 출처 페이지를 열어 인용 문장과 음 표기를 대조한 뒤에만 앱으로 보낸다. 이때 사설·루프백 주소로는 접속하지 않는다.
 
 | 구성 | 책임 | 주요 파일 |
 | --- | --- | --- |
@@ -27,9 +33,11 @@ flowchart TD
 | 오디오 | 피아노 샘플 선택·재생, 마이크 요청, 녹음, 취소 처리 | `src/piano.js`, `src/audio.js`, `src/capture.js` |
 | 음높이 분석 | 단일 음의 주기성에서 주파수·음이름·신뢰도 요약 | `src/pitch.js` |
 | 레슨 규칙 | 시작음 확인, 목표음 비교, 체감에 따른 진행·종료 | `src/lesson.js` |
-| 곡과 플레이리스트 | 곡 검증, 제목·가수 검색, 키 변경 표시, 사용자 이름 플레이리스트와 AI 추천 | `src/songs.js`, `src/song-views.js`, `src/playlists.js`, `src/playlist-views.js`, `src/recommend.js`, `scripts/server.mjs`, `scripts/ai.mjs` |
+| 곡과 플레이리스트 | 곡 검증, 제목·가수 검색, 키 변경 표시, 사용자 이름 플레이리스트와 AI 추천 | `src/songs.js`, `src/song-views.js`, `src/playlists.js`, `src/playlist-views.js`, `src/recommend.js` |
+| 내 음역 | 자신 있는 곡으로 편한 최고음 어림, 남녀 곡 옥타브 제안, 편함·도전·무리 분류, 오선지·막대 그림 | `src/onboarding.js`, `src/onboarding-views.js`, `src/vocal-range.js`, `src/notes.js`, `src/range-graphics.js` |
+| AI와 외부 연결 | 추천·최고음 찾기 흐름, 출처 확인, 곡 검색, 동의 버전 | `scripts/services.mjs`, `scripts/ai.mjs`, `scripts/verify-source.mjs`, `scripts/musicbrainz.mjs`, `src/consent.js` |
 | 저장 | 상태/원음 저장, 백업 검증과 복원 | `src/storage.js` |
-| 개발 서버 | 허용된 정적 파일 제공 | `scripts/serve.mjs` |
+| 개발 서버 | 허용된 정적 파일 제공과 API 전달(입력 한도, 키는 `.env`) | `scripts/serve.mjs`, `scripts/server.mjs` |
 
 ## 한 번의 연습 데이터 흐름
 
