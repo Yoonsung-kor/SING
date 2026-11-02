@@ -13,6 +13,22 @@ const start = opts => new Promise(resolve => {
 const post = (port, body, type = 'application/json') => fetch(`http://127.0.0.1:${port}/api/recommend`, { method: 'POST', headers: { 'Content-Type': type }, body });
 const valid = JSON.stringify({ playlistName: '도전하기', songs: [1, 2, 3].map(n => ({ title: `곡${n}`, artist: '', keyOffset: 0, lowestMidi: null, highestMidi: null, fromAi: false })), exclude: [], rejected: [] });
 
+test('song-search endpoint validates q and maps failures', async () => {
+  const get = (port, q) => fetch(`http://127.0.0.1:${port}/api/song-search?q=${encodeURIComponent(q)}`);
+  const s = await start({ recommend: null, searchSongs: async q => [{ title: q, artist: '가수' }] });
+  try {
+    assert.equal((await get(s.port, '  ')).status, 400);
+    assert.equal((await get(s.port, 'x'.repeat(121))).status, 400);
+    const ok = await get(s.port, '밤편지');
+    assert.equal(ok.status, 200);
+    assert.deepEqual(await ok.json(), { results: [{ title: '밤편지', artist: '가수' }] });
+  } finally { s.close(); }
+  const broken = await start({ recommend: null, searchSongs: async () => { throw new Error('down'); } });
+  try { assert.equal((await get(broken.port, '밤편지')).status, 502); } finally { broken.close(); }
+  const off = await start({ recommend: null });
+  try { assert.equal((await get(off.port, '밤편지')).status, 503); } finally { off.close(); }
+});
+
 test('static files keep their headers and secrets are never served', async () => {
   const { port, close } = await start({ recommend: null });
   const home = await fetch(`http://127.0.0.1:${port}/`);

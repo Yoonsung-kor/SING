@@ -4,6 +4,7 @@ import { createHandler } from './server.mjs';
 import { fetchRecommendations } from './ai.mjs';
 import { toRecItems } from '../src/recommend.js';
 import { createServices } from './services.mjs';
+import { createSearcher } from './musicbrainz.mjs';
 
 // The OpenAI key lives only in .env on this machine; without it the app runs with AI recommendations off.
 try { process.loadEnvFile(fileURLToPath(new URL('../.env', import.meta.url))); }
@@ -17,8 +18,9 @@ const model = process.env.OPENAI_MODEL;
 const recommend = apiKey && model
   ? async body => toRecItems(await fetchRecommendations(body, { apiKey, model }), [...body.exclude, ...body.rejected])
   : null;
-const { lookupRange } = createServices({ apiKey, model });
+// Song search needs no key, so it stays on even when the AI is off.
+const { lookupRange, searchSongs } = createServices({ apiKey, model, search: createSearcher() });
 
-const server = http.createServer(createHandler({ root, recommend, lookupRange }));
+const server = http.createServer(createHandler({ root, recommend, lookupRange, searchSongs }));
 server.listen(port, host, () => console.log(`SING is ready at http://${host}:${port} · AI 추천: ${recommend ? '켜짐' : '꺼짐'}`));
 server.on('error', error => { console.error(error.message); process.exitCode = 1; });
