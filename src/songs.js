@@ -1,5 +1,7 @@
 const STATUSES = ['want', 'practicing', 'comfortable'];
 const ORIGINS = ['user', 'ai'];
+const VOCALS = ['male', 'female', 'mixed'];
+const OCTAVE_SHIFTS = [-12, 0, 12];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function fail(message) { throw new Error(message); }
@@ -28,8 +30,12 @@ function checkFields(song) {
   text(song.originalKey, '원곡 키', 40);
   midi(song.lowestMidi, '최저음');
   midi(song.highestMidi, '최고음');
-  if ((song.lowestMidi === null) !== (song.highestMidi === null)
-    || (song.lowestMidi !== null && song.lowestMidi > song.highestMidi)) fail('음역은 최저음과 최고음을 함께 올바른 순서로 입력해 주세요.');
+  midi(song.falsettoHighestMidi, '가성 최고음');
+  // A highest note alone is enough; a lowest note needs the highest and must sit below it.
+  if (song.lowestMidi !== null && (song.highestMidi === null || song.lowestMidi > song.highestMidi)) fail('음역은 최고음을 먼저 입력하고, 최저음은 최고음보다 낮게 입력해 주세요.');
+  if (song.falsettoHighestMidi !== null && (song.highestMidi === null || song.falsettoHighestMidi <= song.highestMidi)) fail('최고음과 함께, 가성 최고음은 진성보다 높게 입력해 주세요.');
+  if (!OCTAVE_SHIFTS.includes(song.octaveShift)) fail('부르는 옥타브를 확인해 주세요.');
+  if (song.vocal !== null && !VOCALS.includes(song.vocal)) fail('원곡 보컬 구분을 확인해 주세요.');
   if (!Number.isInteger(song.keyOffset) || song.keyOffset < -12 || song.keyOffset > 12) fail('키 조정은 -12~12 반음으로 입력해 주세요.');
   if (!STATUSES.includes(song.status)) fail('곡 상태를 확인해 주세요.');
   const url = text(song.lyricsUrl, '가사 링크', 2048);
@@ -37,12 +43,17 @@ function checkFields(song) {
   text(song.note, '메모', 1000);
   if (!ORIGINS.includes(song.origin)) fail('곡 출처 구분을 확인해 주세요.');
   if (typeof song.rangeSourceUrl !== 'string' || song.rangeSourceUrl.length > 2048) fail('음역 출처는 HTTPS 주소로, 음역과 함께 입력해 주세요.');
-  if (song.rangeSourceUrl && (!httpsUrl(song.rangeSourceUrl) || song.lowestMidi === null)) fail('음역 출처는 HTTPS 주소로, 음역과 함께 입력해 주세요.');
+  if (song.rangeSourceUrl && (!httpsUrl(song.rangeSourceUrl) || song.highestMidi === null)) fail('음역 출처는 HTTPS 주소로, 음역과 함께 입력해 주세요.');
+  // A quote marks a value the server checked against its page, so it only exists with that page.
+  if (typeof song.rangeQuote !== 'string' || song.rangeQuote.length > 120 || (song.rangeQuote && !song.rangeSourceUrl)) fail('음역 출처는 HTTPS 주소로, 음역과 함께 입력해 주세요.');
 }
 
-/** Fills fields added after the first release so stored songs validate. */
+/** Fills fields added after the first release so stored songs validate. Existing keys keep their order. */
 export function normalizeSong(song) {
-  return { ...song, rangeSourceUrl: song.rangeSourceUrl ?? '', origin: song.origin ?? 'user' };
+  return {
+    ...song, rangeSourceUrl: song.rangeSourceUrl ?? '', origin: song.origin ?? 'user',
+    falsettoHighestMidi: song.falsettoHighestMidi ?? null, rangeQuote: song.rangeQuote ?? '', vocal: song.vocal ?? null, octaveShift: song.octaveShift ?? 0,
+  };
 }
 
 export function validateSong(song) {
@@ -73,9 +84,13 @@ function buildFields(fields, base) {
     note: pick('note'),
     rangeSourceUrl: pick('rangeSourceUrl'),
     origin: pick('origin'),
+    falsettoHighestMidi: pick('falsettoHighestMidi'),
+    rangeQuote: pick('rangeQuote'),
+    vocal: pick('vocal'),
+    octaveShift: pick('octaveShift'),
   };
   // Persist normalized text so search and the UI see the same values.
-  for (const key of ['title', 'artist', 'originalKey', 'lyricsUrl', 'note', 'rangeSourceUrl']) {
+  for (const key of ['title', 'artist', 'originalKey', 'lyricsUrl', 'note', 'rangeSourceUrl', 'rangeQuote']) {
     if (typeof song[key] === 'string') song[key] = song[key].trim();
   }
   checkFields(song);
@@ -87,7 +102,7 @@ export function createSong(fields, now = new Date()) {
   const data = buildFields(fields, {
     title: undefined, artist: '', originalKey: '', lowestMidi: null,
     highestMidi: null, keyOffset: 0, status: 'want', lyricsUrl: '', note: '',
-    rangeSourceUrl: '', origin: 'user',
+    rangeSourceUrl: '', origin: 'user', falsettoHighestMidi: null, rangeQuote: '', vocal: null, octaveShift: 0,
   });
   return { id: crypto.randomUUID(), ...data, createdAt: timestamp, updatedAt: timestamp };
 }

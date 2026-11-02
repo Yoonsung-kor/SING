@@ -3,6 +3,7 @@ import test from 'node:test';
 import { defaultState, openStore, parseBackup } from '../src/storage.js';
 import { createSong } from '../src/songs.js';
 import { createPlaylist } from '../src/playlists.js';
+import { hasCurrentConsent } from '../src/consent.js';
 
 const attempt = {
   id: 'a1', targetMidi: null, midi: 60, reliable: true, cents: null,
@@ -23,7 +24,7 @@ const backup = { version: 1, state, recordings: [] };
 test('default state is fresh and has stable versioned shape', () => {
   const a = defaultState();
   const b = defaultState();
-  assert.deepEqual(a, { version: 1, sessions: [], draft: null, activities: [], songs: [], playlists: [], settings: { keepAudio: false, aiConsentAt: null } });
+  assert.deepEqual(a, { version: 1, sessions: [], draft: null, activities: [], songs: [], playlists: [], settings: { keepAudio: false, aiConsentAt: null, aiConsentVersion: null, voice: null, voiceOnboardingDismissedAt: null } });
   a.sessions.push(session);
   assert.equal(b.sessions.length, 0);
 });
@@ -146,6 +147,29 @@ test('recording base64, MIME, and decoded size are validated', () => {
 test('unsupported version and text above 25 MB are rejected', () => {
   assert.throws(() => parseBackup(JSON.stringify({ ...backup, version: 2 })), /version/i);
   assert.throws(() => parseBackup(' '.repeat(25 * 1024 * 1024 + 1)), /backup size/i);
+});
+
+const voice = { comfortableHighMidi: 71, voiceType: 'male', method: 'songs', updatedAt: '2026-11-03T01:00:00.000Z',
+  basis: [{ title: '밤편지', artist: 'IU', highestMidi: 71, keyOffset: 0, octaveShift: -12, vocal: 'female' }, { title: '못 찾은 곡', artist: '', highestMidi: null, keyOffset: 0, octaveShift: 0, vocal: null }] };
+
+test('an old consent becomes version 1 and is not current', () => {
+  const old = structuredClone(backup);
+  old.state.settings = { keepAudio: false, aiConsentAt: '2026-11-02T01:00:00.000Z' };
+  const settings = parseBackup(JSON.stringify(old)).state.settings;
+  assert.deepEqual([settings.aiConsentVersion, settings.voice, settings.voiceOnboardingDismissedAt], [1, null, null]);
+  assert.equal(hasCurrentConsent(settings), false);
+});
+
+test('a voice profile round-trips and bad profiles are rejected', () => {
+  const withVoice = structuredClone(backup);
+  withVoice.state.settings = { ...withVoice.state.settings, voice, voiceOnboardingDismissedAt: '2026-11-03T02:00:00.000Z' };
+  assert.deepEqual(parseBackup(JSON.stringify(withVoice)).state.settings.voice, voice);
+  for (const bad of [{ ...voice, comfortableHighMidi: 54 }, { ...voice, voiceType: 'other' }, { ...voice, basis: Array.from({ length: 21 }, () => voice.basis[0]) },
+    { ...voice, basis: [{ ...voice.basis[0], octaveShift: 5 }] }, { ...voice, method: 'mic' }]) {
+    const broken = structuredClone(backup);
+    broken.state.settings = { ...broken.state.settings, voice: bad };
+    assert.throws(() => parseBackup(JSON.stringify(broken)));
+  }
 });
 
 test('openStore reports unavailable IndexedDB', async () => {

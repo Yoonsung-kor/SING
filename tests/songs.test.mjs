@@ -11,6 +11,7 @@ test('createSong supplies defaults and stable timestamps', () => {
     id: song.id, title: '봄날', artist: '', originalKey: '',
     lowestMidi: null, highestMidi: null, keyOffset: 0,
     status: 'want', lyricsUrl: '', note: '', rangeSourceUrl: '', origin: 'user',
+    falsettoHighestMidi: null, rangeQuote: '', vocal: null, octaveShift: 0,
     createdAt: now.toISOString(), updatedAt: now.toISOString(),
   });
   assert.equal(validateSong(song), song);
@@ -85,4 +86,27 @@ test('searchSongs matches title or artist across case and whitespace', () => {
   ];
   assert.deepEqual(searchSongs(songs, ' LOVESONG '), [songs[0]]);
   assert.deepEqual(searchSongs(songs, '  아이 유 '), [songs[1]]);
+});
+
+test('songs saved before chest/falsetto fields gain their defaults and validate', () => {
+  const { falsettoHighestMidi, rangeQuote, vocal, octaveShift, ...old } = createSong({ title: 'A', lowestMidi: 48, highestMidi: 72 }, now);
+  const upgraded = normalizeSong(old);
+  assert.deepEqual([upgraded.falsettoHighestMidi, upgraded.rangeQuote, upgraded.vocal, upgraded.octaveShift], [null, '', null, 0]);
+  assert.equal(validateSong(upgraded), upgraded);
+});
+
+test('a highest note alone is enough, and a checked quote needs its source', () => {
+  const song = createSong({ title: 'A', highestMidi: 74, falsettoHighestMidi: 78, rangeSourceUrl: 'https://example.org/r', rangeQuote: '진성 3옥 레, 가성 3옥 파#', vocal: 'female', octaveShift: -12 }, now);
+  assert.deepEqual([song.lowestMidi, song.highestMidi, song.falsettoHighestMidi, song.vocal, song.octaveShift], [null, 74, 78, 'female', -12]);
+  assert.throws(() => createSong({ title: 'A', highestMidi: 74, falsettoHighestMidi: 74 }), /가성/);
+  assert.throws(() => createSong({ title: 'A', falsettoHighestMidi: 78 }), /가성/);
+  assert.throws(() => createSong({ title: 'A', highestMidi: 74, rangeQuote: '진성 3옥 레' }), /음역 출처/);
+  assert.throws(() => createSong({ title: 'A', highestMidi: 74, octaveShift: 5 }), /옥타브/);
+  assert.throws(() => createSong({ title: 'A', highestMidi: 74, vocal: 'robot' }), /보컬/);
+  assert.throws(() => createSong({ title: 'A', highestMidi: 74, rangeSourceUrl: 'https://example.org/r', rangeQuote: 'x'.repeat(121) }), /음역 출처/);
+});
+
+test('normalizeSong leaves a complete v2 song byte-identical', () => {
+  const song = createSong({ title: 'A', highestMidi: 74, rangeSourceUrl: 'https://example.org/r', rangeQuote: '3옥 레(D5)', vocal: 'male' }, now);
+  assert.equal(JSON.stringify(normalizeSong(song)), JSON.stringify(song));
 });

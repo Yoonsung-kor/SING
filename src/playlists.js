@@ -4,6 +4,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const LEGACY = [['want', '불러볼 곡'], ['practicing', '연습 중'], ['comfortable', '익숙한 곡']];
 const SONG_ERROR = '플레이리스트의 곡 정보가 올바르지 않아요.';
 const REC_ERROR = '플레이리스트의 추천 정보가 올바르지 않아요.';
+const VOCALS = ['male', 'female', 'mixed'];
+const INTENTS = ['comfortable', 'challenge', 'any'];
 
 function fail(message) { throw new Error(message); }
 function isoNow(now) {
@@ -72,8 +74,9 @@ export function migrateLegacyStatuses(songs, now = new Date()) {
   return playlists;
 }
 
-export function setRecommendations(playlist, items, now = new Date()) {
-  return touch(playlist, { recommendations: { fetchedAt: isoNow(now), items } }, now);
+/** meta carries the list intent the AI read and whether the picks fell back to unchecked songs. */
+export function setRecommendations(playlist, items, now = new Date(), meta = {}) {
+  return touch(playlist, { recommendations: { fetchedAt: isoNow(now), items, ...meta } }, now);
 }
 
 export function takeRecommendation(playlist, index, now = new Date()) {
@@ -92,9 +95,17 @@ export function rejectRecommendation(playlist, index, now = new Date()) {
 export function isValidRecItem(item) {
   if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
   if (!isText(item.title, 1, 120) || !isText(item.artist, 0, 120) || !isText(item.reason, 1, 80) || !isHttps(item.songUrl)) return false;
+  if (item.vocal !== undefined && item.vocal !== null && !VOCALS.includes(item.vocal)) return false;
   const range = item.range;
   if (range === null) return true;
-  return Boolean(range) && isMidi(range.lowestMidi) && isMidi(range.highestMidi) && range.lowestMidi <= range.highestMidi
+  if (!range || typeof range !== 'object') return false;
+  // Checked ranges (with the quote the server found on the page) and the earlier lowest+highest shape both load.
+  if ('sourceQuote' in range) {
+    return isMidi(range.highestMidi) && isHttps(range.sourceUrl) && isText(range.sourceQuote, 1, 120)
+      && (range.falsettoHighestMidi === null || (isMidi(range.falsettoHighestMidi) && range.falsettoHighestMidi > range.highestMidi))
+      && (range.lowestMidi === null || (isMidi(range.lowestMidi) && range.lowestMidi < range.highestMidi));
+  }
+  return isMidi(range.lowestMidi) && isMidi(range.highestMidi) && range.lowestMidi <= range.highestMidi
     && isHttps(range.sourceUrl) && isText(range.sourceNotation, 0, 40);
 }
 
@@ -108,7 +119,8 @@ export function validatePlaylist(playlist, songIdSet) {
     || playlist.songIds.some(id => !songIdSet.has(id))) fail(SONG_ERROR);
   const recs = playlist.recommendations;
   if (recs !== null && (!recs || typeof recs !== 'object' || !isIso(recs.fetchedAt) || !Array.isArray(recs.items)
-    || recs.items.length > PLAYLIST_LIMITS.recCount || !recs.items.every(isValidRecItem))) fail(REC_ERROR);
+    || recs.items.length > PLAYLIST_LIMITS.recCount || !recs.items.every(isValidRecItem)
+    || (recs.intent !== undefined && !INTENTS.includes(recs.intent)) || (recs.fallback !== undefined && typeof recs.fallback !== 'boolean'))) fail(REC_ERROR);
   if (!Array.isArray(playlist.rejected) || playlist.rejected.length > PLAYLIST_LIMITS.maxRejected
     || !playlist.rejected.every(r => r && isText(r.title, 1, 120) && isText(r.artist, 0, 120))) fail(REC_ERROR);
   return playlist;
