@@ -5,7 +5,7 @@ import { noteName, frequencyToMidi } from './pitch.js';
 import { renderView } from './views.js';
 import { createSong, updateSong } from './songs.js';
 import { createPlaylist, renamePlaylist, removeSong, applyMembership, removeSongEverywhere, addSong, setRecommendations, takeRecommendation, rejectRecommendation, isValidRecItem, PLAYLIST_LIMITS } from './playlists.js';
-import { buildRecommendationRequest, suggestKey } from './recommend.js';
+import { buildRecommendationRequest, suggestKey, sameSong } from './recommend.js';
 import { playlistHomeResults } from './playlist-views.js';
 
 const root = document.querySelector('#app');
@@ -35,6 +35,7 @@ let playlistError = '';
 let recLoading = null;
 let recError = null;
 let consentReturn = 'playlist';
+let rangeToken = 0;
 let toastTimer;
 
 function toast(message) {
@@ -66,6 +67,7 @@ function cancelCapture() {
 }
 
 function navigate(target) {
+  rangeToken++;
   cancelCapture();
   error = '';
   page = target;
@@ -396,11 +398,13 @@ async function requestRecommendations(id) {
   } catch { /* network failure keeps the generic message */ }
   recLoading = null;
   // The list may have been deleted or changed while waiting; apply the answer to the current state only.
-  if (!state.playlists.some(p => p.id === id)) return render();
+  // Re-render only the playlist page; other pages (e.g. a half-typed form) keep their input.
+  const refresh = () => { if (page === 'playlist') render(); };
+  if (!state.playlists.some(p => p.id === id)) return refresh();
   const valid = Array.isArray(items) ? items.filter(isValidRecItem).slice(0, PLAYLIST_LIMITS.recCount) : [];
-  if (!valid.length) { recError = { id, message }; return render(); }
+  if (!valid.length) { recError = { id, message }; return refresh(); }
   await persist({ ...state, playlists: state.playlists.map(p => p.id === id ? setRecommendations(p, valid) : p) });
-  render();
+  refresh();
 }
 
 async function lookupSongRange() {
@@ -410,6 +414,8 @@ async function lookupSongRange() {
   const title = String(songDraft?.title ?? '').trim();
   if (!title) return toast('노래 제목을 먼저 적어 주세요.');
   if (!state.settings.aiConsentAt) { consentReturn = 'song-form'; return navigate('ai-consent'); }
+  const token = ++rangeToken;
+  const askedFor = { id: songDraft.id ?? null, title };
   busy = 'range'; render();
   let message = '지금은 음역을 찾지 못했어요.';
   try {
@@ -417,6 +423,7 @@ async function lookupSongRange() {
     if (response.status === 503) message = '아직 AI 추천이 설정되지 않았어요.';
     else if (response.ok) {
       const { range } = await response.json();
+      if (!stillAsking()) return;
       if (range && Number.isInteger(range.lowestMidi) && Number.isInteger(range.highestMidi)) {
         // Fill the form only; the user checks the source and decides whether to save.
         songDraft = { ...songDraft, lowestMidi: range.lowestMidi, highestMidi: range.highestMidi, rangeSourceUrl: range.sourceUrl, sourcedRange: { lowestMidi: range.lowestMidi, highestMidi: range.highestMidi } };
@@ -424,9 +431,15 @@ async function lookupSongRange() {
       } else message = '출처가 있는 음역을 찾지 못했어요.';
     }
   } catch { /* network failure keeps the generic message */ }
-  busy = false;
+  finally { if (busy === 'range') busy = false; }
+  if (!stillAsking()) return;
   render();
   toast(message);
+
+  // The user may have left the form, opened another song, or changed the title while waiting.
+  function stillAsking() {
+    return token === rangeToken && page === 'song-form' && (songDraft?.id ?? null) === askedFor.id && String(songDraft?.title ?? '').trim() === askedFor.title;
+  }
 }
 
 async function addRecommendation(index) {
@@ -434,6 +447,15 @@ async function addRecommendation(index) {
   if (!playlist || busy) return;
   if (state.songs.length >= 500) return toast('곡은 500곡까지 담을 수 있어요.');
   const { item, playlist: remaining } = takeRecommendation(playlist, Number(index));
+  const existing = state.songs.find(song => sameSong(song, item));
+  if (existing) {
+    busy = 'saving'; render();
+    const linked = await persist({ ...state, playlists: state.playlists.map(p => p.id === playlist.id ? addSong(remaining, existing.id) : p) });
+    busy = false;
+    render();
+    if (linked) toast(`이미 담아둔 ‘${existing.title}’을(를) 이 리스트에 넣었어요.`);
+    return;
+  }
   const byId = new Map(state.songs.map(song => [song.id, song]));
   const listSongs = playlist.songIds.map(songId => byId.get(songId)).filter(Boolean);
   const song = createSong({

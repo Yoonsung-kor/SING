@@ -70,3 +70,13 @@ test('consent page names OpenAI, what is sent, and what is not', () => {
   const html = aiConsentView({ state: defaultState(), selectedPlaylistId: 'p' });
   for (const text of ['OpenAI', '플레이리스트 이름', '녹음, 허밍 기록, 연습 기록은 보내지 않아요.', 'data-action="ai-consent-accept"', '나의 기록']) assert.ok(html.includes(text), text);
 });
+
+test('cards for songs already in the library are hidden but keep their index', () => {
+  const songs = three();
+  const owned = createSong({ title: '아로하', artist: '조정석' });
+  const items = [{ title: '아로하 (Live)', artist: '조정석', reason: 'r', songUrl: 'https://x.org/1', range: null }, { title: '응급실', artist: 'izi', reason: 'r', songUrl: 'https://x.org/2', range: null }];
+  const list = setRecommendations(songs.reduce((p, s) => addSong(p, s.id), createPlaylist([], 'A')), items);
+  const html = recommendationSection({ state: { ...defaultState(), songs: [...songs, owned], playlists: [list] }, recLoading: null, recError: null }, list);
+  assert.ok(!html.includes('아로하'));
+  assert.match(html, /응급실[\s\S]*data-action="rec-add" data-id="1"/);
+});

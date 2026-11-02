@@ -84,7 +84,8 @@ export function buildRecommendationRequest(state, playlistId) {
   return {
     playlistName: playlist.name,
     songs: songs.map(song => ({ title: song.title, artist: song.artist, keyOffset: song.keyOffset, lowestMidi: song.lowestMidi, highestMidi: song.highestMidi, fromAi: song.origin === 'ai' })),
-    exclude: state.songs.map(titleArtist),
+    // Cards already on screen are excluded too, so '다른 곡 추천 받기' really asks for different songs.
+    exclude: [...state.songs, ...(playlist.recommendations?.items || [])].map(titleArtist),
     rejected: playlist.rejected.map(titleArtist),
   };
 }

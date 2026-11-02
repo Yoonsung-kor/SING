@@ -27,7 +27,7 @@ test('recommend endpoint validates input and maps failures to status codes', asy
   let received;
   const cases = [
     [{ recommend: async body => { received = body; return [{ title: 'A' }]; } }, valid, 'application/json', 200],
-    [{ recommend: async () => [] }, 'x'.repeat(20000), 'application/json', 413],
+    [{ recommend: async () => [] }, 'x'.repeat(1100000), 'application/json', 413],
     [{ recommend: async () => [] }, valid, 'text/plain', 415],
     [{ recommend: async () => [] }, '{bad', 'application/json', 400],
     [{ recommend: async () => [] }, JSON.stringify({ ...JSON.parse(valid), songs: [] }), 'application/json', 400],
@@ -55,4 +55,17 @@ test('song-range endpoint validates input and returns a range or null', async ()
   const off = await start({ recommend: null, lookupRange: null });
   try { assert.equal((await postRange(off.port, JSON.stringify({ title: '봄날', artist: '' }))).status, 503); }
   finally { off.close(); }
+});
+
+test('a request at the app limits (500 songs, 200 rejected) fits under the body cap', async () => {
+  const title = i => `아주 긴 한국어 노래 제목 ${i} (Feat. 누군가)`;
+  const big = JSON.stringify({
+    playlistName: '도전하기',
+    songs: Array.from({ length: 500 }, (_, i) => ({ title: title(i), artist: '어떤 가수 이름', keyOffset: -2, lowestMidi: 48, highestMidi: 67, fromAi: false })),
+    exclude: Array.from({ length: 500 }, (_, i) => ({ title: title(i), artist: '어떤 가수 이름' })),
+    rejected: Array.from({ length: 200 }, (_, i) => ({ title: `별로인 곡 ${i}`, artist: '가수' })),
+  });
+  assert.ok(Buffer.byteLength(big) > 16384);
+  const s = await start({ recommend: async () => [{ title: 'A' }] });
+  try { assert.equal((await post(s.port, big)).status, 200); } finally { s.close(); }
 });

@@ -52,7 +52,11 @@ async function handleJson(req, res, { maxBody, validate, run }) {
   }
 }
 
-export function createHandler({ root, recommend, lookupRange = null, maxBody = 16384 }) {
+// The recommend cap covers the validator's own bounds (500 songs, 700 exclusions, 200 rejected).
+const RECOMMEND_MAX_BODY = 1024 * 1024;
+const RANGE_MAX_BODY = 16 * 1024;
+
+export function createHandler({ root, recommend, lookupRange = null }) {
   const recommendRun = recommend && (async body => {
     const items = await recommend(body);
     return Array.isArray(items) && items.length ? { items } : null;
@@ -61,8 +65,8 @@ export function createHandler({ root, recommend, lookupRange = null, maxBody = 1
   return async (req, res) => {
     try {
       const pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
-      if (req.method === 'POST' && pathname === '/api/recommend') return await handleJson(req, res, { maxBody, validate: validateRecommendationRequest, run: recommendRun });
-      if (req.method === 'POST' && pathname === '/api/song-range') return await handleJson(req, res, { maxBody, validate: validateRangeRequest, run: rangeRun });
+      if (req.method === 'POST' && pathname === '/api/recommend') return await handleJson(req, res, { maxBody: RECOMMEND_MAX_BODY, validate: validateRecommendationRequest, run: recommendRun });
+      if (req.method === 'POST' && pathname === '/api/song-range') return await handleJson(req, res, { maxBody: RANGE_MAX_BODY, validate: validateRangeRequest, run: rangeRun });
       if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405).end(); return; }
       const relative = pathname === '/' ? 'index.html' : pathname.slice(1);
       if (!/^(index\.html|src\/[\w.-]+|assets\/[\w.-]+|tests\/browser[\w.-]*)$/.test(relative)) { res.writeHead(404).end('Not found'); return; }

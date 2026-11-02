@@ -1,5 +1,5 @@
 import { songResults, keyLabel } from './song-views.js';
-import { suggestKey } from './recommend.js';
+import { suggestKey, sameSong } from './recommend.js';
 import { PLAYLIST_LIMITS } from './playlists.js';
 import { noteName } from './pitch.js';
 
@@ -47,10 +47,11 @@ export function recommendationSection(v, playlist) {
   else if (v.recLoading === playlist.id) body = '<div class="playlist-note" role="status">어울리는 곡을 찾고 있어요… 웹에서 출처를 확인하느라 조금 걸릴 수 있어요.</div>';
   else {
     const error = v.recError?.id === playlist.id ? `<div class="error-box" role="alert">${e(v.recError.message)} <button class="text-button" data-action="rec-fetch" data-id="${id}">다시 시도</button></div>` : '';
-    const items = playlist.recommendations?.items || [];
+    const owned = v.state.songs;
+    const items = (playlist.recommendations?.items || []).map((item, index) => ({ item, index })).filter(({ item }) => !owned.some(song => sameSong(song, item)));
     body = !playlist.recommendations
       ? `${error}<button class="button secondary" data-action="rec-fetch" data-id="${id}">추천 받기</button><p class="subtle">리스트 이름과 담긴 곡을 보고, 실제로 있는 곡인지 확인한 곡만 골라 드려요.</p>`
-      : `${error}${items.length ? `<div class="rec-list">${items.map((item, index) => recommendationCard(item, index, listSongs)).join('')}</div>` : '<div class="playlist-note">받은 추천을 모두 확인했어요.</div>'}<button class="button secondary" data-action="rec-fetch" data-id="${id}">다른 곡 추천 받기</button>`;
+      : `${error}${items.length ? `<div class="rec-list">${items.map(({ item, index }) => recommendationCard(item, index, listSongs)).join('')}</div>` : '<div class="playlist-note">받은 추천을 모두 확인했어요.</div>'}<button class="button secondary" data-action="rec-fetch" data-id="${id}">다른 곡 추천 받기</button>`;
   }
   return `<section class="rec-section" aria-live="polite"><div class="rec-head"><h2>이 리스트에 어울리는 곡</h2><span class="rec-badge">AI 추천</span></div>${body}</section>`;
 }

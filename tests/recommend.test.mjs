@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { normalizeKey, sameSong, parseNoteName, toRecItems, toRange, suggestKey, buildRecommendationRequest, validateRecommendationRequest } from '../src/recommend.js';
-import { createPlaylist, addSong } from '../src/playlists.js';
+import { createPlaylist, addSong, setRecommendations } from '../src/playlists.js';
 import { createSong } from '../src/songs.js';
 import { defaultState } from '../src/storage.js';
 
@@ -67,4 +67,13 @@ test('toRange keeps only scientific, plausible, https-sourced ranges', () => {
   assert.equal(toRange({ lowest: 'C3', highest: 'G4', sourceUrl: 'http://s.org', sourceNotation: '' }), null);
   assert.deepEqual(toRange({ lowest: 'C3', highest: 'G4', sourceUrl: 'https://s.org', sourceNotation: '2옥타브 솔' }), { lowestMidi: 48, highestMidi: 67, sourceUrl: 'https://s.org', sourceNotation: '2옥타브 솔' });
   assert.equal(toRange(null), null);
+});
+
+test('asking again excludes the cards already shown', () => {
+  const songs = [1, 2, 3].map(n => createSong({ title: `곡${n}` }));
+  const shown = { title: '아로하', artist: '조정석', reason: 'r', songUrl: 'https://x.org/a', range: null };
+  const playlist = setRecommendations(songs.reduce((p, x) => addSong(p, x.id), createPlaylist([], '도전하기')), [shown]);
+  const req = buildRecommendationRequest({ ...defaultState(), songs, playlists: [playlist] }, playlist.id);
+  assert.ok(req.exclude.some(x => x.title === '아로하' && x.artist === '조정석'));
+  assert.equal(validateRecommendationRequest(req), req);
 });
