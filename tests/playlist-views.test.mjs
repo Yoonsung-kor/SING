@@ -49,12 +49,12 @@ test('section states: too few songs, ask, loading, error', () => {
 
 test('malicious AI item is escaped and only https links render', () => {
   const songs = three();
-  const item = { title: '<img src=x onerror=alert(1)>', artist: 'a', reason: '<script>x</script>', songUrl: 'javascript:alert(1)', range: { lowestMidi: 48, highestMidi: 70, sourceUrl: 'https://s.org', sourceNotation: '' } };
+  const item = { title: '<img src=x onerror=alert(1)>', artist: 'a', reason: '<script>x</script>', songUrl: 'javascript:alert(1)', range: { highestMidi: 70, falsettoHighestMidi: null, lowestMidi: null, sourceUrl: 'https://s.org', sourceQuote: '최고음 2옥 라#' } };
   const list = setRecommendations(songs.reduce((p, s) => addSong(p, s.id), createPlaylist([], 'A')), [item]);
   const html = view(list, songs);
   assert.ok(!html.includes('<img') && !html.includes('<script') && !html.includes('javascript:'));
   assert.match(html, /노래방 -5 반음 추천 · 담아둔 곡 기준 어림값/);
-  assert.match(html, /href="https:\/\/s\.org"/);
+  assert.doesNotMatch(html, /s\.org/);
   assert.match(html, /data-action="rec-add" data-id="0"[\s\S]*data-action="rec-nope" data-id="0"/);
 });
 
@@ -62,7 +62,7 @@ test('an item without a range says so and offers no key', () => {
   const songs = three();
   const list = setRecommendations(songs.reduce((p, s) => addSong(p, s.id), createPlaylist([], 'A')), [{ title: 'T', artist: '', reason: 'r', songUrl: 'https://x.org', range: null }]);
   const html = view(list, songs);
-  assert.match(html, /음역 정보 없음/);
+  assert.match(html, /최고음 확인 안 됨/);
   assert.ok(!html.includes('반음 추천'));
 });
 
@@ -84,4 +84,36 @@ test('cards for songs already in the library are hidden but keep their index', (
   const html = recommendationSection({ state: { ...defaultState(), songs: [...songs, owned], playlists: [list] }, recLoading: null, recError: null }, list);
   assert.ok(!html.includes('아로하'));
   assert.match(html, /응급실[\s\S]*data-action="rec-add" data-id="1"/);
+});
+
+const myVoice = { comfortableHighMidi: 71, voiceType: 'male', method: 'songs', updatedAt: '2026-11-03T01:00:00.000Z', basis: [] };
+const v2 = (highestMidi, vocal = 'male') => ({ title: `곡${highestMidi}`, artist: '가수', reason: '어울려요.', songUrl: 'https://example.org/song', vocal,
+  range: { highestMidi, falsettoHighestMidi: null, lowestMidi: null, sourceUrl: 'https://namu.example/w/x', sourceQuote: '최고음 확인 문장' } });
+function section(items, { voice = myVoice, meta = {} } = {}) {
+  const songs = three();
+  const list = setRecommendations(songs.reduce((p, s) => addSong(p, s.id), createPlaylist([], '도전하기')), items, new Date(), meta);
+  const settings = { ...defaultState().settings, voice };
+  return recommendationSection({ state: { ...defaultState(), settings, songs, playlists: [list] }, recLoading: null, recError: null }, list);
+}
+
+test('cards place each checked song on my bar, an octave down for a woman\'s song in a man\'s key', () => {
+  const html = section([v2(81, 'female'), v2(74)]);
+  assert.match(html, /aria-label="편한 구간"[\s\S]*최고음 3옥 라 ✓ · 편하게 부를 수 있어요 · 한 옥타브 아래 기준/);
+  assert.match(html, /aria-label="도전 구간, 반음 3개 위"[\s\S]*최고음 3옥 레 ✓ · 도전 \+3 · 버거우면 −3키/);
+});
+
+test('unchecked and old ranges never get a check mark, and no source is named or linked', () => {
+  const legacy = { title: '예전 곡', artist: '가수', reason: '어울려요.', songUrl: 'https://example.org/old', range: { lowestMidi: 50, highestMidi: 70, sourceUrl: 'https://namu.example/w/old', sourceNotation: '2옥 라#' } };
+  const html = section([legacy, { ...v2(72), range: null }]);
+  assert.match(html, /원곡 최고음 2옥 라♯ \(확인 전\)/);
+  assert.match(html, /최고음 확인 안 됨/);
+  assert.doesNotMatch(html, /✓/);
+  assert.doesNotMatch(section([v2(74)]), /namu|출처 보기|음역 출처/);
+});
+
+test('without my range the section offers to set it, and a fallback pick says so', () => {
+  assert.match(section([v2(74)], { voice: null }), /내 음역을 알려주면 실력에 맞춰 골라드려요[\s\S]*data-action="voice-start"/);
+  assert.doesNotMatch(section([v2(74)]), /data-action="voice-start"/);
+  assert.match(section([{ ...v2(72), range: null }], { meta: { intent: 'challenge', fallback: true } }), /확인된 도전 곡을 못 찾아 분위기로 골랐어요\./);
+  assert.match(section([{ ...v2(72), range: null }], { meta: { intent: 'comfortable', fallback: true } }), /확인된 편한 곡을 못 찾아 분위기로 골랐어요\./);
 });

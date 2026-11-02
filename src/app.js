@@ -10,7 +10,7 @@ import { playlistHomeResults } from './playlist-views.js';
 import { hasCurrentConsent, withConsent, withoutConsent } from './consent.js';
 import { shouldShowOnboarding, startOnboarding, addPick, applyLookup, setVoiceType, setPickKey, toggleOctave, removePick, onboardingResult, commitOnboarding, commitManual, dismissOnboarding } from './onboarding.js';
 import { voiceResultsHtml, voicePicksHtml, voiceActionsHtml } from './onboarding-views.js';
-import { RANGE_BOUNDS } from './vocal-range.js';
+import { RANGE_BOUNDS, candidateShift } from './vocal-range.js';
 
 const root = document.querySelector('#app');
 const audio = new AudioEngine();
@@ -412,12 +412,16 @@ async function saveSong(form) {
   songError = '';
   let song;
   try {
-    const fields = { ...songDraft, keyOffset: Number(songDraft.keyOffset), lowestMidi: songDraft.lowestMidi === '' ? null : Number(songDraft.lowestMidi), highestMidi: songDraft.highestMidi === '' ? null : Number(songDraft.highestMidi) };
+    const midiOrNull = value => value === '' || value === null || value === undefined ? null : Number(value);
+    const fields = { ...songDraft, keyOffset: Number(songDraft.keyOffset), lowestMidi: midiOrNull(songDraft.lowestMidi), highestMidi: midiOrNull(songDraft.highestMidi), falsettoHighestMidi: midiOrNull(songDraft.falsettoHighestMidi), octaveShift: Number(songDraft.octaveShift ?? 0) };
     const existing = state.songs.find(s => s.id === songDraft.id);
     // Saving the form makes every value the user's own; a hand-edited range no longer matches its source.
     fields.origin = 'user';
-    const sourced = songDraft.sourcedRange ?? (existing?.rangeSourceUrl ? { lowestMidi: existing.lowestMidi, highestMidi: existing.highestMidi } : null);
-    if (!sourced || fields.lowestMidi !== sourced.lowestMidi || fields.highestMidi !== sourced.highestMidi) fields.rangeSourceUrl = '';
+    const sourced = songDraft.sourcedRange ?? (existing?.rangeQuote ? { highestMidi: existing.highestMidi, falsettoHighestMidi: existing.falsettoHighestMidi, lowestMidi: existing.lowestMidi } : null);
+    if (!sourced || fields.highestMidi !== sourced.highestMidi || fields.falsettoHighestMidi !== sourced.falsettoHighestMidi || fields.lowestMidi !== sourced.lowestMidi) {
+      fields.rangeSourceUrl = '';
+      fields.rangeQuote = '';
+    }
     song = existing ? updateSong(existing, fields) : createSong(fields);
     if (!existing && state.songs.length >= 500) throw new Error('곡은 500곡까지 담을 수 있어요.');
   } catch (err) {
@@ -505,6 +509,8 @@ async function removeFromPlaylist(songId) {
 }
 
 const RECOMMEND_FAILED = '지금은 추천을 불러오지 못했어요.';
+const RECOMMEND_NO_MATCH = '조건에 맞는 곡을 못 찾았어요.';
+const INTENTS = ['comfortable', 'challenge', 'any'];
 
 async function requestRecommendations(id) {
   if (recLoading) return;
@@ -515,13 +521,15 @@ async function requestRecommendations(id) {
   recLoading = id;
   recError = null;
   render();
-  let items = null;
+  let payload = null;
   let message = RECOMMEND_FAILED;
   try {
     const response = await fetch('/api/recommend', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request) });
-    if (response.ok) items = (await response.json()).items;
+    if (response.ok) payload = await response.json();
     else if (response.status === 503) message = '아직 AI 추천이 설정되지 않았어요.';
   } catch { /* network failure keeps the generic message */ }
+  const items = payload?.items;
+  if (Array.isArray(items) && items.length === 0) message = RECOMMEND_NO_MATCH;
   recLoading = null;
   // The list may have been deleted or changed while waiting; apply the answer to the current state only.
   // Re-render only the playlist page; other pages (e.g. a half-typed form) keep their input.
@@ -529,7 +537,8 @@ async function requestRecommendations(id) {
   if (!state.playlists.some(p => p.id === id)) return refresh();
   const valid = Array.isArray(items) ? items.filter(isValidRecItem).slice(0, PLAYLIST_LIMITS.recCount) : [];
   if (!valid.length) { recError = { id, message }; return refresh(); }
-  await persist({ ...state, playlists: state.playlists.map(p => p.id === id ? setRecommendations(p, valid) : p) });
+  const meta = { intent: INTENTS.includes(payload.intent) ? payload.intent : 'any', fallback: payload.fallback === true };
+  await persist({ ...state, playlists: state.playlists.map(p => p.id === id ? setRecommendations(p, valid, new Date(), meta) : p) });
   refresh();
 }
 
@@ -543,18 +552,21 @@ async function lookupSongRange() {
   const token = ++rangeToken;
   const askedFor = { id: songDraft.id ?? null, title };
   busy = 'range'; render();
-  let message = '지금은 음역을 찾지 못했어요.';
+  let message = '지금은 최고음을 찾지 못했어요.';
   try {
     const response = await fetch('/api/song-range', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, artist: String(songDraft.artist ?? '').trim() }) });
     if (response.status === 503) message = '아직 AI 추천이 설정되지 않았어요.';
     else if (response.ok) {
       const { range } = await response.json();
       if (!stillAsking()) return;
-      if (range && Number.isInteger(range.lowestMidi) && Number.isInteger(range.highestMidi)) {
-        // Fill the form only; the user checks the source and decides whether to save.
-        songDraft = { ...songDraft, lowestMidi: range.lowestMidi, highestMidi: range.highestMidi, rangeSourceUrl: range.sourceUrl, sourcedRange: { lowestMidi: range.lowestMidi, highestMidi: range.highestMidi } };
-        message = '출처에서 찾은 음역을 채웠어요. 출처를 확인하고 저장해 주세요.';
-      } else message = '출처가 있는 음역을 찾지 못했어요.';
+      if (range && Number.isInteger(range.highestMidi)) {
+        // Fill the form only; the user decides whether to save. A lowest note above the new top note is dropped.
+        const current = songDraft.lowestMidi === '' || songDraft.lowestMidi == null ? null : Number(songDraft.lowestMidi);
+        const lowestMidi = range.lowestMidi ?? (current !== null && current <= range.highestMidi ? current : null);
+        const sourcedRange = { highestMidi: range.highestMidi, falsettoHighestMidi: range.falsettoHighestMidi ?? null, lowestMidi };
+        songDraft = { ...songDraft, ...sourcedRange, rangeSourceUrl: range.sourceUrl, rangeQuote: range.sourceQuote, vocal: range.vocal ?? songDraft.vocal ?? null, sourcedRange };
+        message = '출처에서 확인한 최고음을 채웠어요. 확인하고 저장해 주세요.';
+      } else message = '출처에서 확인된 최고음을 찾지 못했어요.';
     }
   } catch { /* network failure keeps the generic message */ }
   finally { if (busy === 'range') busy = false; }
@@ -584,10 +596,18 @@ async function addRecommendation(index) {
   }
   const byId = new Map(state.songs.map(song => [song.id, song]));
   const listSongs = playlist.songIds.map(songId => byId.get(songId)).filter(Boolean);
+  // With my range the song goes in at the original key: a challenge list keeps its challenge.
+  const voice = state.settings.voice;
+  const range = item.range;
+  const checked = Boolean(range?.sourceQuote);
+  const vocal = item.vocal ?? null;
   const song = createSong({
-    title: item.title, artist: item.artist, keyOffset: suggestKey(listSongs, item.range?.highestMidi ?? null) ?? 0,
-    lowestMidi: item.range?.lowestMidi ?? null, highestMidi: item.range?.highestMidi ?? null,
-    rangeSourceUrl: item.range?.sourceUrl ?? '', origin: 'ai',
+    title: item.title, artist: item.artist,
+    keyOffset: voice ? 0 : suggestKey(listSongs, range?.highestMidi ?? null) ?? 0,
+    lowestMidi: range?.lowestMidi ?? null, highestMidi: range?.highestMidi ?? null,
+    falsettoHighestMidi: checked ? range.falsettoHighestMidi : null,
+    rangeSourceUrl: range?.sourceUrl ?? '', rangeQuote: checked ? range.sourceQuote : '',
+    vocal, octaveShift: voice ? candidateShift(voice.voiceType, vocal) : 0, origin: 'ai',
   });
   busy = 'saving'; render();
   const saved = await persist({ ...state, songs: [...state.songs, song], playlists: state.playlists.map(p => p.id === playlist.id ? addSong(remaining, song.id) : p) });

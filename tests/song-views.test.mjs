@@ -16,13 +16,14 @@ test('song metadata and searches are escaped in cards, details, and form attribu
   }
 });
 
-test('a title-only song has unknown range and transposed range only appears for supplied notes', () => {
+test('a title-only song has an unknown top note, and the sung top note appears only once a top note is known', () => {
   const song = createSong({title:'제목만',keyOffset:-2});
   const render = s => songDetailView({state:{...defaultState(), songs:[s]},selectedSongId:s.id});
   assert.ok(render(song).includes('아직 미입력'));
-  assert.ok(!render(song).includes('내 설정으로 옮긴 음역'));
+  assert.ok(!render(song).includes('내가 부르는 최고음'));
   const known = {...song,lowestMidi:60,highestMidi:72};
-  assert.ok(render(known).includes('라♯ · A♯3 ~ 라♯ · A♯4'));
+  assert.match(render(known), /내가 부르는 최고음<\/dt><dd>2옥 라♯/);
+  assert.match(render(known), /원곡 최저음<\/dt><dd>2옥 도/);
 });
 
 test('form offers a checkbox per playlist and detail shows membership, AI note and https source', () => {
@@ -36,7 +37,9 @@ test('form offers a checkbox per playlist and detail shows membership, AI note a
   const detail = songDetailView({ state: st, selectedSongId: song.id });
   assert.match(detail, /도전하기/);
   assert.match(detail, /AI 추천으로 담은 곡 · 키는 추천값이에요/);
-  assert.match(detail, /href="https:\/\/src\.org\/a"[^>]*rel="noopener noreferrer"/);
+  // Sources are checked by the server but never named or linked on screen.
+  assert.doesNotMatch(detail, /src\.org|출처 보기/);
+  assert.match(detail, /확인 전/);
   assert.match(detail, /data-action="song-back"/);
 });
 
@@ -50,5 +53,31 @@ test('song form offers AI range lookup and keeps a found source in the form', ()
   assert.match(songFormView({ state: st, songDraft: {} }), /data-action="song-range"/);
   const html = songFormView({ state: st, songDraft: { title: '봄날', lowestMidi: 48, highestMidi: 67, rangeSourceUrl: 'https://src.org/r' } });
   assert.match(html, /name="rangeSourceUrl" value="https:\/\/src\.org\/r"/);
-  assert.match(html, /음역 출처 보기/);
+  assert.doesNotMatch(html, /음역 출처 보기|<a[^>]*src\.org/);
+});
+
+const voice = { comfortableHighMidi: 71, voiceType: 'male', method: 'songs', updatedAt: '2026-11-03T01:00:00.000Z', basis: [] };
+const withVoice = { ...defaultState().settings, voice };
+
+test('song detail marks checked top notes, shows falsetto, and draws the bar only with my range', () => {
+  const checked = createSong({ title: '사건의 지평선', artist: '윤하', highestMidi: 74, falsettoHighestMidi: 78, rangeSourceUrl: 'https://example.org/r', rangeQuote: '진성 3옥타브 레(D5), 가성 3옥타브 파#(F#5)', vocal: 'female' });
+  const plain = createSong({ title: '직접 적은 곡', highestMidi: 74 });
+  const render = (song, settings = defaultState().settings) => songDetailView({ state: { ...defaultState(), settings, songs: [song] }, selectedSongId: song.id });
+  assert.match(render(checked), /진성 3옥 레 ✓ \(가성 3옥 파♯\)/);
+  assert.match(render(checked), /최고음은 출처에서 확인한 값이에요/);
+  assert.doesNotMatch(render(checked), /example\.org|range-bar/);
+  assert.doesNotMatch(render(plain), /✓/);
+  const barred = render(checked, withVoice);
+  assert.match(barred, /class="range-bar[^"]*" role="img" aria-label="도전 구간, 반음 3개 위"/);
+  assert.match(barred, /버거우면 −3키/);
+});
+
+test('the song form looks up top notes, offers falsetto and octave fields, and links no source', () => {
+  const html = songFormView({ state: defaultState(), songDraft: { title: '봄날', highestMidi: 67, rangeSourceUrl: 'https://src.org/r', rangeQuote: '최고음 2옥타브 솔(G4)' } });
+  assert.match(html, /data-action="song-range"[^>]*>최고음 찾기 \(AI\)/);
+  assert.match(html, /name="falsettoHighestMidi"/);
+  assert.match(html, /name="octaveShift"[\s\S]*한 옥타브 아래/);
+  assert.match(html, /name="rangeQuote" value="최고음 2옥타브 솔\(G4\)"/);
+  assert.match(html, /최고음은 출처에서 확인한 값이에요 ✓/);
+  assert.doesNotMatch(html, /<a[^>]*src\.org/);
 });

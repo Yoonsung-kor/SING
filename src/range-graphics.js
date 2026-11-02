@@ -50,6 +50,13 @@ export function gapPercent(gap) {
   return (clamp(gap, -6, 6) + 6) / 12 * 100;
 }
 
+/** One short phrase for where a song sits against my comfortable high. */
+export function zoneText(gap) {
+  const zone = gapZone(gap);
+  if (zone === 'easy') return '편하게 부를 수 있어요';
+  return zone === 'challenge' ? `도전 +${gap}` : `반음 ${gap}개 위`;
+}
+
 const ZONE_LABEL = { easy: () => '편한 구간', challenge: gap => `도전 구간, 반음 ${gap}개 위`, hard: gap => `아직 무리, 반음 ${gap}개 위` };
 
 /** Easy / challenge / too-high bar: my comfortable high is the line in the middle, the song is the marker. */
