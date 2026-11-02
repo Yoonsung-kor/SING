@@ -2,6 +2,7 @@ import { songResults, keyLabel } from './song-views.js';
 import { suggestKey, sameSong } from './recommend.js';
 import { PLAYLIST_LIMITS } from './playlists.js';
 import { noteName } from './pitch.js';
+import { voiceCard } from './onboarding-views.js';
 
 const e = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const songsById = state => new Map(state.songs.map(song => [song.id, song]));
@@ -27,7 +28,7 @@ export function playlistHomeResults(state, query) {
 }
 
 export function playlistHomeView(v) {
-  return `<div class="songbook"><div class="songbook-heading"><div><p class="eyebrow">뭐 부르지?</p><h1>내 플레이리스트</h1><p>부르는 곡을 내 기준으로 나눠 담아요.<br>리스트마다 어울리는 곡도 추천받을 수 있어요.</p></div><button class="button" data-action="song-add">＋ 곡 담기</button></div><div class="song-tools"><label class="song-search-label" for="song-search">제목 · 가수 검색</label><input id="song-search" class="song-search" type="search" maxlength="120" placeholder="오늘 떠오른 노래가 있나요?" value="${e(v.songQuery)}" autocomplete="off"></div><div id="song-results" aria-live="polite">${playlistHomeResults(v.state, v.songQuery || '')}</div><p class="songbook-footnote">직접 적어두는 개인 플레이리스트예요. 허밍 기록만으로 이 곡을 편하게 부를 수 있는지 판단하지 않아요.</p></div>`;
+  return `<div class="songbook"><div class="songbook-heading"><div><p class="eyebrow">뭐 부르지?</p><h1>내 플레이리스트</h1><p>부르는 곡을 내 기준으로 나눠 담아요.<br>리스트마다 어울리는 곡도 추천받을 수 있어요.</p></div><button class="button" data-action="song-add">＋ 곡 담기</button></div>${voiceCard(v.state)}<div class="song-tools"><label class="song-search-label" for="song-search">제목 · 가수 검색</label><input id="song-search" class="song-search" type="search" maxlength="120" placeholder="오늘 떠오른 노래가 있나요?" value="${e(v.songQuery)}" autocomplete="off"></div><div id="song-results" aria-live="polite">${playlistHomeResults(v.state, v.songQuery || '')}</div><p class="songbook-footnote">직접 적어두는 개인 플레이리스트예요. 허밍 기록만으로 이 곡을 편하게 부를 수 있는지 판단하지 않아요.</p></div>`;
 }
 
 function recommendationCard(item, index, listSongs) {

@@ -4,6 +4,10 @@ import { noteName } from './pitch.js';
 import { songFormView, songDetailView } from './song-views.js';
 import { HUM_SAMPLES, humSampleFor } from './voice.js';
 import { playlistHomeView, playlistView, playlistFormView, allSongsView, aiConsentView } from './playlist-views.js';
+import { voiceIntroView, voicePickView, voiceResultView, voiceManualView } from './onboarding-views.js';
+
+// Onboarding pages need their state; after a reload there is none, so they fall back to the playlist home.
+const withOnboarding = view => v => v.onboarding ? view(v) : playlistHomeView(v);
 
 export const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const e = escapeHtml;
@@ -132,7 +136,7 @@ function done(v) {
 }
 
 export function renderView(v) {
-  const renderers = { home, check, intro, explore: x => capture(x), result, practice: x => capture(x, true), done, history, detail: x => result(x, true), learn, rest, songs: playlistHomeView, playlist: playlistView, 'playlist-form': playlistFormView, 'all-songs': allSongsView, 'ai-consent': aiConsentView, 'song-form': songFormView, 'song-detail': songDetailView };
-  const nav = ['songs', 'playlist', 'playlist-form', 'all-songs', 'ai-consent', 'song-form', 'song-detail'].includes(v.page) ? 'songs' : v.page === 'learn' ? 'learn' : ['history', 'detail'].includes(v.page) ? 'history' : 'home';
+  const renderers = { home, check, intro, explore: x => capture(x), result, practice: x => capture(x, true), done, history, detail: x => result(x, true), learn, rest, songs: playlistHomeView, playlist: playlistView, 'playlist-form': playlistFormView, 'all-songs': allSongsView, 'ai-consent': aiConsentView, 'song-form': songFormView, 'song-detail': songDetailView, 'voice-intro': withOnboarding(voiceIntroView), 'voice-pick': withOnboarding(voicePickView), 'voice-result': withOnboarding(voiceResultView), 'voice-manual': withOnboarding(voiceManualView) };
+  const nav = ['songs', 'playlist', 'playlist-form', 'all-songs', 'ai-consent', 'song-form', 'song-detail', 'voice-intro', 'voice-pick', 'voice-result', 'voice-manual'].includes(v.page) ? 'songs' : v.page === 'learn' ? 'learn' : ['history', 'detail'].includes(v.page) ? 'history' : 'home';
   return `${v.demo ? '<div class="demo-banner">체험 모드 · 연습과 플레이리스트는 기기에 저장되지 않아요.<button data-action="exit-demo">체험 마치기</button></div>' : ''}<div class="wrap"><header class="site-header"><button class="brand" data-action="home" aria-label="SING 오늘의 연습"><span class="wordmark">sing<span>•</span></span><span class="brand-caption">나의 작은<br>보컬 연습실</span></button><nav class="navigation" aria-label="주요 메뉴">${[['home', '오늘의 연습', 'home'], ['songs', '뭐 부르지?', 'note'], ['learn', '알아두기', 'book'], ['history', '나의 기록', 'history']].map(([page, title, glyph]) => `<button class="nav-button ${nav === page ? 'active' : ''}" data-action="${page}" ${nav === page ? 'aria-current="page"' : ''}>${icon(glyph)}${title}</button>`).join('')}</nav></header><main id="main" class="page" tabindex="-1">${v.storageError ? `<div class="notice" role="alert">${e(v.storageError)} <button class="text-button" data-action="retry-storage">다시 저장</button></div>` : ''}${renderers[v.page]?.(v) || home(v)}</main><footer class="site-footer"><span>차근차근, 내 목소리의 속도로.<span class="prototype-label">개발 버전 0.1</span></span><span class="footer-lock">${icon('lock')}기록은 이 기기에만 · AI 추천은 동의할 때만</span></footer></div>`;
 }
