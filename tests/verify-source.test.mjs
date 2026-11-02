@@ -54,6 +54,14 @@ test('octave slips, swapped voices, a claimed lower note, missing pages and miss
   assert.equal(await verifyHighest({ ...claim, sourceUrl: 'http://example.org/s' }, { getPage }), null);
 });
 
+test('a chest note above A5 is treated as an octave mix-up in the source, while falsetto may go higher', async () => {
+  // Seen with a real key: a blog wrote "4옥 도" for 밤편지 (really about 3옥 도); quote and reader agreed, the source was an octave off.
+  const blog = '최고음은 4옥 도';
+  assert.equal(await verifyHighest({ chestHighest: 'C6', falsettoHighest: null, lowest: null, sourceUrl: 'https://example.org/b', sourceQuote: blog, vocal: 'female' }, { getPage: async () => blog }), null);
+  const high = '진성 3옥 라(A5), 가성 4옥 도(C6)';
+  assert.deepEqual((await verifyHighest({ chestHighest: 'A5', falsettoHighest: 'C6', lowest: null, sourceUrl: 'https://example.org/h', sourceQuote: high, vocal: 'female' }, { getPage: async () => high }))?.falsettoHighestMidi, 84);
+});
+
 test('a single unlabeled value is chest, a stated lowest is kept, unknown vocal becomes null', async () => {
   const q = '* 최고음: 2옥타브 시(B4) * 최저음: 0옥타브 파♯(F♯2)';
   assert.deepEqual(await verifyHighest({ chestHighest: 'B4', falsettoHighest: null, lowest: 'F#2', sourceUrl: 'https://example.org/t', sourceQuote: q, vocal: 'robot' }, { getPage: async () => q }),

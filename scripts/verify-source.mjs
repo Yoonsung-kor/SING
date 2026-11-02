@@ -10,6 +10,9 @@ const USER_AGENT = 'SING-source-check/0.1 (class project; verifies cited quotes)
 const TIMEOUT_MS = 10000;
 const MAX_BYTES = 3 * 1024 * 1024;
 const BOUNDS = { min: 55, max: 88 };
+// Pop chest voice tops out around A5. A higher "chest" note means the source counted octaves differently
+// (a real lookup returned "4옥 도" = C6 for 밤편지), and both the quote and our reader would agree on it.
+const CHEST_MAX = 81;
 const VOCALS = ['male', 'female', 'mixed'];
 
 function ipv4Public(address) {
@@ -129,7 +132,7 @@ export async function verifyHighest(claim, { getPage = fetchPageText } = {}) {
   if (!isHttps(sourceUrl) || sourceUrl.length > 2048 || !sourceQuote || sourceQuote.length > 120) return null;
   const chest = parseNoteName(claim.chestHighest);
   const falsetto = claim.falsettoHighest == null ? null : parseNoteName(claim.falsettoHighest);
-  if (!inBounds(chest) || (claim.falsettoHighest != null && (!inBounds(falsetto) || falsetto <= chest))) return null;
+  if (!inBounds(chest) || chest > CHEST_MAX || (claim.falsettoHighest != null && (!inBounds(falsetto) || falsetto <= chest))) return null;
   const notes = notesInText(sourceQuote);
   if (!notes.includes(chest)) return null;
   if (falsetto !== null && (!notes.includes(falsetto) || falsetto !== Math.max(...notes))) return null;
