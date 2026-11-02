@@ -16,7 +16,12 @@ const RANGE_SCHEMA = {
   type: 'object', additionalProperties: false, required: ['lowest', 'highest', 'sourceUrl', 'sourceNotation'],
   properties: { lowest: { type: 'string' }, highest: { type: 'string' }, sourceUrl: { type: 'string' }, sourceNotation: { type: 'string' } },
 };
-const SONG_RANGE_SCHEMA = { type: 'object', additionalProperties: false, required: ['range'], properties: { range: { anyOf: [RANGE_SCHEMA, { type: 'null' }] } } };
+const nullable = type => ({ anyOf: [{ type }, { type: 'null' }] });
+const VOCAL_SCHEMA = { anyOf: [{ type: 'string', enum: ['male', 'female', 'mixed'] }, { type: 'null' }] };
+const SONG_RANGE_SCHEMA = {
+  type: 'object', additionalProperties: false, required: ['found', 'chestHighest', 'falsettoHighest', 'lowest', 'sourceUrl', 'sourceQuote', 'vocal'],
+  properties: { found: { type: 'boolean' }, chestHighest: nullable('string'), falsettoHighest: nullable('string'), lowest: nullable('string'), sourceUrl: nullable('string'), sourceQuote: nullable('string'), vocal: VOCAL_SCHEMA },
+};
 const RECOMMENDATION_SCHEMA = {
   type: 'object', additionalProperties: false, required: ['items'],
   properties: {
@@ -45,12 +50,22 @@ export const RECOMMEND_INSTRUCTIONS = [
   '7. 사용자의 목소리나 실력을 평가하지 않는다.',
 ].join('\n');
 
+// Shared by the per-song lookup and the recommendation request. It names no preferred site on purpose.
+export const HIGHEST_RULES = [
+  '- 웹 검색으로 원곡 보컬의 최고음이 글자로 적힌 페이지를 찾는다. 어느 사이트든 된다. 라이브나 편곡이 아니라 원곡 기준이어야 한다.',
+  '- sourceUrl에는 그 페이지의 https 주소를, sourceQuote에는 페이지에서 최고음이 적힌 부분을 고치지 말고 그대로 120자 이내로 복사한다.',
+  '- 음은 과학적 음이름(가온 도 = C4, A4 = 440Hz, 예: F#5)으로 바꿔 적는다. 한국 가요식 \'n옥타브\' 표기는 과학적 표기보다 옥타브 번호가 2 작다(2옥타브 라 = A4, 3옥타브 도 = C5).',
+  '- 일본식 표기는 옥타브 이름이 A에서 바뀐다: hiA = A4(440Hz), hiC = C5, mid2G# = G#4, mid2A = A3.',
+  '- 진성과 가성이 나뉘어 적혀 있으면 chestHighest와 falsettoHighest에 각각 넣는다. 구분 없이 하나만 적혀 있으면 chestHighest에 넣고 falsettoHighest는 null로 둔다.',
+  '- 같은 페이지에 최저음이 적혀 있으면 lowest에 넣고, 없으면 null로 둔다.',
+  '- vocal은 원곡 보컬이 남성이면 male, 여성이면 female, 듀엣이나 혼성이면 mixed, 모르면 null이다.',
+  '- 숫자나 음을 추측하지 않는다. 표기를 확신할 수 없으면 찾지 못한 것으로 둔다.',
+];
+
 export const SONG_RANGE_INSTRUCTIONS = [
-  '너는 노래의 원곡 보컬 음역을 찾는 도우미다. 입력은 JSON으로 곡 제목(title)과 가수(artist)다.',
-  '1. 웹 검색으로 이 곡의 원곡 보컬 최저음과 최고음이 적힌 페이지를 찾는다. 라이브나 편곡 버전이 아니라 원곡 기준이어야 한다.',
-  '2. 찾았으면 range에 lowest, highest, 출처 주소 sourceUrl(https), 출처에 적힌 원래 표기 sourceNotation을 넣는다.',
-  '3. lowest와 highest는 과학적 음이름(가온 도 = C4, A4 = 440Hz, 예: F#4)으로 바꿔 적는다. 한국 가요식 \'n옥타브\' 표기는 과학적 표기보다 옥타브 번호가 2 작다(2옥타브 라 = A4, 3옥타브 도 = C5). 어느 표기인지 확실하지 않으면 range는 null로 둔다.',
-  '4. 출처를 찾지 못했거나 값이 서로 다르면 range는 null로 둔다. 추측하지 않는다.',
+  '너는 노래의 원곡 보컬 최고음을 찾는 도우미다. 입력은 JSON으로 곡 제목(title)과 가수(artist)다.',
+  ...HIGHEST_RULES,
+  '- 찾았으면 found는 true, 찾지 못했으면 found는 false로 두고 나머지는 모두 null로 둔다.',
 ].join('\n');
 
 function redact(text, apiKey) {

@@ -1,8 +1,9 @@
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { createHandler } from './server.mjs';
-import { fetchRecommendations, fetchSongRange } from './ai.mjs';
-import { toRecItems, toRange } from '../src/recommend.js';
+import { fetchRecommendations } from './ai.mjs';
+import { toRecItems } from '../src/recommend.js';
+import { createServices } from './services.mjs';
 
 // The OpenAI key lives only in .env on this machine; without it the app runs with AI recommendations off.
 try { process.loadEnvFile(fileURLToPath(new URL('../.env', import.meta.url))); }
@@ -16,9 +17,7 @@ const model = process.env.OPENAI_MODEL;
 const recommend = apiKey && model
   ? async body => toRecItems(await fetchRecommendations(body, { apiKey, model }), [...body.exclude, ...body.rejected])
   : null;
-const lookupRange = apiKey && model
-  ? async body => toRange((await fetchSongRange(body, { apiKey, model }))?.range)
-  : null;
+const { lookupRange } = createServices({ apiKey, model });
 
 const server = http.createServer(createHandler({ root, recommend, lookupRange }));
 server.listen(port, host, () => console.log(`SING is ready at http://${host}:${port} · AI 추천: ${recommend ? '켜짐' : '꺼짐'}`));

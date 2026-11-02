@@ -50,3 +50,14 @@ test('song range lookup asks for one range with the same notation rule', async (
   assert.ok(seen.input.includes('봄날'));
   assert.match(seen.instructions, /2옥타브 라 = A4/);
 });
+
+test('song range lookup v2 asks for chest, falsetto, the exact quote and the original vocal', async () => {
+  let seen;
+  const fetchImpl = async (url, init) => { seen = JSON.parse(init.body); return ok('{"found":false}')(); };
+  await fetchSongRange({ title: '밤편지', artist: '아이유' }, { apiKey: 'k', model: 'm', fetchImpl });
+  assert.deepEqual(seen.text.format.schema.required, ['found', 'chestHighest', 'falsettoHighest', 'lowest', 'sourceUrl', 'sourceQuote', 'vocal']);
+  assert.match(seen.instructions, /hiA = A4/);
+  assert.match(seen.instructions, /2옥타브 라 = A4/);
+  assert.doesNotMatch(seen.instructions, /hiA = A5/);
+  assert.doesNotMatch(seen.instructions, /나무위키|namu/i);
+});
