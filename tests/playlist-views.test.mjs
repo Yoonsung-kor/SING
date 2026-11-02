@@ -71,6 +71,11 @@ test('consent page names OpenAI, what is sent, and what is not', () => {
   for (const text of ['OpenAI', '플레이리스트 이름', '녹음, 허밍 기록, 연습 기록은 보내지 않아요.', 'data-action="ai-consent-accept"', '나의 기록']) assert.ok(html.includes(text), text);
 });
 
+test('consent v2 also covers MusicBrainz search and my comfortable high', () => {
+  const html = aiConsentView({ state: defaultState(), selectedPlaylistId: 'p' });
+  for (const text of ['AI 추천과 곡 검색을 쓰기 전에', 'MusicBrainz', '내 편한 최고음', '동의하고 계속하기', '최고음 찾기']) assert.ok(html.includes(text), text);
+});
+
 test('cards for songs already in the library are hidden but keep their index', () => {
   const songs = three();
   const owned = createSong({ title: '아로하', artist: '조정석' });

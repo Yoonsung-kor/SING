@@ -7,6 +7,7 @@ import { createSong, updateSong } from './songs.js';
 import { createPlaylist, renamePlaylist, removeSong, applyMembership, removeSongEverywhere, addSong, setRecommendations, takeRecommendation, rejectRecommendation, isValidRecItem, PLAYLIST_LIMITS } from './playlists.js';
 import { buildRecommendationRequest, suggestKey, sameSong } from './recommend.js';
 import { playlistHomeResults } from './playlist-views.js';
+import { hasCurrentConsent, withConsent, withoutConsent } from './consent.js';
 
 const root = document.querySelector('#app');
 const audio = new AudioEngine();
@@ -382,7 +383,7 @@ const RECOMMEND_FAILED = '지금은 추천을 불러오지 못했어요.';
 
 async function requestRecommendations(id) {
   if (recLoading) return;
-  if (!state.settings.aiConsentAt) { selectedPlaylistId = id; consentReturn = 'playlist'; return navigate('ai-consent'); }
+  if (!hasCurrentConsent(state.settings)) { selectedPlaylistId = id; consentReturn = 'playlist'; return navigate('ai-consent'); }
   let request;
   try { request = buildRecommendationRequest(state, id); }
   catch (err) { recError = { id, message: err.message }; return render(); }
@@ -413,7 +414,7 @@ async function lookupSongRange() {
   if (form) readSongForm(form);
   const title = String(songDraft?.title ?? '').trim();
   if (!title) return toast('노래 제목을 먼저 적어 주세요.');
-  if (!state.settings.aiConsentAt) { consentReturn = 'song-form'; return navigate('ai-consent'); }
+  if (!hasCurrentConsent(state.settings)) { consentReturn = 'song-form'; return navigate('ai-consent'); }
   const token = ++rangeToken;
   const askedFor = { id: songDraft.id ?? null, title };
   busy = 'range'; render();
@@ -551,15 +552,15 @@ async function handle(action, id) {
   if (action === 'song-range') return lookupSongRange();
   if (action === 'consent-back') return navigate(consentReturn === 'song-form' ? 'song-form' : state.playlists.some(p => p.id === selectedPlaylistId) ? 'playlist' : 'songs');
   if (action === 'ai-consent-accept') {
-    if (!(await persist({ ...state, settings: { ...state.settings, aiConsentAt: new Date().toISOString() } }))) return;
+    if (!(await persist({ ...state, settings: withConsent(state.settings, new Date()) }))) return;
     if (consentReturn === 'song-form') { navigate('song-form'); return lookupSongRange(); }
     navigate('playlist');
     return requestRecommendations(selectedPlaylistId);
   }
   if (action === 'ai-consent-revoke') {
-    await persist({ ...state, settings: { ...state.settings, aiConsentAt: null } });
+    await persist({ ...state, settings: withoutConsent(state.settings) });
     render();
-    return toast('AI 추천 동의를 철회했어요.');
+    return toast('AI 추천과 곡 검색 동의를 철회했어요.');
   }
   if (action === 'song-add' || action === 'song-edit') {
     if (!initialized && !demo) return toast('저장소가 준비되지 않았어요. 체험 모드에서 먼저 둘러볼 수 있어요.');
