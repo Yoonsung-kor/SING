@@ -37,6 +37,11 @@ test('normalizeSong upgrades songs saved before the new fields existed', () => {
   assert.throws(() => validateSong(old));
 });
 
+test('normalizeSong leaves a complete song byte-identical so backups round-trip', () => {
+  const song = createSong({ title: 'A', origin: 'ai' }, now);
+  assert.equal(JSON.stringify(normalizeSong(song)), JSON.stringify(song));
+});
+
 test('updateSong keeps origin unless the caller passes one', () => {
   const ai = createSong({ title: 'A', origin: 'ai' }, now);
   assert.equal(updateSong(ai, { note: 'x' }, now).origin, 'ai');

@@ -42,7 +42,7 @@ function checkFields(song) {
 
 /** Fills fields added after the first release so stored songs validate. */
 export function normalizeSong(song) {
-  return { rangeSourceUrl: '', origin: 'user', ...song };
+  return { ...song, rangeSourceUrl: song.rangeSourceUrl ?? '', origin: song.origin ?? 'user' };
 }
 
 export function validateSong(song) {

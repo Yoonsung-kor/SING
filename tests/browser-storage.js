@@ -1,6 +1,7 @@
 import { openStore, defaultState } from '/src/storage.js';
 import { createLesson, recordAttempt, finishLesson, addActivity } from '/src/lesson.js';
 import { createSong, updateSong } from '/src/songs.js';
+import { createPlaylist, addSong } from '/src/playlists.js';
 
 const name = `sing-practice-test-${crypto.randomUUID()}`;
 let store;
@@ -82,6 +83,15 @@ try {
     assert(JSON.stringify(await store.getState()) === JSON.stringify(withSong), 'song or lesson changed');
     const bytes = new Uint8Array(await (await store.getRecording('test-recording')).arrayBuffer());
     assert(bytes.join() === '0,1,2,251,255', 'audio bytes changed');
+  });
+  await check('플레이리스트도 백업 왕복 후 그대로', async () => {
+    const withList = { ...withSong, playlists: [addSong(createPlaylist([], '도전하기', now), song.id, now)] };
+    await store.saveState(withList);
+    const json = await store.exportData();
+    await store.clear();
+    await store.importData(json);
+    assert(JSON.stringify((await store.getState()).playlists) === JSON.stringify(withList.playlists), 'playlist changed');
+    await store.saveState(withSong);
   });
   await check('곡 수정·삭제 후 레슨과 원음 유지', async () => {
     const changed = updateSong(song, { title: '봄날 연습', status: 'practicing', keyOffset: 1 }, new Date('2026-09-28T01:00:00.000Z'));

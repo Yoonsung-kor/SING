@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { defaultState, openStore, parseBackup } from '../src/storage.js';
 import { createSong } from '../src/songs.js';
+import { createPlaylist } from '../src/playlists.js';
 
 const attempt = {
   id: 'a1', targetMidi: null, midi: 60, reliable: true, cents: null,
@@ -22,7 +23,7 @@ const backup = { version: 1, state, recordings: [] };
 test('default state is fresh and has stable versioned shape', () => {
   const a = defaultState();
   const b = defaultState();
-  assert.deepEqual(a, { version: 1, sessions: [], draft: null, activities: [], songs: [], settings: { keepAudio: false } });
+  assert.deepEqual(a, { version: 1, sessions: [], draft: null, activities: [], songs: [], playlists: [], settings: { keepAudio: false, aiConsentAt: null } });
   a.sessions.push(session);
   assert.equal(b.sessions.length, 0);
 });
@@ -46,6 +47,32 @@ test('songbook is backed up and malformed or oversized songbooks are rejected', 
   const tooMany = structuredClone(withSong);
   tooMany.state.songs = Array.from({ length: 501 }, (_, i) => ({ ...withSong.state.songs[0], id: String(i) }));
   assert.throws(() => parseBackup(JSON.stringify(tooMany)), /songs/i);
+});
+
+test('legacy state migrates statuses into playlists and fills new song fields', () => {
+  const legacy = structuredClone(backup);
+  const { rangeSourceUrl, origin, ...oldSong } = createSong({ title: '봄날', status: 'comfortable' });
+  legacy.state.songs = [oldSong];
+  delete legacy.state.playlists;
+  delete legacy.state.settings.aiConsentAt;
+  const parsed = parseBackup(JSON.stringify(legacy));
+  assert.deepEqual(parsed.state.playlists.map(p => [p.name, p.songIds]), [['익숙한 곡', [oldSong.id]]]);
+  assert.equal(parsed.state.songs[0].origin, 'user');
+  assert.equal(parsed.state.settings.aiConsentAt, null);
+});
+
+test('playlists referencing unknown songs, too many playlists, or a bad consent time are rejected', () => {
+  const bad = structuredClone(backup);
+  bad.state.playlists = [{ ...createPlaylist([], 'A'), songIds: [crypto.randomUUID()] }];
+  assert.throws(() => parseBackup(JSON.stringify(bad)));
+  const many = structuredClone(backup);
+  many.state.playlists = Array.from({ length: 51 }, (_, i) => createPlaylist([], `L${i}`));
+  assert.throws(() => parseBackup(JSON.stringify(many)));
+  const consent = structuredClone(backup);
+  consent.state.settings.aiConsentAt = 'yesterday';
+  assert.throws(() => parseBackup(JSON.stringify(consent)));
+  consent.state.settings.aiConsentAt = '2026-11-03T01:00:00.000Z';
+  assert.equal(parseBackup(JSON.stringify(consent)).state.settings.aiConsentAt, '2026-11-03T01:00:00.000Z');
 });
 
 test('valid backup retains session, activity, and date fields', () => {
