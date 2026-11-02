@@ -31,7 +31,8 @@ try {
     const range = item.range ? `${noteName(item.range.lowestMidi).scientific}~${noteName(item.range.highestMidi).scientific} (출처 표기: ${item.range.sourceNotation || '-'}) ${item.range.sourceUrl}` : '음역 정보 없음';
     console.log(`- ${item.title} / ${item.artist}\n  이유: ${item.reason}\n  곡: ${item.songUrl}\n  음역: ${range}`);
   }
-  if (Date.now() - started > 30000) console.log('주의: 30초를 넘었어요. 서버 시간 제한(30초)에 걸릴 수 있어요.');
+  if (Date.now() - started > 60000) console.log('주의: 60초를 넘었어요. 서버 시간 제한(60초)에 걸려요.');
+  else if (Date.now() - started > 30000) console.log('참고: 30초를 넘었어요. 서버 제한(60초) 안이지만 기다리기엔 길어요.');
 } catch (error) {
   if (!(error instanceof AiError)) throw error;
   console.error(`실패 (${error.code}): ${error.message}`);

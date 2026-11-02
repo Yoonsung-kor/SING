@@ -1,5 +1,8 @@
 // OpenAI Responses API client. Runs only on the server: the key never reaches the browser.
 const ENDPOINT = 'https://api.openai.com/v1/responses';
+// Measured 2026-11-02 with gpt-5.5: default reasoning took 40-55 s, low took 16 s with the same quality.
+const REASONING = { effort: 'low' };
+const TIMEOUT_MS = 60000;
 
 export class AiError extends Error {
   constructor(code, message) {
@@ -62,7 +65,7 @@ async function requestJson({ apiKey, model, fetchImpl, timeoutMs, instructions, 
     const response = await fetchImpl(ENDPOINT, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, instructions, input, tools: [{ type: 'web_search' }], text: { format: { type: 'json_schema', name: schemaName, strict: true, schema } } }),
+      body: JSON.stringify({ model, instructions, input, tools: [{ type: 'web_search' }], reasoning: REASONING, text: { format: { type: 'json_schema', name: schemaName, strict: true, schema } } }),
       signal: controller.signal,
     });
     body = await response.json().catch(() => null);
@@ -86,10 +89,10 @@ async function requestJson({ apiKey, model, fetchImpl, timeoutMs, instructions, 
   catch { throw new AiError('format', 'AI 응답 형식이 올바르지 않아요.'); }
 }
 
-export function fetchRecommendations(request, { apiKey, model, fetchImpl = fetch, timeoutMs = 30000 }) {
+export function fetchRecommendations(request, { apiKey, model, fetchImpl = fetch, timeoutMs = TIMEOUT_MS }) {
   return requestJson({ apiKey, model, fetchImpl, timeoutMs, instructions: RECOMMEND_INSTRUCTIONS, input: JSON.stringify(request), schemaName: 'recommendations', schema: RECOMMENDATION_SCHEMA });
 }
 
-export function fetchSongRange({ title, artist }, { apiKey, model, fetchImpl = fetch, timeoutMs = 30000 }) {
+export function fetchSongRange({ title, artist }, { apiKey, model, fetchImpl = fetch, timeoutMs = TIMEOUT_MS }) {
   return requestJson({ apiKey, model, fetchImpl, timeoutMs, instructions: SONG_RANGE_INSTRUCTIONS, input: JSON.stringify({ title, artist }), schemaName: 'song_range', schema: SONG_RANGE_SCHEMA });
 }

@@ -17,6 +17,20 @@ test('sends a Responses API request with web search and a JSON schema', async ()
   assert.equal(seen.body.text.format.type, 'json_schema');
   assert.ok(seen.body.input.includes('도전하기'));
   assert.match(seen.body.instructions, /2옥타브 라 = A4/);
+  // Measured 2026-11-02 with gpt-5.5: default effort took 55 s, low took 16 s with the same quality.
+  assert.deepEqual(seen.body.reasoning, { effort: 'low' });
+});
+
+test('both lookups wait up to 60 seconds by default before timing out', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  for (const call of [fetchImpl => fetchRecommendations(request, { apiKey: 'k', model: 'm', fetchImpl }), fetchImpl => fetchSongRange({ title: '봄날', artist: '' }, { apiKey: 'k', model: 'm', fetchImpl })]) {
+    let signal;
+    const pending = call((_, init) => { signal = init.signal; return new Promise((_, reject) => init.signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))); });
+    t.mock.timers.tick(59999);
+    assert.equal(signal.aborted, false);
+    t.mock.timers.tick(1);
+    await assert.rejects(pending, e => e.code === 'timeout');
+  }
 });
 
 test('upstream errors, bad JSON, and timeouts become AiError codes without leaking the key', async () => {
@@ -32,6 +46,7 @@ test('song range lookup asks for one range with the same notation rule', async (
   const fetchImpl = async (url, init) => { seen = JSON.parse(init.body); return ok('{"range":null}')(); };
   assert.deepEqual(await fetchSongRange({ title: '봄날', artist: '방탄소년단' }, { apiKey: 'k', model: 'm', fetchImpl }), { range: null });
   assert.equal(seen.text.format.name, 'song_range');
+  assert.deepEqual(seen.reasoning, { effort: 'low' });
   assert.ok(seen.input.includes('봄날'));
   assert.match(seen.instructions, /2옥타브 라 = A4/);
 });
