@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { fetchRecommendations } from '../scripts/ai.mjs';
+import { fetchRecommendations, fetchSongRange } from '../scripts/ai.mjs';
 
 const request = { playlistName: '도전하기', songs: [], exclude: [], rejected: [] };
 const reply = (status, body) => async () => ({ ok: status < 300, status, json: async () => body });
@@ -25,4 +25,13 @@ test('upstream errors, bad JSON, and timeouts become AiError codes without leaki
   await assert.rejects(fetchRecommendations(request, { apiKey: 'k', model: 'm', fetchImpl: ok('not json') }), e => e.code === 'format');
   const hang = (_, init) => new Promise((_, reject) => init.signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))));
   await assert.rejects(fetchRecommendations(request, { apiKey: 'k', model: 'm', fetchImpl: hang, timeoutMs: 20 }), e => e.code === 'timeout');
+});
+
+test('song range lookup asks for one range with the same notation rule', async () => {
+  let seen;
+  const fetchImpl = async (url, init) => { seen = JSON.parse(init.body); return ok('{"range":null}')(); };
+  assert.deepEqual(await fetchSongRange({ title: '봄날', artist: '방탄소년단' }, { apiKey: 'k', model: 'm', fetchImpl }), { range: null });
+  assert.equal(seen.text.format.name, 'song_range');
+  assert.ok(seen.input.includes('봄날'));
+  assert.match(seen.instructions, /2옥타브 라 = A4/);
 });

@@ -36,7 +36,7 @@ export function parseNoteName(text) {
   return (Number(match[3]) + 1) * 12 + LETTERS[match[1].toLowerCase()] + ACCIDENTALS[match[2]];
 }
 
-function toRange(range) {
+export function toRange(range) {
   if (!range || typeof range !== 'object') return null;
   const lowestMidi = parseNoteName(range.lowest), highestMidi = parseNoteName(range.highest);
   if (lowestMidi === null || highestMidi === null || lowestMidi < RANGE_BOUNDS.lowestMin || lowestMidi > highestMidi
@@ -87,6 +87,11 @@ export function buildRecommendationRequest(state, playlistId) {
     exclude: state.songs.map(titleArtist),
     rejected: playlist.rejected.map(titleArtist),
   };
+}
+
+export function validateRangeRequest(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body) || !isText(body.title, 1, 120) || !isText(body.artist, 0, 120)) fail(BAD_REQUEST);
+  return { title: body.title.trim(), artist: body.artist.trim() };
 }
 
 const isTitleArtist = entry => entry && isText(entry.title, 1, 120) && isText(entry.artist, 0, 120);

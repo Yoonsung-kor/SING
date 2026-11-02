@@ -13,6 +13,7 @@ const RANGE_SCHEMA = {
   type: 'object', additionalProperties: false, required: ['lowest', 'highest', 'sourceUrl', 'sourceNotation'],
   properties: { lowest: { type: 'string' }, highest: { type: 'string' }, sourceUrl: { type: 'string' }, sourceNotation: { type: 'string' } },
 };
+const SONG_RANGE_SCHEMA = { type: 'object', additionalProperties: false, required: ['range'], properties: { range: { anyOf: [RANGE_SCHEMA, { type: 'null' }] } } };
 const RECOMMENDATION_SCHEMA = {
   type: 'object', additionalProperties: false, required: ['items'],
   properties: {
@@ -39,6 +40,14 @@ export const RECOMMEND_INSTRUCTIONS = [
   '   한국 가요식 \'n옥타브\' 표기는 과학적 표기보다 옥타브 번호가 2 작다(2옥타브 라 = A4, 3옥타브 도 = C5). 어느 표기인지 확실하지 않으면 range는 null로 둔다.',
   '6. 숫자나 음을 추측하지 않는다. 찾지 못한 정보는 null로 둔다.',
   '7. 사용자의 목소리나 실력을 평가하지 않는다.',
+].join('\n');
+
+export const SONG_RANGE_INSTRUCTIONS = [
+  '너는 노래의 원곡 보컬 음역을 찾는 도우미다. 입력은 JSON으로 곡 제목(title)과 가수(artist)다.',
+  '1. 웹 검색으로 이 곡의 원곡 보컬 최저음과 최고음이 적힌 페이지를 찾는다. 라이브나 편곡 버전이 아니라 원곡 기준이어야 한다.',
+  '2. 찾았으면 range에 lowest, highest, 출처 주소 sourceUrl(https), 출처에 적힌 원래 표기 sourceNotation을 넣는다.',
+  '3. lowest와 highest는 과학적 음이름(가온 도 = C4, A4 = 440Hz, 예: F#4)으로 바꿔 적는다. 한국 가요식 \'n옥타브\' 표기는 과학적 표기보다 옥타브 번호가 2 작다(2옥타브 라 = A4, 3옥타브 도 = C5). 어느 표기인지 확실하지 않으면 range는 null로 둔다.',
+  '4. 출처를 찾지 못했거나 값이 서로 다르면 range는 null로 둔다. 추측하지 않는다.',
 ].join('\n');
 
 function redact(text, apiKey) {
@@ -79,4 +88,8 @@ async function requestJson({ apiKey, model, fetchImpl, timeoutMs, instructions, 
 
 export function fetchRecommendations(request, { apiKey, model, fetchImpl = fetch, timeoutMs = 30000 }) {
   return requestJson({ apiKey, model, fetchImpl, timeoutMs, instructions: RECOMMEND_INSTRUCTIONS, input: JSON.stringify(request), schemaName: 'recommendations', schema: RECOMMENDATION_SCHEMA });
+}
+
+export function fetchSongRange({ title, artist }, { apiKey, model, fetchImpl = fetch, timeoutMs = 30000 }) {
+  return requestJson({ apiKey, model, fetchImpl, timeoutMs, instructions: SONG_RANGE_INSTRUCTIONS, input: JSON.stringify({ title, artist }), schemaName: 'song_range', schema: SONG_RANGE_SCHEMA });
 }

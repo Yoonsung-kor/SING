@@ -44,3 +44,11 @@ test('the word 노래장 no longer appears in any view', () => {
   const st = { ...defaultState(), songs: [createSong({ title: 'A' })] };
   for (const html of [songFormView({ state: st, songDraft: {} }), songDetailView({ state: st, selectedSongId: st.songs[0].id }), songResults(st.songs, '')]) assert.ok(!html.includes('노래장'));
 });
+
+test('song form offers AI range lookup and keeps a found source in the form', () => {
+  const st = defaultState();
+  assert.match(songFormView({ state: st, songDraft: {} }), /data-action="song-range"/);
+  const html = songFormView({ state: st, songDraft: { title: '봄날', lowestMidi: 48, highestMidi: 67, rangeSourceUrl: 'https://src.org/r' } });
+  assert.match(html, /name="rangeSourceUrl" value="https:\/\/src\.org\/r"/);
+  assert.match(html, /음역 출처 보기/);
+});

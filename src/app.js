@@ -34,6 +34,7 @@ let playlistDraft = null;
 let playlistError = '';
 let recLoading = null;
 let recError = null;
+let consentReturn = 'playlist';
 let toastTimer;
 
 function toast(message) {
@@ -287,7 +288,8 @@ async function saveSong(form) {
     const existing = state.songs.find(s => s.id === songDraft.id);
     // Saving the form makes every value the user's own; a hand-edited range no longer matches its source.
     fields.origin = 'user';
-    if (fields.lowestMidi === null || (existing && (existing.lowestMidi !== fields.lowestMidi || existing.highestMidi !== fields.highestMidi))) fields.rangeSourceUrl = '';
+    const sourced = songDraft.sourcedRange ?? (existing?.rangeSourceUrl ? { lowestMidi: existing.lowestMidi, highestMidi: existing.highestMidi } : null);
+    if (!sourced || fields.lowestMidi !== sourced.lowestMidi || fields.highestMidi !== sourced.highestMidi) fields.rangeSourceUrl = '';
     song = existing ? updateSong(existing, fields) : createSong(fields);
     if (!existing && state.songs.length >= 500) throw new Error('곡은 500곡까지 담을 수 있어요.');
   } catch (err) {
@@ -378,7 +380,7 @@ const RECOMMEND_FAILED = '지금은 추천을 불러오지 못했어요.';
 
 async function requestRecommendations(id) {
   if (recLoading) return;
-  if (!state.settings.aiConsentAt) { selectedPlaylistId = id; return navigate('ai-consent'); }
+  if (!state.settings.aiConsentAt) { selectedPlaylistId = id; consentReturn = 'playlist'; return navigate('ai-consent'); }
   let request;
   try { request = buildRecommendationRequest(state, id); }
   catch (err) { recError = { id, message: err.message }; return render(); }
@@ -399,6 +401,32 @@ async function requestRecommendations(id) {
   if (!valid.length) { recError = { id, message }; return render(); }
   await persist({ ...state, playlists: state.playlists.map(p => p.id === id ? setRecommendations(p, valid) : p) });
   render();
+}
+
+async function lookupSongRange() {
+  if (busy) return;
+  const form = document.querySelector('#song-form');
+  if (form) readSongForm(form);
+  const title = String(songDraft?.title ?? '').trim();
+  if (!title) return toast('노래 제목을 먼저 적어 주세요.');
+  if (!state.settings.aiConsentAt) { consentReturn = 'song-form'; return navigate('ai-consent'); }
+  busy = 'range'; render();
+  let message = '지금은 음역을 찾지 못했어요.';
+  try {
+    const response = await fetch('/api/song-range', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, artist: String(songDraft.artist ?? '').trim() }) });
+    if (response.status === 503) message = '아직 AI 추천이 설정되지 않았어요.';
+    else if (response.ok) {
+      const { range } = await response.json();
+      if (range && Number.isInteger(range.lowestMidi) && Number.isInteger(range.highestMidi)) {
+        // Fill the form only; the user checks the source and decides whether to save.
+        songDraft = { ...songDraft, lowestMidi: range.lowestMidi, highestMidi: range.highestMidi, rangeSourceUrl: range.sourceUrl, sourcedRange: { lowestMidi: range.lowestMidi, highestMidi: range.highestMidi } };
+        message = '출처에서 찾은 음역을 채웠어요. 출처를 확인하고 저장해 주세요.';
+      } else message = '출처가 있는 음역을 찾지 못했어요.';
+    }
+  } catch { /* network failure keeps the generic message */ }
+  busy = false;
+  render();
+  toast(message);
 }
 
 async function addRecommendation(index) {
@@ -498,8 +526,11 @@ async function handle(action, id) {
   if (action === 'rec-fetch') return requestRecommendations(id);
   if (action === 'rec-add') return addRecommendation(id);
   if (action === 'rec-nope') return rejectRecommendationAt(id);
+  if (action === 'song-range') return lookupSongRange();
+  if (action === 'consent-back') return navigate(consentReturn === 'song-form' ? 'song-form' : state.playlists.some(p => p.id === selectedPlaylistId) ? 'playlist' : 'songs');
   if (action === 'ai-consent-accept') {
     if (!(await persist({ ...state, settings: { ...state.settings, aiConsentAt: new Date().toISOString() } }))) return;
+    if (consentReturn === 'song-form') { navigate('song-form'); return lookupSongRange(); }
     navigate('playlist');
     return requestRecommendations(selectedPlaylistId);
   }

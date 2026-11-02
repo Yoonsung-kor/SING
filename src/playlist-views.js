@@ -56,8 +56,8 @@ export function recommendationSection(v, playlist) {
 }
 
 export function aiConsentView(v) {
-  const back = v.selectedPlaylistId ? `data-action="playlist-open" data-id="${e(v.selectedPlaylistId)}"` : 'data-action="songs"';
-  return `<div class="narrow"><button class="back-button" ${back}>‹ 돌아가기</button><div class="lesson-header"><h1>AI 추천을 받기 전에</h1><p>추천을 만들려면 아래 정보를 OpenAI로 보내요.<br>처음 한 번만 확인할게요.</p></div><section class="surface"><h2>보내는 정보</h2><ul class="instructions"><li>플레이리스트 이름</li><li>이 리스트에 담긴 곡의 제목·가수·내 노래방 키·원곡 음역</li><li>이미 담아둔 모든 곡의 제목·가수 (같은 곡을 다시 추천하지 않으려고요)</li><li>이 리스트에서 ‘별로예요’를 누른 곡</li></ul><p><strong>녹음, 허밍 기록, 연습 기록은 보내지 않아요.</strong></p><p class="subtle">받는 곳: OpenAI (추천 문장 생성과 웹 검색). 동의는 ‘나의 기록 → 기록과 개인정보 관리’에서 언제든 철회할 수 있어요.</p></section><div class="action-row"><button class="button" data-action="ai-consent-accept">동의하고 추천 받기</button><button class="button secondary" ${back}>돌아가기</button></div></div>`;
+  const back = 'data-action="consent-back"';
+  return `<div class="narrow"><button class="back-button" ${back}>‹ 돌아가기</button><div class="lesson-header"><h1>AI 추천을 받기 전에</h1><p>추천을 만들려면 아래 정보를 OpenAI로 보내요.<br>처음 한 번만 확인할게요.</p></div><section class="surface"><h2>보내는 정보</h2><ul class="instructions"><li>플레이리스트 이름</li><li>이 리스트에 담긴 곡의 제목·가수·내 노래방 키·원곡 음역</li><li>이미 담아둔 모든 곡의 제목·가수 (같은 곡을 다시 추천하지 않으려고요)</li><li>이 리스트에서 ‘별로예요’를 누른 곡</li></ul><p class="subtle">곡 정보의 ‘음역 찾기 (AI)’는 그 곡의 제목과 가수만 보내요.</p><p><strong>녹음, 허밍 기록, 연습 기록은 보내지 않아요.</strong></p><p class="subtle">받는 곳: OpenAI (추천 문장 생성과 웹 검색). 동의는 ‘나의 기록 → 기록과 개인정보 관리’에서 언제든 철회할 수 있어요.</p></section><div class="action-row"><button class="button" data-action="ai-consent-accept">동의하고 추천 받기</button><button class="button secondary" ${back}>돌아가기</button></div></div>`;
 }
 
 export function playlistView(v) {

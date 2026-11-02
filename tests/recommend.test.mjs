@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { normalizeKey, sameSong, parseNoteName, toRecItems, suggestKey, buildRecommendationRequest, validateRecommendationRequest } from '../src/recommend.js';
+import { normalizeKey, sameSong, parseNoteName, toRecItems, toRange, suggestKey, buildRecommendationRequest, validateRecommendationRequest } from '../src/recommend.js';
 import { createPlaylist, addSong } from '../src/playlists.js';
 import { createSong } from '../src/songs.js';
 import { defaultState } from '../src/storage.js';
@@ -59,4 +59,12 @@ test('the request carries list songs and exclusions but never practice records',
   assert.equal(validateRecommendationRequest(req), req);
   assert.throws(() => buildRecommendationRequest({ ...state, playlists: [{ ...playlist, songIds: playlist.songIds.slice(0, 2) }] }, playlist.id), /3개/);
   assert.throws(() => validateRecommendationRequest({ ...req, songs: req.songs.slice(0, 2) }));
+});
+
+test('toRange keeps only scientific, plausible, https-sourced ranges', () => {
+  assert.equal(toRange({ lowest: 'C3', highest: '2옥타브 라', sourceUrl: 'https://s.org', sourceNotation: '' }), null);
+  assert.equal(toRange({ lowest: 'A2', highest: 'A2', sourceUrl: 'https://s.org', sourceNotation: '' }), null);
+  assert.equal(toRange({ lowest: 'C3', highest: 'G4', sourceUrl: 'http://s.org', sourceNotation: '' }), null);
+  assert.deepEqual(toRange({ lowest: 'C3', highest: 'G4', sourceUrl: 'https://s.org', sourceNotation: '2옥타브 솔' }), { lowestMidi: 48, highestMidi: 67, sourceUrl: 'https://s.org', sourceNotation: '2옥타브 솔' });
+  assert.equal(toRange(null), null);
 });

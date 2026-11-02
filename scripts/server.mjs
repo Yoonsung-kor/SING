@@ -1,7 +1,7 @@
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { AiError } from './ai.mjs';
-import { validateRecommendationRequest } from '../src/recommend.js';
+import { validateRecommendationRequest, validateRangeRequest } from '../src/recommend.js';
 
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.json': 'application/json; charset=utf-8', '.mp3': 'audio/mpeg', '.txt': 'text/plain; charset=utf-8' };
 const staticHeaders = {
@@ -31,31 +31,38 @@ function readBody(req, maxBody) {
   });
 }
 
-async function handleRecommend(req, res, { recommend, maxBody }) {
+// Shared POST handling: JSON only, size-limited, validated, and AI failures mapped to status codes.
+async function handleJson(req, res, { maxBody, validate, run }) {
   const type = (req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
   if (type !== 'application/json') return sendJson(res, 415, { error: 'json-only' });
   let text;
   try { text = await readBody(req, maxBody); }
   catch (error) { return sendJson(res, error.status === 413 ? 413 : 400, { error: error.status === 413 ? 'too-large' : 'bad-request' }); }
   let body;
-  try { body = validateRecommendationRequest(JSON.parse(text)); }
+  try { body = validate(JSON.parse(text)); }
   catch { return sendJson(res, 400, { error: 'bad-request' }); }
-  if (!recommend) return sendJson(res, 503, { error: 'not-configured' });
+  if (!run) return sendJson(res, 503, { error: 'not-configured' });
   try {
-    const items = await recommend(body);
-    if (!Array.isArray(items) || !items.length) return sendJson(res, 502, { error: 'upstream' });
-    return sendJson(res, 200, { items });
+    const result = await run(body);
+    if (!result) return sendJson(res, 502, { error: 'upstream' });
+    return sendJson(res, 200, result);
   } catch (error) {
     if (error instanceof AiError) return sendJson(res, error.code === 'timeout' ? 504 : 502, { error: error.code === 'timeout' ? 'timeout' : 'upstream' });
     return sendJson(res, 500, { error: 'server' });
   }
 }
 
-export function createHandler({ root, recommend, maxBody = 16384 }) {
+export function createHandler({ root, recommend, lookupRange = null, maxBody = 16384 }) {
+  const recommendRun = recommend && (async body => {
+    const items = await recommend(body);
+    return Array.isArray(items) && items.length ? { items } : null;
+  });
+  const rangeRun = lookupRange && (async body => ({ range: await lookupRange(body) ?? null }));
   return async (req, res) => {
     try {
       const pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
-      if (req.method === 'POST' && pathname === '/api/recommend') return await handleRecommend(req, res, { recommend, maxBody });
+      if (req.method === 'POST' && pathname === '/api/recommend') return await handleJson(req, res, { maxBody, validate: validateRecommendationRequest, run: recommendRun });
+      if (req.method === 'POST' && pathname === '/api/song-range') return await handleJson(req, res, { maxBody, validate: validateRangeRequest, run: rangeRun });
       if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405).end(); return; }
       const relative = pathname === '/' ? 'index.html' : pathname.slice(1);
       if (!/^(index\.html|src\/[\w.-]+|assets\/[\w.-]+|tests\/browser[\w.-]*)$/.test(relative)) { res.writeHead(404).end('Not found'); return; }

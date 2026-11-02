@@ -42,3 +42,17 @@ test('recommend endpoint validates input and maps failures to status codes', asy
   }
   assert.equal(received.playlistName, '도전하기');
 });
+
+test('song-range endpoint validates input and returns a range or null', async () => {
+  const postRange = (port, body) => fetch(`http://127.0.0.1:${port}/api/song-range`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+  const found = { lowestMidi: 48, highestMidi: 67, sourceUrl: 'https://s.org', sourceNotation: '' };
+  const s = await start({ recommend: null, lookupRange: async body => body.title === '봄날' ? found : null });
+  try {
+    assert.deepEqual(await (await postRange(s.port, JSON.stringify({ title: '봄날', artist: '' }))).json(), { range: found });
+    assert.deepEqual(await (await postRange(s.port, JSON.stringify({ title: '없는 곡', artist: '' }))).json(), { range: null });
+    assert.equal((await postRange(s.port, JSON.stringify({ title: ' ', artist: '' }))).status, 400);
+  } finally { s.close(); }
+  const off = await start({ recommend: null, lookupRange: null });
+  try { assert.equal((await postRange(off.port, JSON.stringify({ title: '봄날', artist: '' }))).status, 503); }
+  finally { off.close(); }
+});
