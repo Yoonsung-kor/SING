@@ -42,21 +42,24 @@ test('static files keep their headers and secrets are never served', async () =>
 test('recommend endpoint validates input and maps failures to status codes', async () => {
   let received;
   const cases = [
-    [{ recommend: async body => { received = body; return [{ title: 'A' }]; } }, valid, 'application/json', 200],
+    [{ recommend: async body => { received = body; return { items: [{ title: 'A' }], intent: 'any', fallback: false }; } }, valid, 'application/json', 200],
+    [{ recommend: async () => ({ items: [], intent: 'challenge', fallback: false }) }, valid, 'application/json', 200],
     [{ recommend: async () => [] }, 'x'.repeat(1100000), 'application/json', 413],
     [{ recommend: async () => [] }, valid, 'text/plain', 415],
     [{ recommend: async () => [] }, '{bad', 'application/json', 400],
     [{ recommend: async () => [] }, JSON.stringify({ ...JSON.parse(valid), songs: [] }), 'application/json', 400],
     [{ recommend: null }, valid, 'application/json', 503],
     [{ recommend: async () => { throw new AiError('timeout', 't'); } }, valid, 'application/json', 504],
-    [{ recommend: async () => [] }, valid, 'application/json', 502],
+    [{ recommend: async () => null }, valid, 'application/json', 502],
   ];
   for (const [opts, body, type, status] of cases) {
     const { port, close } = await start(opts);
-    assert.equal((await post(port, body, type)).status, status, `${status}`);
-    close();
+    try { assert.equal((await post(port, body, type)).status, status, `${status}`); }
+    finally { close(); }
   }
   assert.equal(received.playlistName, '도전하기');
+  const shaped = await start({ recommend: async () => ({ items: [{ title: 'A' }], intent: 'challenge', fallback: true }) });
+  try { assert.deepEqual(await (await post(shaped.port, valid)).json(), { items: [{ title: 'A' }], intent: 'challenge', fallback: true }); } finally { shaped.close(); }
 });
 
 test('song-range endpoint validates input and returns a range or null', async () => {
@@ -82,6 +85,6 @@ test('a request at the app limits (500 songs, 200 rejected) fits under the body 
     rejected: Array.from({ length: 200 }, (_, i) => ({ title: `별로인 곡 ${i}`, artist: '가수' })),
   });
   assert.ok(Buffer.byteLength(big) > 16384);
-  const s = await start({ recommend: async () => [{ title: 'A' }] });
+  const s = await start({ recommend: async () => ({ items: [{ title: 'A' }], intent: 'any', fallback: false }) });
   try { assert.equal((await post(s.port, big)).status, 200); } finally { s.close(); }
 });

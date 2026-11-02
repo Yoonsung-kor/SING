@@ -1,8 +1,6 @@
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { createHandler } from './server.mjs';
-import { fetchRecommendations } from './ai.mjs';
-import { toRecItems } from '../src/recommend.js';
 import { createServices } from './services.mjs';
 import { createSearcher } from './musicbrainz.mjs';
 
@@ -15,11 +13,8 @@ const port = Number(process.env.PORT || 4173);
 const host = process.env.HOST || '127.0.0.1';
 const apiKey = process.env.OPENAI_API_KEY;
 const model = process.env.OPENAI_MODEL;
-const recommend = apiKey && model
-  ? async body => toRecItems(await fetchRecommendations(body, { apiKey, model }), [...body.exclude, ...body.rejected])
-  : null;
 // Song search needs no key, so it stays on even when the AI is off.
-const { lookupRange, searchSongs } = createServices({ apiKey, model, search: createSearcher() });
+const { lookupRange, recommend, searchSongs } = createServices({ apiKey, model, search: createSearcher() });
 
 const server = http.createServer(createHandler({ root, recommend, lookupRange, searchSongs }));
 server.listen(port, host, () => console.log(`SING is ready at http://${host}:${port} · AI 추천: ${recommend ? '켜짐' : '꺼짐'}`));

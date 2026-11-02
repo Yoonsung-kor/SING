@@ -65,9 +65,10 @@ async function handleSearch(req, res, searchSongs) {
 }
 
 export function createHandler({ root, recommend, lookupRange = null, searchSongs = null }) {
+  // An empty list is a real answer ("no song fits"); only a missing result counts as an upstream failure.
   const recommendRun = recommend && (async body => {
-    const items = await recommend(body);
-    return Array.isArray(items) && items.length ? { items } : null;
+    const result = await recommend(body);
+    return result && Array.isArray(result.items) ? { items: result.items, intent: result.intent, fallback: result.fallback } : null;
   });
   const rangeRun = lookupRange && (async body => ({ range: await lookupRange(body) ?? null }));
   return async (req, res) => {
