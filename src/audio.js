@@ -1,10 +1,12 @@
 import { MicrophoneLease } from './capture.js';
 import { detectPitch, summarizePitch } from './pitch.js';
 import { PianoBank } from './piano.js';
+import { HumBank } from './voice.js';
 
 export class AudioEngine {
-  constructor({ piano = new PianoBank() } = {}) {
+  constructor({ piano = new PianoBank(), hum = new HumBank() } = {}) {
     this.piano = piano;
+    this.hum = hum;
     this.lease = new MicrophoneLease();
     this.generation = 0;
     this.context = null;
@@ -28,13 +30,13 @@ export class AudioEngine {
     if (this.context && this.context.state !== 'closed') this.context.close().catch(() => {});
     this.context = null;
   }
-  async tone(midi, duration = 1600) {
+  async tone(midi, duration = 1600, { voice = 'piano' } = {}) {
     this.cancel();
     const generation = this.generation;
     const context = await this.contextForGesture();
     if (generation !== this.generation) return false;
     let sample;
-    try { sample = await this.piano.load(context, midi); }
+    try { sample = await (voice === 'hum' ? this.hum : this.piano).load(context, midi); }
     catch (error) {
       if (generation !== this.generation) return false;
       this.cancel();

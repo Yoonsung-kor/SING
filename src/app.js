@@ -529,11 +529,12 @@ async function handle(action, id) {
   if (action === 'pause') { navigate('home'); return toast('완료한 시도까지 남겨뒀어요. 이어서 시작할 수 있어요.'); }
   if (action === 'record') return capture(false);
   if (action === 'record-practice') return capture(true);
-  if (['tone', 'preview-piano'].includes(action) && !busy) {
+  if (['tone', 'preview-piano', 'tone-hum', 'preview-hum'].includes(action) && !busy) {
     const token = ++operation;
-    const target = action === 'preview-piano' ? session?.targetMidi ?? 60 : page === 'practice' ? recommendedNote(session) : session.targetMidi;
-    busy = 'tone'; render();
-    try { await audio.tone(target); }
+    const target = action.startsWith('preview') ? session?.targetMidi ?? 60 : page === 'practice' ? recommendedNote(session) : session.targetMidi;
+    const hum = action.endsWith('hum');
+    busy = hum ? 'hum' : 'tone'; render();
+    try { await (hum ? audio.tone(target, 2400, { voice: 'hum' }) : audio.tone(target)); }
     finally { if (token === operation) { busy = false; render(); } }
     return;
   }
@@ -606,7 +607,7 @@ root.addEventListener('submit', async event => {
 });
 
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden && ['recording', 'tone'].includes(busy)) {
+  if (document.hidden && ['recording', 'tone', 'hum'].includes(busy)) {
     cancelCapture();
     error = '화면을 벗어나 녹음을 멈췄어요. 이 시도는 저장하지 않았어요. 준비되면 다시 시작해 주세요.';
     render();
