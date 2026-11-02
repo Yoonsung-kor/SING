@@ -47,8 +47,10 @@ export function applyLookup(onb, key, result) {
   });
 }
 
+/** A new voice type changes which octave move makes sense, so every pick goes back to the suggestion for it. */
 export function setVoiceType(onb, voiceType) {
-  return { ...onb, voiceType, picks: onb.picks.map(p => p.octaveTouched ? p : { ...p, octaveShift: defaultShift(voiceType, p.vocal) }) };
+  if (voiceType === onb.voiceType) return onb;
+  return { ...onb, voiceType, picks: onb.picks.map(p => ({ ...p, octaveShift: defaultShift(voiceType, p.vocal), octaveTouched: false })) };
 }
 
 export function setPickKey(onb, key, keyOffset) {
@@ -74,12 +76,15 @@ export function onboardingResult(onb) {
 
 const rangeFields = range => ({ highestMidi: range.highestMidi, falsettoHighestMidi: range.falsettoHighestMidi, lowestMidi: range.lowestMidi, rangeSourceUrl: range.sourceUrl, rangeQuote: range.sourceQuote, vocal: range.vocal });
 
-/** Saves my range; with the checkbox on, also saves the songs and puts them in the '자신 있는 곡' list. */
-export function commitOnboarding(state, onb, now = new Date()) {
+/** Saves my range; with the checkbox on, also saves the songs and puts them in the '자신 있는 곡' list.
+ *  manualMidi: the user fixed the result by hand, so that value wins but the picks still count. */
+export function commitOnboarding(state, onb, now = new Date(), { manualMidi } = {}) {
   if (!onb.voiceType) throw new Error('주로 부르는 키를 골라 주세요.');
-  const { midi, basis } = onboardingResult(onb);
+  const { midi: found, basis } = onboardingResult(onb);
+  const manual = Number.isFinite(manualMidi);
+  const midi = manual ? clamp(Math.round(manualMidi), RANGE_BOUNDS.min, RANGE_BOUNDS.max) : found;
   if (midi === null) throw new Error('최고음을 찾은 곡이 한 곡은 있어야 해요.');
-  const settings = { ...state.settings, voice: { comfortableHighMidi: midi, voiceType: onb.voiceType, method: 'songs', updatedAt: now.toISOString(), basis } };
+  const settings = { ...state.settings, voice: { comfortableHighMidi: midi, voiceType: onb.voiceType, method: manual ? 'manual' : 'songs', updatedAt: now.toISOString(), basis } };
   if (!onb.createList) return { ...state, settings };
   const songs = [...state.songs];
   const ids = [];

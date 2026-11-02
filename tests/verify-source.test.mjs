@@ -67,3 +67,32 @@ test('a single unlabeled value is chest, a stated lowest is kept, unknown vocal 
   assert.deepEqual(await verifyHighest({ chestHighest: 'B4', falsettoHighest: null, lowest: 'F#2', sourceUrl: 'https://example.org/t', sourceQuote: q, vocal: 'robot' }, { getPage: async () => q }),
     { highestMidi: 71, falsettoHighestMidi: null, lowestMidi: 42, sourceUrl: 'https://example.org/t', sourceQuote: q, vocal: null });
 });
+
+test('final #1: IP-literal hosts on private networks are refused before any request, including after a redirect', async () => {
+  const calls = [];
+  const requestOnce = async url => { calls.push(url); return url === 'https://ok.example/' ? { status: 302, location: 'https://192.168.0.1/admin' } : { status: 200, contentType: 'text/html', body: 'x' }; };
+  for (const url of ['https://127.0.0.1/x', 'https://2130706433/x', 'https://[::1]/x', 'https://[::ffff:192.168.0.1]/x', 'https://10.0.0.1/x']) {
+    assert.equal(await fetchPageText(url, { requestOnce }), null, url);
+  }
+  assert.deepEqual(calls, []);
+  assert.equal(await fetchPageText('https://ok.example/', { requestOnce }), null);
+  assert.deepEqual(calls, ['https://ok.example/']);
+});
+
+test('final #12: only 192.0.0.0/24 and 192.0.2.0/24 are reserved; WordPress.com addresses are public', () => {
+  assert.equal(isPublicAddress('192.0.78.9'), true);
+  assert.equal(isPublicAddress('192.0.0.8'), false);
+  assert.equal(isPublicAddress('192.0.2.1'), false);
+});
+
+test('final #2: a sharp added by the AI is not on a page that has none', () => {
+  assert.equal(quoteOnPage('<p>최고음 3옥타브 레(D5)</p>', '최고음 3옥타브 레#(D#5)'), false);
+  assert.equal(quoteOnPage('<p>최고음 3옥타브 파♯(F♯5)</p>', '최고음 3옥타브 파#(F#5)'), true);
+});
+
+test('final #3: when the quote labels a falsetto note, a claim without falsetto is not accepted', async () => {
+  const q = '진성 2옥 시(B4), 가성 3옥 레(D5)';
+  const base = { lowest: null, sourceUrl: 'https://example.org/f', sourceQuote: q, vocal: 'male' };
+  assert.equal(await verifyHighest({ ...base, chestHighest: 'D5', falsettoHighest: null }, { getPage: async () => q }), null);
+  assert.equal((await verifyHighest({ ...base, chestHighest: 'B4', falsettoHighest: 'D5' }, { getPage: async () => q }))?.highestMidi, 71);
+});

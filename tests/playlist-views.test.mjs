@@ -117,3 +117,7 @@ test('without my range the section offers to set it, and a fallback pick says so
   assert.match(section([{ ...v2(72), range: null }], { meta: { intent: 'challenge', fallback: true } }), /확인된 도전 곡을 못 찾아 분위기로 골랐어요\./);
   assert.match(section([{ ...v2(72), range: null }], { meta: { intent: 'comfortable', fallback: true } }), /확인된 편한 곡을 못 찾아 분위기로 골랐어요\./);
 });
+
+test('final #16: the consent copy names the lowest note it also sends', () => {
+  assert.match(aiConsentView({ state: defaultState(), selectedPlaylistId: 'p' }), /원곡 최고음·최저음/);
+});

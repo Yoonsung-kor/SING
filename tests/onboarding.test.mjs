@@ -112,3 +112,27 @@ test('manual commit keeps the old basis, and dismissal is stored', () => {
   assert.deepEqual(restarted.picks.map(p => [p.title, p.status, p.range?.highestMidi]), [['밤편지', 'found', 71]]);
   assert.equal(restarted.voiceType, 'male');
 });
+
+test('final #5: changing the voice type resets octave moves the new type cannot show, even on restored picks', () => {
+  const voice = { comfortableHighMidi: 71, voiceType: 'male', method: 'songs', updatedAt: now.toISOString(), basis: [{ title: '밤편지', artist: '아이유', highestMidi: 71, keyOffset: 0, octaveShift: -12, vocal: 'female' }] };
+  const restored = startOnboarding({ ...defaultState(), settings: { ...defaultState().settings, voice } });
+  assert.equal(restored.picks[0].octaveShift, -12);
+  assert.equal(setVoiceType(restored, 'male').picks[0].octaveShift, -12);
+  assert.equal(setVoiceType(restored, 'female').picks[0].octaveShift, 0);
+  let female = { ...startOnboarding(defaultState()), voiceType: 'female' };
+  female = applyLookup(pick(female, '거리에서', '성시경').onboarding, '거리에서|성시경', checked(70, 'male'));
+  female = toggleOctave(female, '거리에서|성시경');
+  assert.equal(female.picks[0].octaveShift, 12);
+  assert.equal(setVoiceType(female, 'male').picks[0].octaveShift, 0);
+  assert.equal(onboardingResult(setVoiceType(female, 'male')).midi, 70);
+});
+
+test('final #6: fixing the result by hand keeps the picked songs, the basis and the list', () => {
+  let onb = { ...startOnboarding(defaultState()), voiceType: 'male' };
+  onb = applyLookup(pick(onb, '밤편지', 'IU').onboarding, '밤편지|iu', checked(71));
+  const next = commitOnboarding(defaultState(), { ...onb, manualMidi: 72 }, now, { manualMidi: 72 });
+  assert.deepEqual([next.settings.voice.comfortableHighMidi, next.settings.voice.method, next.settings.voice.basis.length], [72, 'manual', 1]);
+  assert.deepEqual(next.playlists.map(p => p.name), [LIST_NAME]);
+  const nothingFound = applyLookup(pick({ ...startOnboarding(defaultState()), voiceType: 'female' }, '없는 곡').onboarding, '없는곡|', null);
+  assert.equal(commitOnboarding(defaultState(), nothingFound, now, { manualMidi: 76 }).settings.voice.comfortableHighMidi, 76);
+});

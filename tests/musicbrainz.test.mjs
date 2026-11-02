@@ -39,3 +39,21 @@ test('a failed MusicBrainz answer becomes an error', async () => {
   const search = createSearcher({ fetchImpl: async () => ({ ok: false, status: 503, json: async () => ({}) }), now: () => 0, sleep: async () => {} });
   await assert.rejects(search('밤편지'));
 });
+
+test('final #4: while a slow request is out, queries typed past are dropped instead of sent one by one', async () => {
+  let clock = 0, release;
+  const sent = [];
+  const fetchImpl = async url => {
+    sent.push(decodeURIComponent(url.split('query=')[1]));
+    if (sent.length === 1) await new Promise(r => { release = r; });
+    return { ok: true, status: 200, json: async () => ({ recordings: [] }) };
+  };
+  const search = createSearcher({ fetchImpl, now: () => clock, sleep: async ms => { clock += ms; } });
+  const a = search('a');
+  await new Promise(r => setImmediate(r));
+  const rest = [search('ab'), search('abc'), search('abcd')];
+  clock = 1500;
+  release();
+  await Promise.all([a, ...rest]);
+  assert.deepEqual(sent, ['a', 'abcd']);
+});

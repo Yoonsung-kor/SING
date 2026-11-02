@@ -16,13 +16,13 @@ const CHEST_MAX = 81;
 const VOCALS = ['male', 'female', 'mixed'];
 
 function ipv4Public(address) {
-  const [a, b] = address.split('.').map(Number);
+  const [a, b, c] = address.split('.').map(Number);
   if (a === 0 || a === 10 || a === 127 || a >= 224) return false;
   if (a === 100 && b >= 64 && b <= 127) return false;
   if (a === 169 && b === 254) return false;
   if (a === 172 && b >= 16 && b <= 31) return false;
   if (a === 192 && b === 168) return false;
-  if (a === 192 && b === 0) return false;
+  if (a === 192 && b === 0 && (c === 0 || c === 2)) return false;
   if (a === 198 && (b === 18 || b === 19)) return false;
   return true;
 }
@@ -95,6 +95,8 @@ export async function fetchPageText(url, { requestOnce = httpsRequestOnce, maxRe
   let current = url;
   for (let hop = 0; hop <= maxRedirects; hop++) {
     if (!isHttps(current)) return null;
+    const host = new URL(current).hostname.replace(/^\[|\]$/g, '');
+    if (net.isIP(host) && !isPublicAddress(host)) return null;
     let response;
     try { response = await requestOnce(current); }
     catch { return null; }
@@ -113,8 +115,8 @@ const squash = text => String(text ?? '')
   .replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi, ' ')
   .replace(/<[^>]*>/g, ' ')
   .replace(/&(?:#\d+|#x[\da-f]+|[a-z]+);/gi, ' ')
-  .normalize('NFKC').toLowerCase()
-  .replace(/[\s\p{P}\p{S}]/gu, '');
+  .normalize('NFKC').replace(/♯/g, '#').replace(/♭/g, 'b').toLowerCase()
+  .replace(/(?!#)[\s\p{P}\p{S}]/gu, '');
 
 /** Whether the quote appears on the page once markup, spacing and punctuation are ignored. */
 export function quoteOnPage(pageText, quote) {
@@ -134,6 +136,7 @@ export async function verifyHighest(claim, { getPage = fetchPageText } = {}) {
   const falsetto = claim.falsettoHighest == null ? null : parseNoteName(claim.falsettoHighest);
   if (!inBounds(chest) || chest > CHEST_MAX || (claim.falsettoHighest != null && (!inBounds(falsetto) || falsetto <= chest))) return null;
   const notes = notesInText(sourceQuote);
+  if (falsetto === null && notes.length >= 2 && /가성|팔세토|두성|falsetto/i.test(sourceQuote)) return null;
   if (!notes.includes(chest)) return null;
   if (falsetto !== null && (!notes.includes(falsetto) || falsetto !== Math.max(...notes))) return null;
   const others = notes.filter(note => note !== falsetto);

@@ -720,7 +720,9 @@ async function handleVoice(action, id) {
     try {
       next = action === 'voice-save'
         ? commitOnboarding(state, onboarding, new Date())
-        : commitManual(state, { midi: onboarding.manualMidi, voiceType: onboarding.voiceType }, new Date());
+        : onboarding.picks.length
+          ? commitOnboarding(state, onboarding, new Date(), { manualMidi: onboarding.manualMidi })
+          : commitManual(state, { midi: onboarding.manualMidi, voiceType: onboarding.voiceType }, new Date());
     } catch (err) { return toast(err.message); }
     return saveVoice(next, '내 음역을 저장했어요.');
   }
@@ -730,6 +732,8 @@ async function handle(action, id) {
   // Persistence writes must finish before navigating or changing their source state.
   if (busy === 'saving') return;
   if (action === 'songs') selectedPlaylistId = null;
+  // Tapping the tab you are already on keeps an onboarding in progress instead of starting it over.
+  if (action === 'songs' && page.startsWith('voice-') && onboarding) return;
   if (action === 'songs' && shouldShowOnboarding(state, { demo, initialized })) return beginOnboarding('voice-intro');
   if (action.startsWith('voice-')) return handleVoice(action, id);
   if (['home', 'learn', 'history', 'songs', 'all-songs'].includes(action)) return navigate(action);

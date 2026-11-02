@@ -28,7 +28,10 @@ test('picking keeps intent matches first, then unchecked songs, and flags fallba
   const titles = r => r.items.map(i => i.title);
   assert.deepEqual(titles(pickRecommendations(items, { voice, intent: 'challenge' })), ['ch2', 'ch1', 'unknown']);
   assert.deepEqual(titles(pickRecommendations(items, { voice, intent: 'comfortable' })), ['easy', 'female-easy', 'unknown']);
-  assert.deepEqual(titles(pickRecommendations(items, { voice, intent: 'any' })), ['easy', 'ch2', 'unknown']);
+  // final #14 (spec 9 step 4): with my range, unchecked songs go after checked ones in every intent.
+  assert.deepEqual(titles(pickRecommendations(items, { voice, intent: 'any' })), ['easy', 'ch2', 'hard']);
+  assert.deepEqual(titles(pickRecommendations([v('unknown', null), v('easy', 69)], { voice, intent: 'any' })), ['easy', 'unknown']);
+  assert.deepEqual(titles(pickRecommendations([v('unknown', null), v('easy', 69)], { voice: null, intent: 'any' })), ['unknown', 'easy']);
   const fb = pickRecommendations([v('hard', 76), v('unknown', null)], { voice, intent: 'challenge' });
   assert.deepEqual([titles(fb), fb.fallback], [['unknown'], true]);
   assert.equal(pickRecommendations(items, { voice: null, intent: 'challenge' }).items.length, 3);

@@ -46,7 +46,8 @@ export function keyHint(gap) {
 /** Up to three picks: checked songs that fit the list intent, then unchecked ones; checked misfits are dropped. */
 export function pickRecommendations(items, { voice, intent }) {
   const list = Array.isArray(items) ? items : [];
-  if (!voice || intent === 'any' || !['comfortable', 'challenge'].includes(intent)) return { items: list.slice(0, 3), fallback: false };
+  if (!voice) return { items: list.slice(0, 3), fallback: false };
+  if (!['comfortable', 'challenge'].includes(intent)) return { items: [...list.filter(item => item.range), ...list.filter(item => !item.range)].slice(0, 3), fallback: false };
   const fits = item => {
     const gap = item.range.highestMidi + candidateShift(voice.voiceType, item.vocal) - voice.comfortableHighMidi;
     return intent === 'comfortable' ? gap <= 0 : gap >= 1 && gap <= 3;

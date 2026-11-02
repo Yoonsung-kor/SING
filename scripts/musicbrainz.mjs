@@ -29,6 +29,7 @@ export function createSearcher({ fetchImpl = fetch, now = Date.now, sleep = ms =
   let lastSent = -Infinity;
   let chain = Promise.resolve();
   let latest = 0;
+  let pending = 0;
 
   async function send(q) {
     const response = await fetchImpl(ENDPOINT + encodeURIComponent(q), { headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' }, signal: AbortSignal.timeout(10000) });
@@ -38,7 +39,11 @@ export function createSearcher({ fetchImpl = fetch, now = Date.now, sleep = ms =
 
   return function search(q) {
     const ticket = ++latest;
+    // Only a query that arrives when nothing is pending goes out no matter what; queued ones can go stale.
+    const queued = pending > 0;
+    pending++;
     const run = chain.then(async () => {
+      if (queued && ticket !== latest) return [];
       const wait = lastSent + minIntervalMs - now();
       if (wait > 0) {
         await sleep(wait);
@@ -48,7 +53,8 @@ export function createSearcher({ fetchImpl = fetch, now = Date.now, sleep = ms =
       lastSent = now();
       return send(q);
     });
-    chain = run.catch(() => {});
-    return run;
+    const settled = run.finally(() => { pending--; });
+    chain = settled.catch(() => {});
+    return settled;
   };
 }
