@@ -1,7 +1,14 @@
 import { songResults, keyLabel } from './song-views.js';
+import { suggestKey } from './recommend.js';
+import { PLAYLIST_LIMITS } from './playlists.js';
+import { noteName } from './pitch.js';
 
 const e = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const songsById = state => new Map(state.songs.map(song => [song.id, song]));
+const isHttps = url => { try { const u = new URL(url); return u.protocol === 'https:' && Boolean(u.hostname); } catch { return false; } };
+// AI output is untrusted: every link is re-checked here even though the server already filtered it.
+const outLink = (url, label) => isHttps(url) ? `<a class="source-link" href="${e(url)}" target="_blank" rel="noopener noreferrer">${label}</a>` : '';
+const note = midi => noteName(midi)?.label || '';
 const backToLists = () => '<button class="back-button" data-action="songs">‹ 내 플레이리스트</button>';
 
 function playlistCard(playlist, byId) {
@@ -23,9 +30,34 @@ export function playlistHomeView(v) {
   return `<div class="songbook"><div class="songbook-heading"><div><p class="eyebrow">뭐 부르지?</p><h1>내 플레이리스트</h1><p>부르는 곡을 내 기준으로 나눠 담아요.<br>리스트마다 어울리는 곡도 추천받을 수 있어요.</p></div><button class="button" data-action="song-add">＋ 곡 담기</button></div><div class="song-tools"><label class="song-search-label" for="song-search">제목 · 가수 검색</label><input id="song-search" class="song-search" type="search" maxlength="120" placeholder="오늘 떠오른 노래가 있나요?" value="${e(v.songQuery)}" autocomplete="off"></div><div id="song-results" aria-live="polite">${playlistHomeResults(v.state, v.songQuery || '')}</div><p class="songbook-footnote">직접 적어두는 개인 플레이리스트예요. 허밍 기록만으로 이 곡을 편하게 부를 수 있는지 판단하지 않아요.</p></div>`;
 }
 
-// Filled in by the recommendation task; the playlist page already reserves its place.
-export function recommendationSection() {
-  return '';
+function recommendationCard(item, index, listSongs) {
+  const key = item.range ? suggestKey(listSongs, item.range.highestMidi) : null;
+  const range = item.range
+    ? `<p class="rec-meta">${key === null ? '' : `노래방 ${keyLabel(key)} 추천 · 담아둔 곡 기준 어림값<br>`}원곡 ${e(note(item.range.lowestMidi))} ~ ${e(note(item.range.highestMidi))} · 출처에서 찾은 값이에요 ${outLink(item.range.sourceUrl, '음역 출처 보기 ↗')}</p>`
+    : '<p class="rec-meta">음역 정보 없음</p>';
+  return `<article class="rec-card"><p class="rec-title"><strong>${e(item.title)}</strong>${item.artist ? ` · ${e(item.artist)}` : ''}</p><p class="rec-reason">${e(item.reason)}</p>${range}<p class="rec-meta">${outLink(item.songUrl, '곡 정보 ↗')}</p><div class="rec-actions"><button class="button small" data-action="rec-add" data-id="${index}">＋ 담기</button><button class="button quiet small" data-action="rec-nope" data-id="${index}">별로예요</button></div></article>`;
+}
+
+export function recommendationSection(v, playlist) {
+  const id = e(playlist.id);
+  const byId = songsById(v.state);
+  const listSongs = playlist.songIds.map(songId => byId.get(songId)).filter(Boolean);
+  let body;
+  if (listSongs.length < PLAYLIST_LIMITS.minSongsForRecs) body = '<div class="playlist-note">곡을 3개 이상 담으면 어울리는 곡을 추천해 드려요.</div>';
+  else if (v.recLoading === playlist.id) body = '<div class="playlist-note" role="status">어울리는 곡을 찾고 있어요… 웹에서 출처를 확인하느라 조금 걸릴 수 있어요.</div>';
+  else {
+    const error = v.recError?.id === playlist.id ? `<div class="error-box" role="alert">${e(v.recError.message)} <button class="text-button" data-action="rec-fetch" data-id="${id}">다시 시도</button></div>` : '';
+    const items = playlist.recommendations?.items || [];
+    body = !playlist.recommendations
+      ? `${error}<button class="button secondary" data-action="rec-fetch" data-id="${id}">추천 받기</button><p class="subtle">리스트 이름과 담긴 곡을 보고, 실제로 있는 곡인지 확인한 곡만 골라 드려요.</p>`
+      : `${error}${items.length ? `<div class="rec-list">${items.map((item, index) => recommendationCard(item, index, listSongs)).join('')}</div>` : '<div class="playlist-note">받은 추천을 모두 확인했어요.</div>'}<button class="button secondary" data-action="rec-fetch" data-id="${id}">다른 곡 추천 받기</button>`;
+  }
+  return `<section class="rec-section" aria-live="polite"><div class="rec-head"><h2>이 리스트에 어울리는 곡</h2><span class="rec-badge">AI 추천</span></div>${body}</section>`;
+}
+
+export function aiConsentView(v) {
+  const back = v.selectedPlaylistId ? `data-action="playlist-open" data-id="${e(v.selectedPlaylistId)}"` : 'data-action="songs"';
+  return `<div class="narrow"><button class="back-button" ${back}>‹ 돌아가기</button><div class="lesson-header"><h1>AI 추천을 받기 전에</h1><p>추천을 만들려면 아래 정보를 OpenAI로 보내요.<br>처음 한 번만 확인할게요.</p></div><section class="surface"><h2>보내는 정보</h2><ul class="instructions"><li>플레이리스트 이름</li><li>이 리스트에 담긴 곡의 제목·가수·내 노래방 키·원곡 음역</li><li>이미 담아둔 모든 곡의 제목·가수 (같은 곡을 다시 추천하지 않으려고요)</li><li>이 리스트에서 ‘별로예요’를 누른 곡</li></ul><p><strong>녹음, 허밍 기록, 연습 기록은 보내지 않아요.</strong></p><p class="subtle">받는 곳: OpenAI (추천 문장 생성과 웹 검색). 동의는 ‘나의 기록 → 기록과 개인정보 관리’에서 언제든 철회할 수 있어요.</p></section><div class="action-row"><button class="button" data-action="ai-consent-accept">동의하고 추천 받기</button><button class="button secondary" ${back}>돌아가기</button></div></div>`;
 }
 
 export function playlistView(v) {

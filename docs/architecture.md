@@ -14,12 +14,12 @@ flowchart TD
     Pitch --> Lesson[lesson.js · 진행 규칙]
     UI -->|편안함 응답| Lesson
     Lesson -->|결과 · 다음 과제| UI
-    UI <--> Songs[개인 노래장 · 곡 입력 / 검색]
+    UI <--> Songs[플레이리스트 · 곡 입력 / 검색 / AI 추천]
     UI <--> Store[storage.js · IndexedDB]
     Store <--> Backup[사용자 백업 파일]
 ```
 
-서버는 HTML·JavaScript·CSS·동봉 자산을 제공한다. 음높이 계산과 저장은 브라우저 안에서 수행하며, 현재 음성 업로드 API·회원 서버·생성형 AI 호출은 없다.
+서버는 HTML·JavaScript·CSS·동봉 자산을 제공한다. 음높이 계산과 저장은 브라우저 안에서 수행하며, 음성 업로드 API와 회원 서버는 없다. 곡 추천만 `POST /api/recommend`로 서버를 거쳐 OpenAI를 호출한다(키는 서버의 `.env`, 사용자 동의 후 요청).
 
 | 구성 | 책임 | 주요 파일 |
 | --- | --- | --- |
@@ -27,7 +27,7 @@ flowchart TD
 | 오디오 | 피아노 샘플 선택·재생, 마이크 요청, 녹음, 취소 처리 | `src/piano.js`, `src/audio.js`, `src/capture.js` |
 | 음높이 분석 | 단일 음의 주기성에서 주파수·음이름·신뢰도 요약 | `src/pitch.js` |
 | 레슨 규칙 | 시작음 확인, 목표음 비교, 체감에 따른 진행·종료 | `src/lesson.js` |
-| 개인 노래장 | 곡 검증, 제목·가수 검색, 상태 필터, 키 변경 표시 | `src/songs.js`, `src/song-views.js` |
+| 곡과 플레이리스트 | 곡 검증, 제목·가수 검색, 키 변경 표시, 사용자 이름 플레이리스트와 AI 추천 | `src/songs.js`, `src/song-views.js`, `src/playlists.js`, `src/playlist-views.js`, `src/recommend.js`, `scripts/server.mjs`, `scripts/ai.mjs` |
 | 저장 | 상태/원음 저장, 백업 검증과 복원 | `src/storage.js` |
 | 개발 서버 | 허용된 정적 파일 제공 | `scripts/serve.mjs` |
 

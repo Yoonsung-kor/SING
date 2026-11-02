@@ -4,7 +4,8 @@ import { AudioEngine, microphoneError } from './audio.js';
 import { noteName, frequencyToMidi } from './pitch.js';
 import { renderView } from './views.js';
 import { createSong, updateSong } from './songs.js';
-import { createPlaylist, renamePlaylist, removeSong, applyMembership, removeSongEverywhere } from './playlists.js';
+import { createPlaylist, renamePlaylist, removeSong, applyMembership, removeSongEverywhere, addSong, setRecommendations, takeRecommendation, rejectRecommendation, isValidRecItem, PLAYLIST_LIMITS } from './playlists.js';
+import { buildRecommendationRequest, suggestKey } from './recommend.js';
 import { playlistHomeResults } from './playlist-views.js';
 
 const root = document.querySelector('#app');
@@ -31,6 +32,8 @@ let selectedSongId = null;
 let selectedPlaylistId = null;
 let playlistDraft = null;
 let playlistError = '';
+let recLoading = null;
+let recError = null;
 let toastTimer;
 
 function toast(message) {
@@ -42,7 +45,7 @@ function toast(message) {
 }
 
 function render(focus = false) {
-  root.innerHTML = renderView({ page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, loading: !initialized && !demo });
+  root.innerHTML = renderView({ page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, recLoading, recError, loading: !initialized && !demo });
   if (focus) { document.querySelector('#main')?.focus({ preventScroll: true }); window.scrollTo(0, 0); }
 }
 
@@ -371,6 +374,62 @@ async function removeFromPlaylist(songId) {
   render();
 }
 
+const RECOMMEND_FAILED = '지금은 추천을 불러오지 못했어요.';
+
+async function requestRecommendations(id) {
+  if (recLoading) return;
+  if (!state.settings.aiConsentAt) { selectedPlaylistId = id; return navigate('ai-consent'); }
+  let request;
+  try { request = buildRecommendationRequest(state, id); }
+  catch (err) { recError = { id, message: err.message }; return render(); }
+  recLoading = id;
+  recError = null;
+  render();
+  let items = null;
+  let message = RECOMMEND_FAILED;
+  try {
+    const response = await fetch('/api/recommend', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request) });
+    if (response.ok) items = (await response.json()).items;
+    else if (response.status === 503) message = '아직 AI 추천이 설정되지 않았어요.';
+  } catch { /* network failure keeps the generic message */ }
+  recLoading = null;
+  // The list may have been deleted or changed while waiting; apply the answer to the current state only.
+  if (!state.playlists.some(p => p.id === id)) return render();
+  const valid = Array.isArray(items) ? items.filter(isValidRecItem).slice(0, PLAYLIST_LIMITS.recCount) : [];
+  if (!valid.length) { recError = { id, message }; return render(); }
+  await persist({ ...state, playlists: state.playlists.map(p => p.id === id ? setRecommendations(p, valid) : p) });
+  render();
+}
+
+async function addRecommendation(index) {
+  const playlist = state.playlists.find(p => p.id === selectedPlaylistId);
+  if (!playlist || busy) return;
+  if (state.songs.length >= 500) return toast('곡은 500곡까지 담을 수 있어요.');
+  const { item, playlist: remaining } = takeRecommendation(playlist, Number(index));
+  const byId = new Map(state.songs.map(song => [song.id, song]));
+  const listSongs = playlist.songIds.map(songId => byId.get(songId)).filter(Boolean);
+  const song = createSong({
+    title: item.title, artist: item.artist, keyOffset: suggestKey(listSongs, item.range?.highestMidi ?? null) ?? 0,
+    lowestMidi: item.range?.lowestMidi ?? null, highestMidi: item.range?.highestMidi ?? null,
+    rangeSourceUrl: item.range?.sourceUrl ?? '', origin: 'ai',
+  });
+  busy = 'saving'; render();
+  const saved = await persist({ ...state, songs: [...state.songs, song], playlists: state.playlists.map(p => p.id === playlist.id ? addSong(remaining, song.id) : p) });
+  busy = false;
+  render();
+  if (saved) toast(`‘${item.title}’을(를) 담았어요.`);
+}
+
+async function rejectRecommendationAt(index) {
+  const playlist = state.playlists.find(p => p.id === selectedPlaylistId);
+  if (!playlist || busy) return;
+  busy = 'saving'; render();
+  const saved = await persist({ ...state, playlists: state.playlists.map(p => p.id === playlist.id ? rejectRecommendation(p, Number(index)) : p) });
+  busy = false;
+  render();
+  if (saved) toast('알겠어요. 다음 추천에 반영할게요.');
+}
+
 async function deleteSession(id) {
   if (!confirm('이 레슨 기록과 연결된 녹음을 삭제할까요? 되돌릴 수 없어요.')) return;
   busy = 'saving';
@@ -436,6 +495,19 @@ async function handle(action, id) {
   if (action === 'playlist-open') { selectedPlaylistId = id; return navigate('playlist'); }
   if (action === 'playlist-delete') return deletePlaylist(id);
   if (action === 'playlist-remove-song') return removeFromPlaylist(id);
+  if (action === 'rec-fetch') return requestRecommendations(id);
+  if (action === 'rec-add') return addRecommendation(id);
+  if (action === 'rec-nope') return rejectRecommendationAt(id);
+  if (action === 'ai-consent-accept') {
+    if (!(await persist({ ...state, settings: { ...state.settings, aiConsentAt: new Date().toISOString() } }))) return;
+    navigate('playlist');
+    return requestRecommendations(selectedPlaylistId);
+  }
+  if (action === 'ai-consent-revoke') {
+    await persist({ ...state, settings: { ...state.settings, aiConsentAt: null } });
+    render();
+    return toast('AI 추천 동의를 철회했어요.');
+  }
   if (action === 'song-add' || action === 'song-edit') {
     if (!initialized && !demo) return toast('저장소가 준비되지 않았어요. 체험 모드에서 먼저 둘러볼 수 있어요.');
     songDraft = action === 'song-edit'
