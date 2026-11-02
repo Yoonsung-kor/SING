@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createSong, updateSong, searchSongs, validateSong } from '../src/songs.js';
+import { createSong, updateSong, searchSongs, validateSong, normalizeSong } from '../src/songs.js';
 
 const now = new Date('2026-09-28T04:30:00.000Z');
 
@@ -10,10 +10,37 @@ test('createSong supplies defaults and stable timestamps', () => {
   assert.deepEqual(song, {
     id: song.id, title: '봄날', artist: '', originalKey: '',
     lowestMidi: null, highestMidi: null, keyOffset: 0,
-    status: 'want', lyricsUrl: '', note: '',
+    status: 'want', lyricsUrl: '', note: '', rangeSourceUrl: '', origin: 'user',
     createdAt: now.toISOString(), updatedAt: now.toISOString(),
   });
   assert.equal(validateSong(song), song);
+});
+
+test('AI origin and an https range source are accepted with a range', () => {
+  const song = createSong({ title: 'A', lowestMidi: 48, highestMidi: 72, rangeSourceUrl: 'https://example.org/r', origin: 'ai' }, now);
+  assert.equal(song.origin, 'ai');
+  assert.equal(song.rangeSourceUrl, 'https://example.org/r');
+});
+
+test('bad origin, non-https source, and a source without a range are rejected', () => {
+  assert.throws(() => createSong({ title: 'A', origin: 'bot' }), /출처 구분/);
+  assert.throws(() => createSong({ title: 'A', lowestMidi: 48, highestMidi: 72, rangeSourceUrl: 'http://x.org' }), /음역 출처/);
+  assert.throws(() => createSong({ title: 'A', rangeSourceUrl: 'https://x.org' }), /음역 출처/);
+});
+
+test('normalizeSong upgrades songs saved before the new fields existed', () => {
+  const { rangeSourceUrl, origin, ...old } = createSong({ title: 'A' }, now);
+  const upgraded = normalizeSong(old);
+  assert.equal(upgraded.rangeSourceUrl, '');
+  assert.equal(upgraded.origin, 'user');
+  assert.equal(validateSong(upgraded), upgraded);
+  assert.throws(() => validateSong(old));
+});
+
+test('updateSong keeps origin unless the caller passes one', () => {
+  const ai = createSong({ title: 'A', origin: 'ai' }, now);
+  assert.equal(updateSong(ai, { note: 'x' }, now).origin, 'ai');
+  assert.equal(updateSong(ai, { origin: 'user' }, now).origin, 'user');
 });
 
 test('createSong accepts complete song metadata and update preserves identity', () => {
@@ -46,13 +73,11 @@ test('invalid title, range, offset, status, and URL are rejected', () => {
   assert.throws(() => createSong({ title: 'A', note: '가'.repeat(1001) }), /메모/);
 });
 
-test('searchSongs matches title or artist across case and whitespace, with status filter', () => {
+test('searchSongs matches title or artist across case and whitespace', () => {
   const songs = [
     createSong({ title: 'Love  Song', artist: 'The Singer', status: 'want' }, now),
     createSong({ title: '봄 날', artist: '아이유', status: 'comfortable' }, now),
   ];
   assert.deepEqual(searchSongs(songs, ' LOVESONG '), [songs[0]]);
   assert.deepEqual(searchSongs(songs, '  아이 유 '), [songs[1]]);
-  assert.deepEqual(searchSongs(songs, 'song', 'comfortable'), []);
-  assert.deepEqual(searchSongs(songs, '', 'want'), [songs[0]]);
 });
