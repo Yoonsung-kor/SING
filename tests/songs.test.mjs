@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createSong, updateSong, searchSongs, validateSong } from '../src/songs.js';
+import { createSong, updateSong, searchSongs, validateSong, normalizeSong } from '../src/songs.js';
 
 const now = new Date('2026-09-28T04:30:00.000Z');
 
@@ -10,10 +10,43 @@ test('createSong supplies defaults and stable timestamps', () => {
   assert.deepEqual(song, {
     id: song.id, title: '봄날', artist: '', originalKey: '',
     lowestMidi: null, highestMidi: null, keyOffset: 0,
-    status: 'want', lyricsUrl: '', note: '',
+    status: 'want', lyricsUrl: '', note: '', rangeSourceUrl: '', origin: 'user',
+    falsettoHighestMidi: null, rangeQuote: '', vocal: null, octaveShift: 0, tjNumber: '',
     createdAt: now.toISOString(), updatedAt: now.toISOString(),
   });
   assert.equal(validateSong(song), song);
+});
+
+test('AI origin and an https range source are accepted with a range', () => {
+  const song = createSong({ title: 'A', lowestMidi: 48, highestMidi: 72, rangeSourceUrl: 'https://example.org/r', origin: 'ai' }, now);
+  assert.equal(song.origin, 'ai');
+  assert.equal(song.rangeSourceUrl, 'https://example.org/r');
+});
+
+test('bad origin, non-https source, and a source without a range are rejected', () => {
+  assert.throws(() => createSong({ title: 'A', origin: 'bot' }), /출처 구분/);
+  assert.throws(() => createSong({ title: 'A', lowestMidi: 48, highestMidi: 72, rangeSourceUrl: 'http://x.org' }), /음역 출처/);
+  assert.throws(() => createSong({ title: 'A', rangeSourceUrl: 'https://x.org' }), /음역 출처/);
+});
+
+test('normalizeSong upgrades songs saved before the new fields existed', () => {
+  const { rangeSourceUrl, origin, ...old } = createSong({ title: 'A' }, now);
+  const upgraded = normalizeSong(old);
+  assert.equal(upgraded.rangeSourceUrl, '');
+  assert.equal(upgraded.origin, 'user');
+  assert.equal(validateSong(upgraded), upgraded);
+  assert.throws(() => validateSong(old));
+});
+
+test('normalizeSong leaves a complete song byte-identical so backups round-trip', () => {
+  const song = createSong({ title: 'A', origin: 'ai' }, now);
+  assert.equal(JSON.stringify(normalizeSong(song)), JSON.stringify(song));
+});
+
+test('updateSong keeps origin unless the caller passes one', () => {
+  const ai = createSong({ title: 'A', origin: 'ai' }, now);
+  assert.equal(updateSong(ai, { note: 'x' }, now).origin, 'ai');
+  assert.equal(updateSong(ai, { origin: 'user' }, now).origin, 'user');
 });
 
 test('createSong accepts complete song metadata and update preserves identity', () => {
@@ -46,13 +79,44 @@ test('invalid title, range, offset, status, and URL are rejected', () => {
   assert.throws(() => createSong({ title: 'A', note: '가'.repeat(1001) }), /메모/);
 });
 
-test('searchSongs matches title or artist across case and whitespace, with status filter', () => {
+test('searchSongs matches title or artist across case and whitespace', () => {
   const songs = [
     createSong({ title: 'Love  Song', artist: 'The Singer', status: 'want' }, now),
     createSong({ title: '봄 날', artist: '아이유', status: 'comfortable' }, now),
   ];
   assert.deepEqual(searchSongs(songs, ' LOVESONG '), [songs[0]]);
   assert.deepEqual(searchSongs(songs, '  아이 유 '), [songs[1]]);
-  assert.deepEqual(searchSongs(songs, 'song', 'comfortable'), []);
-  assert.deepEqual(searchSongs(songs, '', 'want'), [songs[0]]);
+});
+
+test('songs saved before chest/falsetto fields gain their defaults and validate', () => {
+  const { falsettoHighestMidi, rangeQuote, vocal, octaveShift, ...old } = createSong({ title: 'A', lowestMidi: 48, highestMidi: 72 }, now);
+  const upgraded = normalizeSong(old);
+  assert.deepEqual([upgraded.falsettoHighestMidi, upgraded.rangeQuote, upgraded.vocal, upgraded.octaveShift], [null, '', null, 0]);
+  assert.equal(validateSong(upgraded), upgraded);
+});
+
+test('a highest note alone is enough, and a checked quote needs its source', () => {
+  const song = createSong({ title: 'A', highestMidi: 74, falsettoHighestMidi: 78, rangeSourceUrl: 'https://example.org/r', rangeQuote: '진성 3옥 레, 가성 3옥 파#', vocal: 'female', octaveShift: -12 }, now);
+  assert.deepEqual([song.lowestMidi, song.highestMidi, song.falsettoHighestMidi, song.vocal, song.octaveShift], [null, 74, 78, 'female', -12]);
+  assert.throws(() => createSong({ title: 'A', highestMidi: 74, falsettoHighestMidi: 74 }), /가성/);
+  assert.throws(() => createSong({ title: 'A', falsettoHighestMidi: 78 }), /가성/);
+  assert.throws(() => createSong({ title: 'A', highestMidi: 74, rangeQuote: '진성 3옥 레' }), /음역 출처/);
+  assert.throws(() => createSong({ title: 'A', highestMidi: 74, octaveShift: 5 }), /옥타브/);
+  assert.throws(() => createSong({ title: 'A', highestMidi: 74, vocal: 'robot' }), /보컬/);
+  assert.throws(() => createSong({ title: 'A', highestMidi: 74, rangeSourceUrl: 'https://example.org/r', rangeQuote: 'x'.repeat(121) }), /음역 출처/);
+});
+
+test('normalizeSong leaves a complete v2 song byte-identical', () => {
+  const song = createSong({ title: 'A', highestMidi: 74, rangeSourceUrl: 'https://example.org/r', rangeQuote: '3옥 레(D5)', vocal: 'male' }, now);
+  assert.equal(JSON.stringify(normalizeSong(song)), JSON.stringify(song));
+});
+
+test('a TJ number is up to six digits and old songs gain an empty one', () => {
+  assert.equal(createSong({ title: '어디에도', tjNumber: ' 46009 ' }, now).tjNumber, '46009');
+  assert.throws(() => createSong({ title: 'A', tjNumber: '4600a' }), /TJ 번호/);
+  assert.throws(() => createSong({ title: 'A', tjNumber: '1234567' }), /TJ 번호/);
+  const { tjNumber, ...old } = createSong({ title: 'A' }, now);
+  assert.equal(normalizeSong(old).tjNumber, '');
+  const full = createSong({ title: 'A', tjNumber: '46009', highestMidi: 74 }, now);
+  assert.equal(JSON.stringify(normalizeSong(full)), JSON.stringify(full));
 });

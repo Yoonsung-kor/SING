@@ -1,4 +1,6 @@
-import { validateSong } from './songs.js';
+import { validateSong, normalizeSong } from './songs.js';
+import { validatePlaylist, migrateLegacyStatuses, PLAYLIST_LIMITS } from './playlists.js';
+import { validateVoice } from './vocal-range.js';
 
 const DB_NAME = 'sing-practice';
 const DB_VERSION = 1;
@@ -10,7 +12,7 @@ const MAX_BACKUP_RECORDINGS = 5000;
 const COMFORT = ['comfortable', 'effort', 'unsure', 'pain'];
 
 export function defaultState() {
-  return { version: 1, sessions: [], draft: null, activities: [], songs: [], settings: { keepAudio: false } };
+  return { version: 1, sessions: [], draft: null, activities: [], songs: [], playlists: [], settings: { keepAudio: false, aiConsentAt: null, aiConsentVersion: null, voice: null, voiceOnboardingDismissedAt: null } };
 }
 
 function invalid(path) { throw new Error(`Invalid backup: ${path}`); }
@@ -104,14 +106,36 @@ function validateState(value) {
   boundedArray(value.activities, 'activities');
   value.activities.forEach((activity, i) => validateActivity(activity, `activities[${i}]`));
   uniqueIds(value.activities, 'activities');
+  let songs = [];
   if (value.songs !== undefined) {
     boundedArray(value.songs, 'songs');
-    value.songs.forEach(validateSong);
-    uniqueIds(value.songs, 'songs');
+    // Songs saved before rangeSourceUrl/origin existed gain their defaults here.
+    songs = value.songs.map(normalizeSong);
+    songs.forEach(validateSong);
+    uniqueIds(songs, 'songs');
+  }
+  let playlists;
+  if (value.playlists === undefined) playlists = migrateLegacyStatuses(songs);
+  else {
+    boundedArray(value.playlists, 'playlists', PLAYLIST_LIMITS.maxPlaylists);
+    const songIds = new Set(songs.map(song => song.id));
+    value.playlists.forEach(playlist => validatePlaylist(playlist, songIds));
+    uniqueIds(value.playlists, 'playlists');
+    playlists = value.playlists;
   }
   object(value.settings, 'settings');
   if (typeof value.settings.keepAudio !== 'boolean') invalid('settings.keepAudio');
-  return value.songs === undefined ? { ...value, songs: [] } : value;
+  const aiConsentAt = value.settings.aiConsentAt ?? null;
+  if (aiConsentAt !== null) timestamp(aiConsentAt, 'settings.aiConsentAt');
+  // Consents given before versioning covered OpenAI only: they count as version 1 and are asked again once.
+  let aiConsentVersion = value.settings.aiConsentVersion === undefined ? (aiConsentAt ? 1 : null) : value.settings.aiConsentVersion;
+  if (aiConsentAt === null) aiConsentVersion = null;
+  if (aiConsentVersion !== null && ![1, 2, 3].includes(aiConsentVersion)) invalid('settings.aiConsentVersion');
+  const voice = value.settings.voice ?? null;
+  if (voice !== null) { try { validateVoice(voice); } catch { invalid('settings.voice'); } }
+  const voiceOnboardingDismissedAt = value.settings.voiceOnboardingDismissedAt ?? null;
+  if (voiceOnboardingDismissedAt !== null) timestamp(voiceOnboardingDismissedAt, 'settings.voiceOnboardingDismissedAt');
+  return { ...value, songs, playlists, settings: { ...value.settings, aiConsentAt, aiConsentVersion, voice, voiceOnboardingDismissedAt } };
 }
 
 function recordingBytes(data) {

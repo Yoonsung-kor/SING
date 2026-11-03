@@ -1,6 +1,7 @@
 import { openStore, defaultState } from '/src/storage.js';
 import { createLesson, recordAttempt, finishLesson, addActivity } from '/src/lesson.js';
 import { createSong, updateSong } from '/src/songs.js';
+import { createPlaylist, addSong } from '/src/playlists.js';
 
 const name = `sing-practice-test-${crypto.randomUUID()}`;
 let store;
@@ -82,6 +83,26 @@ try {
     assert(JSON.stringify(await store.getState()) === JSON.stringify(withSong), 'song or lesson changed');
     const bytes = new Uint8Array(await (await store.getRecording('test-recording')).arrayBuffer());
     assert(bytes.join() === '0,1,2,251,255', 'audio bytes changed');
+  });
+  await check('플레이리스트도 백업 왕복 후 그대로', async () => {
+    const withList = { ...withSong, playlists: [addSong(createPlaylist([], '도전하기', now), song.id, now)] };
+    await store.saveState(withList);
+    const json = await store.exportData();
+    await store.clear();
+    await store.importData(json);
+    assert(JSON.stringify((await store.getState()).playlists) === JSON.stringify(withList.playlists), 'playlist changed');
+    await store.saveState(withSong);
+  });
+  await check('내 음역과 확인된 최고음이 있는 곡도 백업 왕복 후 바이트 그대로', async () => {
+    const checkedSong = createSong({ title: '사건의 지평선', artist: '윤하', highestMidi: 74, falsettoHighestMidi: 78, rangeSourceUrl: 'https://example.org/r', rangeQuote: '진성 3옥타브 레(D5), 가성 3옥타브 파#(F#5)', vocal: 'female', octaveShift: -12 }, now);
+    const voice = { comfortableHighMidi: 71, voiceType: 'male', method: 'songs', updatedAt: now.toISOString(), basis: [{ title: '사건의 지평선', artist: '윤하', highestMidi: 74, keyOffset: 0, octaveShift: -12, vocal: 'female' }] };
+    const withVoice = { ...withSong, songs: [...withSong.songs, checkedSong], settings: { ...withSong.settings, aiConsentAt: now.toISOString(), aiConsentVersion: 2, voice, voiceOnboardingDismissedAt: null } };
+    await store.saveState(withVoice);
+    const json = await store.exportData();
+    await store.clear();
+    await store.importData(json);
+    assert(JSON.stringify(await store.getState()) === JSON.stringify(withVoice), 'voice state changed');
+    await store.saveState(withSong);
   });
   await check('곡 수정·삭제 후 레슨과 원음 유지', async () => {
     const changed = updateSong(song, { title: '봄날 연습', status: 'practicing', keyOffset: 1 }, new Date('2026-09-28T01:00:00.000Z'));
