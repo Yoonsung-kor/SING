@@ -20,16 +20,37 @@ function voiceTypePicker(o) {
   return `<div class="voice-type" role="group" aria-label="주로 부르는 키"><span>주로 부르는 키</span>${option('male', '남자 키')}${option('female', '여자 키')}</div>`;
 }
 
-export function voiceResultsHtml(o) {
-  if (o.searching) return '<p class="subtle">찾고 있어요…</p>';
-  if (o.searchError) return `<p class="error-box" role="alert">${e(o.searchError)}</p>`;
-  if (!o.results) return '';
-  if (!o.results.length) return '<p class="subtle">찾는 곡이 없어요. 아래에서 직접 적어 주세요.</p>';
-  return `<div class="voice-results">${o.results.map((r, i) => `<button class="voice-result-item" data-action="voice-add" data-id="${i}"><span>${e(r.title)}<small>${r.artist ? ` · ${e(r.artist)}` : ''}</small></span><span aria-hidden="true">＋</span></button>`).join('')}</div>`;
+const SEARCH_STATUS = {
+  loading: '찾고 있어요…',
+  slow: '조금 오래 걸려요. 잠시만 기다려 주세요.',
+  empty: '찾는 곡이 없어요. 철자를 확인하거나 아래에서 직접 적어 주세요.',
+  error: '곡 검색이 안 돼요. 잠시 후 다시 찾거나 아래에서 직접 적어 주세요.',
+};
+
+/** Search results with their state: TJ numbers, fallback and retry notes, the artist list and '더 보기'. */
+export function searchResultsHtml(o) {
+  const s = o.search;
+  if (s.status === 'loading' || s.status === 'slow') return `<p class="subtle" role="status">${SEARCH_STATUS[s.status]}</p>`;
+  if (s.status === 'error') return `<p class="error-box" role="alert">${SEARCH_STATUS.error}</p>`;
+  if (s.status !== 'done') return '';
+  if (!s.results.length) return `<p class="subtle">${SEARCH_STATUS.empty}</p>`;
+  const notes = [s.source === 'musicbrainz' ? '노래방 번호 없이 찾은 결과예요' : '', s.retriedWith ? `‘${e(s.retriedWith)}’로 찾은 결과예요` : ''].filter(Boolean)
+    .map(note => `<p class="subtle search-note">${note}</p>`).join('');
+  const artistList = s.mode === 'search' && s.artist ? `<button class="text-button" data-action="search-artist">‘${e(s.artist)}’ 곡 전체 보기</button>` : '';
+  const heading = s.mode === 'artist' && s.artistTitle ? `<p class="subtle">‘${e(s.artistTitle)}’ 곡 전체 · ${s.results.length}곡${s.hasMore ? ' 이상' : ''}</p>` : '';
+  const rows = s.results.slice(0, s.shown).map((r, i) => `<button class="voice-result-item" data-action="voice-add" data-id="${i}"><span>${e(r.title)}<small>${r.artist ? ` · ${e(r.artist)}` : ''}${r.tjNumber ? ` · TJ ${e(r.tjNumber)}` : ''}</small></span><span aria-hidden="true">＋</span></button>`).join('');
+  const more = s.loadingMore ? '<p class="subtle" role="status">더 불러오고 있어요…</p>'
+    : s.shown < s.results.length || s.hasMore ? '<button class="button secondary small" data-action="search-more">더 보기</button>' : '';
+  return `${notes}${artistList}${heading}<div class="voice-results">${rows}</div>${more}`;
+}
+
+/** The search box with its pop toggle; shared by onboarding and '곡 찾아 담기'. */
+export function searchPanelHtml(o) {
+  return `<div class="form-field"><label for="voice-search">곡 제목이나 가수로 찾기</label><input id="voice-search" class="song-search" type="search" maxlength="120" value="${e(o.query)}" placeholder="예: 취중고백, 엠씨더맥스" autocomplete="off"></div><label class="checkbox-label search-pop"><input type="checkbox" id="search-pop"${o.scope === 'all' ? ' checked' : ''}> <span>팝송 포함</span></label><div id="voice-results" aria-live="polite">${searchResultsHtml(o)}</div>`;
 }
 
 function pickStatus(p) {
-  if (p.status === 'looking') return '<span class="pick-status">최고음 찾는 중…</span>';
+  if (p.status === 'looking') return `<span class="pick-status">${p.slow ? '최고음 찾는 중… 조금 오래 걸려요' : '최고음 찾는 중…'}</span>`;
   if (p.status === 'found') return `<span class="pick-status ok">${p.range.sourceQuote ? '최고음 찾음 ✓' : '최고음'} ${e(koreanNote(p.range.highestMidi))}</span>`;
   if (p.status === 'missing') return '<span class="pick-status no">최고음을 못 찾았어요 · 계산에서 빠져요</span>';
   return '<span class="pick-status no">지금은 찾지 못했어요</span>';
@@ -40,7 +61,7 @@ function pickRow(p, o) {
   const keys = Array.from({ length: 25 }, (_, i) => i - 12).map(value => `<option value="${value}"${value === p.keyOffset ? ' selected' : ''}>${keyText(value)}</option>`).join('');
   const octave = choice ? `<label class="checkbox-label pick-octave"><input type="checkbox" data-action="voice-octave" data-id="${e(p.key)}"${p.octaveShift !== 0 ? ' checked' : ''}> <span>${choice.shift < 0 ? '한 옥타브 아래로 불렀어요' : '한 옥타브 위로 불렀어요'}</span></label>` : '';
   const duet = p.vocal === 'mixed' ? `<p class="field-help">${DUET_NOTE}</p>` : '';
-  return `<article class="voice-pick-row"><div class="pick-head"><span class="pick-title">${e(p.title)}${p.artist ? `<small> · ${e(p.artist)}</small>` : ''}</span>${pickStatus(p)}</div><div class="pick-controls"><label class="pick-key"><span>불렀던 키</span><select name="pickKey" data-key="${e(p.key)}">${keys}</select></label><button class="text-button" data-action="voice-remove" data-id="${e(p.key)}">빼기</button></div>${octave}${duet}</article>`;
+  return `<article class="voice-pick-row"><div class="pick-head"><span class="pick-title">${e(p.title)}${p.artist ? `<small> · ${e(p.artist)}</small>` : ''}${p.tjNumber ? `<small> · TJ ${e(p.tjNumber)}</small>` : ''}</span>${pickStatus(p)}</div><div class="pick-controls"><label class="pick-key"><span>불렀던 키</span><select name="pickKey" data-key="${e(p.key)}">${keys}</select></label><button class="text-button" data-action="voice-remove" data-id="${e(p.key)}">빼기</button></div>${octave}${duet}</article>`;
 }
 
 export function voicePicksHtml(o) {
@@ -56,7 +77,7 @@ export function voiceActionsHtml(o) {
 
 export function voicePickView(v) {
   const o = v.onboarding;
-  return `<div class="narrow voice-pick"><button class="back-button" data-action="voice-intro">‹ 돌아가기</button><div class="lesson-header"><h1>자신 있게 부르는 곡</h1><p>고르는 동안 최고음을 미리 찾아둘게요. 불렀던 키도 골라 주세요.</p></div>${voiceTypePicker(o)}<div class="form-field"><label for="voice-search">곡 제목이나 가수로 찾기</label><input id="voice-search" class="song-search" type="search" maxlength="120" value="${e(o.query)}" placeholder="예: 취중고백" autocomplete="off"></div><div id="voice-results" aria-live="polite">${voiceResultsHtml(o)}</div><form id="voice-direct-form" class="voice-direct"><p class="field-help">검색에 없으면 직접 적어 주세요.</p><input name="title" maxlength="120" placeholder="노래 제목" required autocomplete="off"><input name="artist" maxlength="120" placeholder="가수" autocomplete="off"><button class="button secondary small" type="submit">추가</button></form><h2 class="voice-picked-title">고른 곡 ${o.picks.length}</h2><div id="voice-picks" class="voice-picks" aria-live="polite">${voicePicksHtml(o)}</div><div id="voice-actions" class="action-row">${voiceActionsHtml(o)}</div></div>`;
+  return `<div class="narrow voice-pick"><button class="back-button" data-action="voice-intro">‹ 돌아가기</button><div class="lesson-header"><h1>자신 있게 부르는 곡</h1><p>고르는 동안 최고음을 미리 찾아둘게요. 불렀던 키도 골라 주세요.</p></div>${voiceTypePicker(o)}${searchPanelHtml(o)}<form id="voice-direct-form" class="voice-direct"><p class="field-help">검색에 없으면 직접 적어 주세요.</p><input name="title" maxlength="120" placeholder="노래 제목" required autocomplete="off"><input name="artist" maxlength="120" placeholder="가수" autocomplete="off"><button class="button secondary small" type="submit">추가</button></form><h2 class="voice-picked-title">고른 곡 ${o.picks.length}</h2><div id="voice-picks" class="voice-picks" aria-live="polite">${voicePicksHtml(o)}</div><div id="voice-actions" class="action-row">${voiceActionsHtml(o)}</div></div>`;
 }
 
 function basisLine(p) {

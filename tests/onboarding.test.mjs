@@ -31,7 +31,7 @@ test('the same song twice or a 21st song is not added', () => {
   for (let i = 1; i < MAX_PICKS; i++) onb = pick(onb, `곡${i}`).onboarding;
   assert.equal(onb.picks.length, 20);
   assert.equal(pick(onb, '스물한 번째').key, null);
-  assert.deepEqual(onb.picks[0], { key: '밤편지|아이유', title: '밤편지', artist: '아이유', keyOffset: 0, octaveShift: 0, octaveTouched: false, status: 'looking', range: null, vocal: null });
+  assert.deepEqual(onb.picks[0], { key: '밤편지|아이유', title: '밤편지', artist: '아이유', keyOffset: 0, octaveShift: 0, octaveTouched: false, status: 'looking', range: null, vocal: null, tjNumber: '' });
 });
 
 test('lookups set the default octave by voice type and vocal; untouched picks follow a later voice type change', () => {
@@ -135,4 +135,11 @@ test('final #6: fixing the result by hand keeps the picked songs, the basis and 
   assert.deepEqual(next.playlists.map(p => p.name), [LIST_NAME]);
   const nothingFound = applyLookup(pick({ ...startOnboarding(defaultState()), voiceType: 'female' }, '없는 곡').onboarding, '없는곡|', null);
   assert.equal(commitOnboarding(defaultState(), nothingFound, now, { manualMidi: 76 }).settings.voice.comfortableHighMidi, 76);
+});
+
+test('picks keep the TJ number they were found with', () => {
+  const { onboarding } = pick(startOnboarding(defaultState()), '어디에도', 'MC THE MAX');
+  assert.equal(onboarding.picks[0].tjNumber, '');
+  const withNumber = addPick(startOnboarding(defaultState()), { title: '어디에도', artist: 'MC THE MAX', tjNumber: '46009' });
+  assert.equal(withNumber.onboarding.picks[0].tjNumber, '46009');
 });

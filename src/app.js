@@ -8,8 +8,8 @@ import { createPlaylist, renamePlaylist, removeSong, applyMembership, removeSong
 import { buildRecommendationRequest, suggestKey, sameSong } from './recommend.js';
 import { playlistHomeResults } from './playlist-views.js';
 import { hasCurrentConsent, withConsent, withoutConsent } from './consent.js';
-import { shouldShowOnboarding, startOnboarding, addPick, applyLookup, setVoiceType, setPickKey, toggleOctave, removePick, onboardingResult, commitOnboarding, commitManual, dismissOnboarding } from './onboarding.js';
-import { voiceResultsHtml, voicePicksHtml, voiceActionsHtml } from './onboarding-views.js';
+import { shouldShowOnboarding, startOnboarding, addPick, applyLookup, setVoiceType, setPickKey, toggleOctave, removePick, onboardingResult, commitOnboarding, commitManual, dismissOnboarding, emptySearch, markSlow } from './onboarding.js';
+import { searchResultsHtml, voicePicksHtml, voiceActionsHtml } from './onboarding-views.js';
 import { RANGE_BOUNDS, candidateShift } from './vocal-range.js';
 
 const root = document.querySelector('#app');
@@ -51,6 +51,8 @@ let lookupQueue = [];
 let lookupActive = 0;
 let aiOffToastShown = false;
 const LOOKUP_CONCURRENCY = 3;
+const SEARCH_SLOW_MS = 3000;
+const LOOKUP_SLOW_MS = 15000;
 
 function toast(message) {
   const element = document.querySelector('#toast');
@@ -114,36 +116,61 @@ function refreshPicks() {
 
 function refreshResults() {
   const box = document.querySelector('#voice-results');
-  if (box && onboarding) box.innerHTML = voiceResultsHtml(onboarding);
+  if (box && onboarding) box.innerHTML = searchResultsHtml(onboarding);
 }
+
+const setSearch = change => { onboarding = { ...onboarding, search: { ...onboarding.search, ...change } }; };
 
 function scheduleSearch(query) {
   if (!onboarding) return;
   onboarding = { ...onboarding, query };
   clearTimeout(searchTimer);
-  if (!query.trim()) { onboarding = { ...onboarding, results: null, searching: false, searchError: '' }; refreshResults(); return; }
-  searchTimer = setTimeout(() => runSearch(query.trim()), 400);
+  if (!query.trim()) { searchToken++; onboarding = { ...onboarding, search: emptySearch() }; refreshResults(); return; }
+  searchTimer = setTimeout(() => runSearch({ term: query.trim() }), 400);
 }
 
-const SEARCH_FAILED = '곡 검색이 안 돼요. 아래에서 직접 입력해 주세요.';
+const SEARCH_FAILED = '곡 검색이 안 돼요. 잠시 후 다시 찾거나 아래에서 직접 적어 주세요.';
 
-async function runSearch(query) {
+/** One search request. append adds the next page to the rows already shown. */
+async function runSearch({ term, mode = 'search', page = 1, append = false, artistTitle = null }) {
   if (!onboarding || !hasCurrentConsent(state.settings)) return;
   const token = ++searchToken;
   const epoch = onboardingEpoch;
-  onboarding = { ...onboarding, searching: true, searchError: '' };
+  if (append) setSearch({ loadingMore: true });
+  else onboarding = { ...onboarding, search: { ...emptySearch(), status: 'loading', term, mode, artistTitle } };
   refreshResults();
-  let results = null;
-  let searchError = '';
+  // Past a few seconds the panel says it is taking long, so a slow answer never looks like no answer.
+  const slow = setTimeout(() => {
+    if (token === searchToken && epoch === onboardingEpoch && onboarding?.search.status === 'loading') { setSearch({ status: 'slow' }); refreshResults(); }
+  }, SEARCH_SLOW_MS);
+  let body = null;
   try {
-    const response = await fetch('/api/song-search?q=' + encodeURIComponent(query));
-    if (response.ok) results = (await response.json()).results;
-    else searchError = SEARCH_FAILED;
-  } catch { searchError = SEARCH_FAILED; }
+    const response = await fetch(`/api/song-search?q=${encodeURIComponent(term)}&scope=${onboarding.scope}&mode=${mode}&page=${page}`);
+    if (response.ok) body = await response.json();
+  } catch { /* network failure: body stays null */ }
+  clearTimeout(slow);
   if (token !== searchToken || epoch !== onboardingEpoch || !onboarding) return;
-  onboarding = { ...onboarding, searching: false, results: Array.isArray(results) ? results : null, searchError };
+  // The server dropped this request for a newer one, which will answer instead.
+  if (body?.stale) return;
+  if (!body || !Array.isArray(body.results)) {
+    if (append) { setSearch({ loadingMore: false }); toast(SEARCH_FAILED); }
+    else setSearch({ status: 'error' });
+    refreshResults();
+    return;
+  }
+  const previous = onboarding.search;
+  onboarding = { ...onboarding, search: {
+    ...previous, status: 'done', loadingMore: false, page, mode, hasMore: Boolean(body.hasMore), source: body.source,
+    results: append ? [...previous.results, ...body.results] : body.results,
+    retriedWith: append ? previous.retriedWith : body.retriedWith ?? null,
+    artist: append ? previous.artist : body.artist ?? null,
+    shown: append ? previous.shown + 20 : 20,
+  } };
   refreshResults();
 }
+
+// The term a follow-up request should use: an artist list keeps its own term, a search uses the term that found rows.
+const followUpTerm = search => search.mode === 'artist' ? search.term : search.retriedWith ?? search.term;
 
 function addOnboardingPick(song) {
   if (!onboarding || !song) return;
@@ -167,6 +194,11 @@ function pumpLookups() {
 async function runLookup(job) {
   const pick = onboarding?.picks.find(p => p.key === job.key);
   if (!pick) return;
+  const slow = setTimeout(() => { if (job.epoch === onboardingEpoch && onboarding) { onboarding = markSlow(onboarding, job.key); refreshPicks(); } }, LOOKUP_SLOW_MS);
+  try { await lookup(job, pick); } finally { clearTimeout(slow); }
+}
+
+async function lookup(job, pick) {
   // A song already saved with a checked top note needs no new AI call.
   const known = state.songs.find(song => sameSong(song, pick) && song.rangeQuote);
   let result = 'error';
@@ -692,7 +724,14 @@ async function handleVoice(action, id) {
     return navigate('songs');
   }
   if (action === 'voice-type') { onboarding = setVoiceType(onboarding, id); return render(); }
-  if (action === 'voice-add') return addOnboardingPick(onboarding.results?.[Number(id)]);
+  if (action === 'voice-add') return addOnboardingPick(onboarding.search.results[Number(id)]);
+  if (action === 'search-artist') return runSearch({ term: followUpTerm(onboarding.search), mode: 'artist', artistTitle: onboarding.search.artist });
+  if (action === 'search-more') {
+    const search = onboarding.search;
+    if (search.shown < search.results.length) { setSearch({ shown: search.shown + 20 }); return refreshResults(); }
+    if (search.hasMore) return runSearch({ term: followUpTerm(search), mode: search.mode, page: search.page + 1, append: true });
+    return;
+  }
   if (action === 'voice-remove') { onboarding = removePick(onboarding, id); return refreshPicks(); }
   if (action === 'voice-octave') { onboarding = toggleOctave(onboarding, id); return refreshPicks(); }
   if (action === 'voice-result') {
@@ -836,6 +875,11 @@ root.addEventListener('change', async event => {
     if (event.target.closest('#song-form')) readSongForm(event.target.form);
     if (event.target.name === 'pickKey' && onboarding) onboarding = setPickKey(onboarding, event.target.dataset.key, event.target.value);
     if (event.target.id === 'voice-create-list' && onboarding) onboarding = { ...onboarding, createList: event.target.checked };
+    if (event.target.id === 'search-pop' && onboarding) {
+      onboarding = { ...onboarding, scope: event.target.checked ? 'all' : 'kor' };
+      const search = onboarding.search;
+      if (search.term) runSearch({ term: search.term, mode: search.mode, artistTitle: search.artistTitle });
+    }
     if (event.target.id === 'keep-audio') await persist({ ...state, settings: { ...state.settings, keepAudio: event.target.checked } });
     if (event.target.id === 'backup-file') await importBackup(event.target.files[0]);
   } catch {

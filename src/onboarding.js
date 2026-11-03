@@ -15,6 +15,11 @@ const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 const defaultShift = (voiceType, vocal) => { const choice = octaveChoice(voiceType, vocal); return choice?.checked ? choice.shift : 0; };
 const updatePick = (onb, key, change) => ({ ...onb, picks: onb.picks.map(p => p.key === key ? { ...p, ...change(p) } : p) });
 
+/** Search panel state shared by onboarding and '곡 찾아 담기'. term is the text the last request used. */
+export function emptySearch() {
+  return { status: 'idle', results: [], source: 'tj', retriedWith: null, artist: null, artistTitle: null, hasMore: false, page: 1, mode: 'search', shown: 20, term: '', loadingMore: false };
+}
+
 export function shouldShowOnboarding(state, { demo, initialized }) {
   return Boolean(initialized) && !demo && !state.settings.voice && !state.settings.voiceOnboardingDismissedAt;
 }
@@ -24,16 +29,16 @@ export function startOnboarding(state) {
   const voice = state.settings.voice;
   const picks = (voice?.basis ?? []).map(b => ({
     key: keyOf(b.title, b.artist), title: b.title, artist: b.artist, keyOffset: b.keyOffset, octaveShift: b.octaveShift, octaveTouched: true,
-    status: b.highestMidi === null ? 'missing' : 'found', range: b.highestMidi === null ? null : { highestMidi: b.highestMidi }, vocal: b.vocal,
+    status: b.highestMidi === null ? 'missing' : 'found', range: b.highestMidi === null ? null : { highestMidi: b.highestMidi }, vocal: b.vocal, tjNumber: '',
   }));
-  return { voiceType: voice?.voiceType ?? null, query: '', results: null, searchError: '', picks, createList: true, manualMidi: voice?.comfortableHighMidi ?? 64, waiting: false };
+  return { kind: 'voice', voiceType: voice?.voiceType ?? null, query: '', scope: 'kor', search: emptySearch(), picks, createList: true, manualMidi: voice?.comfortableHighMidi ?? 64, waiting: false };
 }
 
-export function addPick(onb, { title, artist }) {
+export function addPick(onb, { title, artist, tjNumber = '' }) {
   const cleanTitle = String(title ?? '').trim(), cleanArtist = String(artist ?? '').trim();
   const key = keyOf(cleanTitle, cleanArtist);
   if (!cleanTitle || onb.picks.length >= MAX_PICKS || onb.picks.some(p => p.key === key)) return { onboarding: onb, key: null };
-  const added = { key, title: cleanTitle, artist: cleanArtist, keyOffset: 0, octaveShift: 0, octaveTouched: false, status: 'looking', range: null, vocal: null };
+  const added = { key, title: cleanTitle, artist: cleanArtist, keyOffset: 0, octaveShift: 0, octaveTouched: false, status: 'looking', range: null, vocal: null, tjNumber: /^\d{1,6}$/.test(String(tjNumber)) ? String(tjNumber) : '' };
   return { onboarding: { ...onb, picks: [...onb.picks, added] }, key };
 }
 
@@ -48,6 +53,11 @@ export function applyLookup(onb, key, result) {
 }
 
 /** A new voice type changes which octave move makes sense, so every pick goes back to the suggestion for it. */
+/** A lookup still running after a while: the row says it is taking long. */
+export function markSlow(onb, key) {
+  return updatePick(onb, key, p => p.status === 'looking' ? { slow: true } : {});
+}
+
 export function setVoiceType(onb, voiceType) {
   if (voiceType === onb.voiceType) return onb;
   return { ...onb, voiceType, picks: onb.picks.map(p => ({ ...p, octaveShift: defaultShift(voiceType, p.vocal), octaveTouched: false })) };
