@@ -93,12 +93,14 @@ test('twenty rows show first, with more available while rows or pages remain', (
   assert.match(searchResultsHtml(withSearch({ status: 'done', results: many, shown: 40, hasMore: true })), /search-more/);
 });
 
-test('the pick screen has a pop toggle, and a slow lookup says so', () => {
+test('the pick screen has a foreign-songs toggle, and a slow lookup says so', () => {
   let onb = { ...startOnboarding(defaultState()), voiceType: 'male' };
   const added = addPick(onb, { title: '어디에도', artist: 'MC THE MAX', tjNumber: '46009' });
   onb = markSlow(added.onboarding, added.key);
   const html = voicePickView({ state: consented, onboarding: onb });
   assert.match(html, /id="search-pop"/);
+  assert.match(html, /외국 노래 포함/);
+  assert.doesNotMatch(html, /팝송/);
   assert.match(html, /최고음 찾는 중… 조금 오래 걸려요/);
   assert.match(html, /TJ 46009/);
 });

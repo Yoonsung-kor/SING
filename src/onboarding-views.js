@@ -46,7 +46,7 @@ export function searchResultsHtml(o) {
 
 /** The search box with its pop toggle; shared by onboarding and '곡 찾아 담기'. */
 export function searchPanelHtml(o) {
-  return `<div class="form-field"><label for="voice-search">곡 제목이나 가수로 찾기</label><input id="voice-search" class="song-search" type="search" maxlength="120" value="${e(o.query)}" placeholder="예: 취중고백, 엠씨더맥스" autocomplete="off"></div><label class="checkbox-label search-pop"><input type="checkbox" id="search-pop"${o.scope === 'all' ? ' checked' : ''}> <span>팝송 포함</span></label><div id="voice-results" aria-live="polite">${searchResultsHtml(o)}</div>`;
+  return `<div class="form-field"><label for="voice-search">곡 제목이나 가수로 찾기</label><input id="voice-search" class="song-search" type="search" maxlength="120" value="${e(o.query)}" placeholder="예: 취중고백, 엠씨더맥스" autocomplete="off"></div><label class="checkbox-label search-pop"><input type="checkbox" id="search-pop"${o.scope === 'all' ? ' checked' : ''}> <span>외국 노래 포함</span></label><div id="voice-results" aria-live="polite">${searchResultsHtml(o)}</div>`;
 }
 
 function pickStatus(p) {
