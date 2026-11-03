@@ -69,11 +69,11 @@ test('song detail marks checked top notes, shows falsetto, and shows the key row
   assert.doesNotMatch(render(plain), /✓/);
   const barred = render(checked, withVoice);
   assert.match(barred, /class="key-row" role="img" aria-label="지금은 −3키로 부르면 편해요"/);
-  assert.match(barred, /원키도 연습 삼아 도전해 볼 만해요/);
+  assert.match(barred, /한 키씩 올리면서 원키까지 도전해 봐요/);
   assert.doesNotMatch(barred, /버거우면|내 키 /);
   const saved = render({ ...checked, keyOffset: -1 }, withVoice);
   assert.match(saved, /aria-label="지금은 −3키로 부르면 편해요"[\s\S]*>내 키 −1<\/text>/);
-  assert.match(saved, /저장한 내 키\(−1\)는 도전해 보기 좋아요/);
+  assert.match(saved, /저장한 내 키\(−1\)로 도전 중이에요\. 힘들면 −3키로 내려도 돼요/);
 });
 
 test('the song form looks up top notes, offers falsetto and octave fields, and links no source', () => {

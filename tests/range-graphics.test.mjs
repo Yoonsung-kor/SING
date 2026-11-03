@@ -45,13 +45,28 @@ test('key row rings my saved key, unless it is the original key or already the k
   assert.equal((keyRow(1, -10).match(/class="key-cell/g) || []).length, 21);
 });
 
-test('key guide speaks softly: what key fits now, and how the original or my saved key feels', () => {
-  assert.deepEqual(keyGuide(4), { main: '지금은 −4키로 부르면 편해요', sub: '원키는 연습하면서 한 키씩 올려 봐요' });
-  assert.deepEqual(keyGuide(2), { main: '지금은 −2키로 부르면 편해요', sub: '원키도 연습 삼아 도전해 볼 만해요' });
-  assert.deepEqual(keyGuide(0), { main: '원키 그대로 편하게 불러요', sub: '' });
-  assert.deepEqual(keyGuide(-3), { main: '원키 그대로 편하게 불러요', sub: '' });
-  assert.equal(keyGuide(4, -1).sub, '저장한 내 키(−1)는 도전해 보기 좋아요');
-  assert.equal(keyGuide(4, -4).sub, '저장한 내 키(−4)도 편하게 맞아요');
-  assert.equal(keyGuide(6, -1).sub, '저장한 내 키(−1)에서 조금 더 내려도 좋아요');
-  assert.equal(keyGuide(-2, 3).sub, '저장한 내 키(+3)는 도전해 보기 좋아요');
+test('key guide: the first line names the key that fits now', () => {
+  assert.equal(keyGuide(4).main, '지금은 −4키로 부르면 편해요');
+  assert.equal(keyGuide(1).main, '지금은 −1키로 부르면 편해요');
+  assert.equal(keyGuide(0).main, '원키 그대로 편하게 불러요');
+  assert.equal(keyGuide(-3).main, '원키 그대로 편하게 불러요');
+});
+
+test('key guide: the second line changes with how far the original key is', () => {
+  assert.equal(keyGuide(-2).sub, '+2키까지 올려도 편하게 부를 수 있어요');
+  assert.equal(keyGuide(0).sub, '원키가 내 최고음과 딱 맞아요');
+  assert.equal(keyGuide(1).sub, '원키와 한 키 차이예요. 원키로 도전해 봐도 좋아요');
+  assert.equal(keyGuide(2).sub, '−1키로 익숙해지면 원키에도 도전해 봐요');
+  assert.equal(keyGuide(3).sub, '한 키씩 올리면서 원키까지 도전해 봐요');
+  assert.equal(keyGuide(4).sub, '한 키씩 올려서 −1키까지는 도전해 볼 만해요');
+  assert.equal(keyGuide(5).sub, '한 키씩 올려서 −2키까지는 도전해 볼 만해요');
+});
+
+test('key guide: with a saved key, the second line is about that key', () => {
+  assert.equal(keyGuide(4, -6).sub, '저장한 내 키(−6)는 여유 있어요. 한 키 올려 봐도 좋아요');
+  assert.equal(keyGuide(4, -4).sub, '저장한 내 키(−4)가 딱 맞아요');
+  assert.equal(keyGuide(4, -1).sub, '저장한 내 키(−1)로 도전 중이에요. 힘들면 −4키로 내려도 돼요');
+  assert.equal(keyGuide(-2, 3).sub, '저장한 내 키(+3)로 도전 중이에요. 힘들면 원키로 내려도 돼요');
+  assert.equal(keyGuide(4, 1).sub, '저장한 내 키(+1)는 아직 높을 수 있어요. −1키부터 올려 봐요');
+  assert.equal(keyGuide(3, 1).sub, '저장한 내 키(+1)는 아직 높을 수 있어요. 원키부터 올려 봐요');
 });

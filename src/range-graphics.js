@@ -2,7 +2,6 @@
 // the key row answers "which karaoke key should I pick" (original key in the middle, the key that fits me marked).
 // Positions use SVG attributes and CSS classes only: the page's CSP blocks inline style attributes.
 import { koreanNote, noteLabel } from './notes.js';
-import { gapZone } from './vocal-range.js';
 
 export const STAFF = Object.freeze({ bottomLineY: 100, stepPx: 5, width: 250, height: 170 });
 const NOTE_X = 150;
@@ -47,23 +46,40 @@ export function staffSvg(midi, { band = true } = {}) {
 // gap below = song top note (in the octave I sing it) − my comfortable high, in semitones, at the original key.
 const KEY_LIMIT = 12;
 const keyText = key => key === 0 ? '원키' : `${key > 0 ? '+' : '−'}${Math.abs(key)}`;
+const keyWord = key => key === 0 ? '원키' : `${keyText(key)}키`;
+const clampKey = key => Math.max(-KEY_LIMIT, Math.min(KEY_LIMIT, key));
 
 /** The karaoke key that brings the song's top note down to my comfortable high; 0 when the original already fits. */
 export function fitKey(gap) {
   return gap > 0 ? -Math.min(gap, KEY_LIMIT) : 0;
 }
 
-/** Two soft lines: the key that fits now, then how the original key (or my saved key) would feel. */
+// The highest key that is still a challenge (top note 1–3 semitones above my comfortable high).
+const topChallengeKey = gap => clampKey(3 - gap);
+
+function originalLine(gap) {
+  if (gap < 0) return `${keyWord(clampKey(-gap))}까지 올려도 편하게 부를 수 있어요`;
+  if (gap === 0) return '원키가 내 최고음과 딱 맞아요';
+  if (gap === 1) return '원키와 한 키 차이예요. 원키로 도전해 봐도 좋아요';
+  if (gap === 2) return '−1키로 익숙해지면 원키에도 도전해 봐요';
+  if (gap === 3) return '한 키씩 올리면서 원키까지 도전해 봐요';
+  return `한 키씩 올려서 ${keyWord(topChallengeKey(gap))}까지는 도전해 볼 만해요`;
+}
+
+function savedLine(gap, savedKey) {
+  const left = gap + savedKey;
+  const saved = `저장한 내 키(${keyText(savedKey)})`;
+  if (left < 0) return `${saved}는 여유 있어요. 한 키 올려 봐도 좋아요`;
+  if (left === 0) return `${saved}가 딱 맞아요`;
+  if (left <= 3) return `${saved}로 도전 중이에요. 힘들면 ${keyWord(fitKey(gap))}로 내려도 돼요`;
+  return `${saved}는 아직 높을 수 있어요. ${keyWord(topChallengeKey(gap))}부터 올려 봐요`;
+}
+
+/** Two soft lines: the key that fits now, then a line that changes with how far the original key (or my saved key) is. */
 export function keyGuide(gap, savedKey = 0) {
   const fit = fitKey(gap);
-  const main = fit === 0 ? '원키 그대로 편하게 불러요' : `지금은 ${keyText(fit)}키로 부르면 편해요`;
-  if (savedKey) {
-    const zone = gapZone(gap + savedKey);
-    const saved = `저장한 내 키(${keyText(savedKey)})`;
-    return { main, sub: zone === 'easy' ? `${saved}도 편하게 맞아요` : zone === 'challenge' ? `${saved}는 도전해 보기 좋아요` : `${saved}에서 조금 더 내려도 좋아요` };
-  }
-  if (fit === 0) return { main, sub: '' };
-  return { main, sub: gapZone(gap) === 'challenge' ? '원키도 연습 삼아 도전해 볼 만해요' : '원키는 연습하면서 한 키씩 올려 봐요' };
+  const main = fit === 0 ? '원키 그대로 편하게 불러요' : `지금은 ${keyWord(fit)}로 부르면 편해요`;
+  return { main, sub: savedKey ? savedLine(gap, savedKey) : originalLine(gap) };
 }
 
 const ROW = Object.freeze({ width: 300, pad: 14, gap: 3, cellY: 18, cellHeight: 22 });

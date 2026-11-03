@@ -106,8 +106,8 @@ function section(items, { voice = myVoice, meta = {} } = {}) {
 
 test('cards show the key that fits me, an octave down for a woman\'s song in a man\'s key', () => {
   const html = section([v2(81, 'female'), v2(74)]);
-  assert.match(html, /최고음 3옥 라 ✓ · 한 옥타브 아래 기준<\/p><div class="key-row" role="img" aria-label="원키 그대로 편하게 불러요"/);
-  assert.match(html, /최고음 3옥 레 ✓<\/p><div class="key-row" role="img" aria-label="지금은 −3키로 부르면 편해요"[\s\S]*<strong>지금은 −3키로 부르면 편해요<\/strong><span>원키도 연습 삼아 도전해 볼 만해요<\/span>/);
+  assert.match(html, /최고음 3옥 라 ✓ · 한 옥타브 아래 기준<\/p><div class="key-row" role="img" aria-label="원키 그대로 편하게 불러요"[^]*?<span>\+2키까지 올려도 편하게 부를 수 있어요<\/span>/);
+  assert.match(html, /최고음 3옥 레 ✓<\/p><div class="key-row" role="img" aria-label="지금은 −3키로 부르면 편해요"[\s\S]*<strong>지금은 −3키로 부르면 편해요<\/strong><span>한 키씩 올리면서 원키까지 도전해 봐요<\/span>/);
   assert.doesNotMatch(html, /버거우면|range-bar/);
 });
 
