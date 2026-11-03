@@ -35,6 +35,7 @@ function checkFields(song) {
   if (song.lowestMidi !== null && (song.highestMidi === null || song.lowestMidi > song.highestMidi)) fail('음역은 최고음을 먼저 입력하고, 최저음은 최고음보다 낮게 입력해 주세요.');
   if (song.falsettoHighestMidi !== null && (song.highestMidi === null || song.falsettoHighestMidi <= song.highestMidi)) fail('최고음과 함께, 가성 최고음은 진성보다 높게 입력해 주세요.');
   if (!OCTAVE_SHIFTS.includes(song.octaveShift)) fail('부르는 옥타브를 확인해 주세요.');
+  if (typeof song.tjNumber !== 'string' || (song.tjNumber && !/^\d{1,6}$/.test(song.tjNumber))) fail('TJ 번호는 숫자 6자리까지 입력해 주세요.');
   if (song.vocal !== null && !VOCALS.includes(song.vocal)) fail('원곡 보컬 구분을 확인해 주세요.');
   if (!Number.isInteger(song.keyOffset) || song.keyOffset < -12 || song.keyOffset > 12) fail('키 조정은 -12~12 반음으로 입력해 주세요.');
   if (!STATUSES.includes(song.status)) fail('곡 상태를 확인해 주세요.');
@@ -53,6 +54,7 @@ export function normalizeSong(song) {
   return {
     ...song, rangeSourceUrl: song.rangeSourceUrl ?? '', origin: song.origin ?? 'user',
     falsettoHighestMidi: song.falsettoHighestMidi ?? null, rangeQuote: song.rangeQuote ?? '', vocal: song.vocal ?? null, octaveShift: song.octaveShift ?? 0,
+    tjNumber: song.tjNumber ?? '',
   };
 }
 
@@ -88,9 +90,10 @@ function buildFields(fields, base) {
     rangeQuote: pick('rangeQuote'),
     vocal: pick('vocal'),
     octaveShift: pick('octaveShift'),
+    tjNumber: pick('tjNumber'),
   };
   // Persist normalized text so search and the UI see the same values.
-  for (const key of ['title', 'artist', 'originalKey', 'lyricsUrl', 'note', 'rangeSourceUrl', 'rangeQuote']) {
+  for (const key of ['title', 'artist', 'originalKey', 'lyricsUrl', 'note', 'rangeSourceUrl', 'rangeQuote', 'tjNumber']) {
     if (typeof song[key] === 'string') song[key] = song[key].trim();
   }
   checkFields(song);
@@ -102,7 +105,7 @@ export function createSong(fields, now = new Date()) {
   const data = buildFields(fields, {
     title: undefined, artist: '', originalKey: '', lowestMidi: null,
     highestMidi: null, keyOffset: 0, status: 'want', lyricsUrl: '', note: '',
-    rangeSourceUrl: '', origin: 'user', falsettoHighestMidi: null, rangeQuote: '', vocal: null, octaveShift: 0,
+    rangeSourceUrl: '', origin: 'user', falsettoHighestMidi: null, rangeQuote: '', vocal: null, octaveShift: 0, tjNumber: '',
   });
   return { id: crypto.randomUUID(), ...data, createdAt: timestamp, updatedAt: timestamp };
 }

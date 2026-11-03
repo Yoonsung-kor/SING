@@ -81,3 +81,11 @@ test('the song form looks up top notes, offers falsetto and octave fields, and l
   assert.match(html, /최고음은 출처에서 확인한 값이에요 ✓/);
   assert.doesNotMatch(html, /<a[^>]*src\.org/);
 });
+
+test('the TJ number can be entered and is shown on cards and details', () => {
+  const song = createSong({ title: '어디에도', artist: 'MC THE MAX', tjNumber: '46009' });
+  const st = { ...defaultState(), songs: [song] };
+  assert.match(songFormView({ state: st, songDraft: song }), /name="tjNumber"[^>]*value="46009"|value="46009"[^>]*name="tjNumber"/);
+  assert.match(songDetailView({ state: st, selectedSongId: song.id }), /TJ 46009/);
+  assert.match(songResults(st.songs, ''), /TJ 46009/);
+});

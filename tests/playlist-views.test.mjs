@@ -121,3 +121,7 @@ test('without my range the section offers to set it, and a fallback pick says so
 test('final #16: the consent copy names the lowest note it also sends', () => {
   assert.match(aiConsentView({ state: defaultState(), selectedPlaylistId: 'p' }), /원곡 최고음·최저음/);
 });
+
+test('consent v3 says search terms go to TJ', () => {
+  assert.match(aiConsentView({ state: defaultState(), selectedPlaylistId: 'p' }), /TJ미디어/);
+});

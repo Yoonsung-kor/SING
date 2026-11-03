@@ -176,3 +176,11 @@ test('openStore reports unavailable IndexedDB', async () => {
   if (globalThis.indexedDB) return;
   await assert.rejects(openStore(), /IndexedDB.*unavailable/i);
 });
+
+test('consent version 3 is kept and an unknown version is rejected', () => {
+  const v3 = structuredClone(backup);
+  v3.state.settings = { ...v3.state.settings, aiConsentAt: '2026-11-03T01:00:00.000Z', aiConsentVersion: 3 };
+  assert.equal(parseBackup(JSON.stringify(v3)).state.settings.aiConsentVersion, 3);
+  v3.state.settings.aiConsentVersion = 4;
+  assert.throws(() => parseBackup(JSON.stringify(v3)));
+});

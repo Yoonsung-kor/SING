@@ -4,7 +4,7 @@ import { voiceIntroView, voicePickView, voiceResultView, voiceManualView, voiceC
 import { startOnboarding, addPick, applyLookup, setPickKey } from '../src/onboarding.js';
 import { defaultState } from '../src/storage.js';
 
-const consented = { ...defaultState(), settings: { ...defaultState().settings, aiConsentAt: '2026-11-03T01:00:00.000Z', aiConsentVersion: 2 } };
+const consented = { ...defaultState(), settings: { ...defaultState().settings, aiConsentAt: '2026-11-03T01:00:00.000Z', aiConsentVersion: 3 } };
 const checked = (highestMidi, vocal = 'male') => ({ highestMidi, falsettoHighestMidi: null, lowestMidi: null, sourceUrl: 'https://example.org/s', sourceQuote: `최고음 ${highestMidi}`, vocal });
 function withPick(voiceType, title, artist, result, keyOffset = 0) {
   let onb = { ...startOnboarding(defaultState()), voiceType };
@@ -57,4 +57,8 @@ test('manual entry stops at the range ends, and the home card offers to set or r
   const voice = { comfortableHighMidi: 71, voiceType: 'male', method: 'songs', updatedAt: '2026-11-03T01:00:00.000Z', basis: [] };
   const card = voiceCard({ ...defaultState(), settings: { ...defaultState().settings, voice } });
   assert.match(card, /편하게 내는 최고음[\s\S]*2옥 시 \(B4\)[\s\S]*다시 고르기/);
+});
+
+test('the intro says search terms go to TJ', () => {
+  assert.match(voiceIntroView({ state: defaultState() }), /TJ미디어/);
 });
