@@ -1,6 +1,6 @@
-// One consent covers OpenAI (recommendations, highest-note lookups, my comfortable high) and MusicBrainz (song search).
-// Version 2 added MusicBrainz and the comfortable high, so a version 1 consent is asked again once.
-export const AI_CONSENT_VERSION = 2;
+// One consent covers OpenAI (recommendations, highest-note lookups, my comfortable high) and song search (TJ Media, then MusicBrainz).
+// Version 2 added MusicBrainz and the comfortable high; version 3 added TJ Media search. Older consents are asked again once.
+export const AI_CONSENT_VERSION = 3;
 
 export function hasCurrentConsent(settings) {
   return Boolean(settings?.aiConsentAt) && settings.aiConsentVersion === AI_CONSENT_VERSION;

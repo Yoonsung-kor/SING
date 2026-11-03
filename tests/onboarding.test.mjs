@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   LIST_NAME, MAX_PICKS, shouldShowOnboarding, startOnboarding, addPick, applyLookup, setVoiceType, setPickKey,
-  toggleOctave, removePick, onboardingResult, commitOnboarding, commitManual, dismissOnboarding,
+  toggleOctave, removePick, onboardingResult, commitOnboarding, commitManual, dismissOnboarding, startPicker, commitPicks,
 } from '../src/onboarding.js';
 import { defaultState, parseBackup } from '../src/storage.js';
 import { createSong } from '../src/songs.js';
@@ -31,7 +31,7 @@ test('the same song twice or a 21st song is not added', () => {
   for (let i = 1; i < MAX_PICKS; i++) onb = pick(onb, `곡${i}`).onboarding;
   assert.equal(onb.picks.length, 20);
   assert.equal(pick(onb, '스물한 번째').key, null);
-  assert.deepEqual(onb.picks[0], { key: '밤편지|아이유', title: '밤편지', artist: '아이유', keyOffset: 0, octaveShift: 0, octaveTouched: false, status: 'looking', range: null, vocal: null });
+  assert.deepEqual(onb.picks[0], { key: '밤편지|아이유', title: '밤편지', artist: '아이유', keyOffset: 0, octaveShift: 0, octaveTouched: false, status: 'looking', range: null, vocal: null, tjNumber: '' });
 });
 
 test('lookups set the default octave by voice type and vocal; untouched picks follow a later voice type change', () => {
@@ -135,4 +135,57 @@ test('final #6: fixing the result by hand keeps the picked songs, the basis and 
   assert.deepEqual(next.playlists.map(p => p.name), [LIST_NAME]);
   const nothingFound = applyLookup(pick({ ...startOnboarding(defaultState()), voiceType: 'female' }, '없는 곡').onboarding, '없는곡|', null);
   assert.equal(commitOnboarding(defaultState(), nothingFound, now, { manualMidi: 76 }).settings.voice.comfortableHighMidi, 76);
+});
+
+test('picks keep the TJ number they were found with', () => {
+  const { onboarding } = pick(startOnboarding(defaultState()), '어디에도', 'MC THE MAX');
+  assert.equal(onboarding.picks[0].tjNumber, '');
+  const withNumber = addPick(startOnboarding(defaultState()), { title: '어디에도', artist: 'MC THE MAX', tjNumber: '46009' });
+  assert.equal(withNumber.onboarding.picks[0].tjNumber, '46009');
+});
+
+const pickFound = (picker, title, artist, tjNumber, result) => {
+  const added = addPick(picker, { title, artist, tjNumber });
+  return applyLookup(added.onboarding, added.key, result);
+};
+
+test('adding by search saves new songs with TJ numbers and checked tops into the list, and links songs already saved', () => {
+  const existing = createSong({ title: '어디에도', artist: 'MC THE MAX' }, now);
+  const list = createPlaylist([], '도전하기', now);
+  const voice = { comfortableHighMidi: 71, voiceType: 'male', method: 'songs', updatedAt: now.toISOString(), basis: [] };
+  const state = { ...defaultState(), songs: [existing], playlists: [list], settings: { ...defaultState().settings, voice } };
+  let picker = startPicker(state, list.id);
+  assert.deepEqual([picker.kind, picker.playlistId, picker.picks.length], ['songs', list.id, 0]);
+  picker = pickFound(picker, '어디에도', 'MC THE MAX', '46009', checked(74, 'male'));
+  picker = pickFound(picker, '사건의 지평선', '윤하', '49095', checked(74, 'female'));
+  picker = pickFound(picker, '없는 노래', '', '', null);
+  const next = commitPicks(state, picker, now);
+  assert.equal(next.songs.length, 3);
+  const linked = next.songs.find(s => s.id === existing.id);
+  assert.deepEqual([linked.tjNumber, linked.highestMidi, linked.rangeQuote], ['46009', 74, '최고음 74']);
+  const female = next.songs.find(s => s.title === '사건의 지평선');
+  assert.deepEqual([female.tjNumber, female.octaveShift, female.origin], ['49095', -12, 'user']);
+  assert.equal(next.songs.find(s => s.title === '없는 노래').highestMidi, null);
+  assert.equal(next.playlists[0].songIds.length, 3);
+  roundTrip(next);
+});
+
+test('adding by search without a list saves songs only; a missing list or a full library changes nothing', () => {
+  const state = defaultState();
+  const loose = commitPicks(state, pickFound(startPicker(state, null), '밤편지', 'IU', '', checked(71)), now);
+  assert.deepEqual([loose.songs.length, loose.playlists], [1, state.playlists]);
+  const gone = pickFound(startPicker(state, crypto.randomUUID()), '밤편지', 'IU', '', checked(71));
+  assert.throws(() => commitPicks(state, gone, now), /플레이리스트를 찾지 못했어요/);
+  const full = { ...state, songs: Array.from({ length: 500 }, (_, i) => createSong({ title: `곡${i}` }, now)) };
+  const tooMany = pickFound(startPicker(full, null), '새 곡', '', '', null);
+  assert.throws(() => commitPicks(full, tooMany, now), /500곡/);
+  assert.throws(() => commitPicks(state, startPicker(state, null), now), /골라 주세요/);
+});
+
+test('final #4: adding a song that is already saved keeps the octave the user set', () => {
+  const kept = createSong({ title: '사건의 지평선', artist: '윤하', highestMidi: 74, vocal: 'female', octaveShift: 0 }, now);
+  const voice = { comfortableHighMidi: 71, voiceType: 'male', method: 'songs', updatedAt: now.toISOString(), basis: [] };
+  const state = { ...defaultState(), songs: [kept], settings: { ...defaultState().settings, voice } };
+  const picker = pickFound(startPicker(state, null), '사건의 지평선', '윤하', '49095', checked(74, 'female'));
+  assert.equal(commitPicks(state, picker, now).songs[0].octaveShift, 0);
 });

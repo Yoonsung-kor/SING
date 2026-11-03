@@ -53,10 +53,10 @@ test('asking again excludes the cards already shown', () => {
 
 test('toCandidates keeps up to 8 https songs, drops excluded and repeated ones, and passes claims through', () => {
   const claim = { chestHighest: 'D5', falsettoHighest: null, lowest: null, sourceUrl: 'https://s.org/x', sourceQuote: '최고음 3옥 레(D5)' };
-  const items = Array.from({ length: 11 }, (_, i) => ({ ...base, title: `곡${i}`, highest: i === 0 ? claim : null, vocal: i === 1 ? 'female' : 'robot' }));
+  const items = Array.from({ length: 11 }, (_, i) => ({ ...base, title: `곡${i}`, artist: `가수${i}`, highest: i === 0 ? claim : null, vocal: i === 1 ? 'female' : 'robot' }));
   items[2] = { ...items[2], title: '밤편지', artist: '아이유' };
   items[3] = { ...items[3], songUrl: 'http://example.org/x' };
-  items[4] = { ...items[4], title: '곡0 (Live)' };
+  items[4] = { ...items[4], title: '곡0 (Live)', artist: '가수0' };
   const { intent, candidates } = toCandidates({ intent: 'challenge', items }, [{ title: '밤편지', artist: '아이유' }]);
   assert.equal(intent, 'challenge');
   assert.equal(candidates.length, 8);
@@ -79,4 +79,10 @@ test('the request carries my comfortable high as a note name, and validation tur
   assert.throws(() => validateRecommendationRequest({ ...req, voice: { comfortableHigh: 'B4', voiceType: 'x' } }));
   const { voice: _, ...withoutVoice } = req;
   assert.equal(validateRecommendationRequest(withoutVoice).voice, null);
+});
+
+test('candidates keep one song per artist, comparing names loosely, and never merge empty artists', () => {
+  const song = (title, artist) => ({ title, artist, reason: '어울려요.', songUrl: 'https://example.org/s', highest: null, vocal: null });
+  const { candidates } = toCandidates({ intent: 'any', items: [song('좋은 날', 'IU'), song('밤편지', 'iu'), song('편지', '김종국'), song('좋겠다', '김종국'), song('제목1', ''), song('제목2', '')] }, []);
+  assert.deepEqual(candidates.map(c => c.title), ['좋은 날', '편지', '제목1', '제목2']);
 });

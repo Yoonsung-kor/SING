@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { comfortableHigh, octaveChoice, candidateShift, gapZone, keyHint, pickRecommendations } from '../src/vocal-range.js';
+import { comfortableHigh, octaveChoice, candidateShift, gapZone, pickRecommendations } from '../src/vocal-range.js';
 
 test('comfortable high is the highest sung top note among found songs, clamped', () => {
   assert.equal(comfortableHigh([{ highestMidi: 71, keyOffset: 0, octaveShift: 0 }, { highestMidi: 72, keyOffset: -2, octaveShift: 0 }, { highestMidi: null, keyOffset: 0, octaveShift: 0 }]), 71);
@@ -16,9 +16,8 @@ test('octave suggestions follow the spec table', () => {
   assert.equal(candidateShift('male', 'female'), -12); assert.equal(candidateShift('female', 'male'), 0);
 });
 
-test('zones split at 0/1 and 3/4 semitones; key hints only above', () => {
+test('zones split at 0/1 and 3/4 semitones', () => {
   assert.deepEqual([-5, 0, 1, 3, 4].map(gapZone), ['easy', 'easy', 'challenge', 'challenge', 'hard']);
-  assert.equal(keyHint(0), null); assert.equal(keyHint(3), '버거우면 −3키'); assert.equal(keyHint(20), '버거우면 −12키');
 });
 
 test('picking keeps intent matches first, then unchecked songs, and flags fallback', () => {

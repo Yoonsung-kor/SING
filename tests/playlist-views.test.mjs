@@ -28,6 +28,14 @@ test('playlist page lists newest songs first with remove buttons, and names are 
   assert.ok(html.includes('&lt;img') && !html.includes('<img'));
 });
 
+test('playlist song cards show the TJ number, so it can be read without opening the song', () => {
+  const numbered = createSong({ title: '바라보기', artist: 'MC THE MAX', tjNumber: '39408' }), plain = createSong({ title: '번호 없는 곡' });
+  const list = [numbered, plain].reduce((p, s) => addSong(p, s.id), createPlaylist([], '도전하기'));
+  const html = playlistView({ state: state([list], [numbered, plain]), selectedPlaylistId: list.id });
+  assert.match(html, /바라보기[^]*?<span class="song-tj">TJ 39408<\/span>[^]*?<\/article>/);
+  assert.equal((html.match(/class="song-tj"/g) || []).length, 1);
+});
+
 test('playlist form prefills a rename and shows an escaped error', () => {
   const html = playlistFormView({ playlistDraft: { id: 'x', name: '"퇴근길' }, playlistError: '<b>같은 이름</b>' });
   assert.ok(html.includes('value="&quot;퇴근길"') && html.includes('&lt;b&gt;'));
@@ -96,10 +104,11 @@ function section(items, { voice = myVoice, meta = {} } = {}) {
   return recommendationSection({ state: { ...defaultState(), settings, songs, playlists: [list] }, recLoading: null, recError: null }, list);
 }
 
-test('cards place each checked song on my bar, an octave down for a woman\'s song in a man\'s key', () => {
+test('cards show the key that fits me, an octave down for a woman\'s song in a man\'s key', () => {
   const html = section([v2(81, 'female'), v2(74)]);
-  assert.match(html, /aria-label="편한 구간"[\s\S]*최고음 3옥 라 ✓ · 편하게 부를 수 있어요 · 한 옥타브 아래 기준/);
-  assert.match(html, /aria-label="도전 구간, 반음 3개 위"[\s\S]*최고음 3옥 레 ✓ · 도전 \+3 · 버거우면 −3키/);
+  assert.match(html, /최고음 3옥 라 ✓ · 한 옥타브 아래 기준<\/p><div class="key-row" role="img" aria-label="원키 그대로 편하게 불러요"[^]*?<span>\+2키까지 올려도 편하게 부를 수 있어요<\/span>/);
+  assert.match(html, /최고음 3옥 레 ✓<\/p><div class="key-row" role="img" aria-label="지금은 −3키로 부르면 편해요"[\s\S]*<strong>지금은 −3키로 부르면 편해요<\/strong><span>한 키씩 올리면서 원키까지 도전해 봐요<\/span>/);
+  assert.doesNotMatch(html, /버거우면|range-bar/);
 });
 
 test('unchecked and old ranges never get a check mark, and no source is named or linked', () => {
@@ -120,4 +129,8 @@ test('without my range the section offers to set it, and a fallback pick says so
 
 test('final #16: the consent copy names the lowest note it also sends', () => {
   assert.match(aiConsentView({ state: defaultState(), selectedPlaylistId: 'p' }), /원곡 최고음·최저음/);
+});
+
+test('consent v3 says search terms go to TJ', () => {
+  assert.match(aiConsentView({ state: defaultState(), selectedPlaylistId: 'p' }), /TJ미디어/);
 });

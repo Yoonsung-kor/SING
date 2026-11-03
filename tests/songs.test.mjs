@@ -11,7 +11,7 @@ test('createSong supplies defaults and stable timestamps', () => {
     id: song.id, title: '봄날', artist: '', originalKey: '',
     lowestMidi: null, highestMidi: null, keyOffset: 0,
     status: 'want', lyricsUrl: '', note: '', rangeSourceUrl: '', origin: 'user',
-    falsettoHighestMidi: null, rangeQuote: '', vocal: null, octaveShift: 0,
+    falsettoHighestMidi: null, rangeQuote: '', vocal: null, octaveShift: 0, tjNumber: '',
     createdAt: now.toISOString(), updatedAt: now.toISOString(),
   });
   assert.equal(validateSong(song), song);
@@ -109,4 +109,14 @@ test('a highest note alone is enough, and a checked quote needs its source', () 
 test('normalizeSong leaves a complete v2 song byte-identical', () => {
   const song = createSong({ title: 'A', highestMidi: 74, rangeSourceUrl: 'https://example.org/r', rangeQuote: '3옥 레(D5)', vocal: 'male' }, now);
   assert.equal(JSON.stringify(normalizeSong(song)), JSON.stringify(song));
+});
+
+test('a TJ number is up to six digits and old songs gain an empty one', () => {
+  assert.equal(createSong({ title: '어디에도', tjNumber: ' 46009 ' }, now).tjNumber, '46009');
+  assert.throws(() => createSong({ title: 'A', tjNumber: '4600a' }), /TJ 번호/);
+  assert.throws(() => createSong({ title: 'A', tjNumber: '1234567' }), /TJ 번호/);
+  const { tjNumber, ...old } = createSong({ title: 'A' }, now);
+  assert.equal(normalizeSong(old).tjNumber, '');
+  const full = createSong({ title: 'A', tjNumber: '46009', highestMidi: 74 }, now);
+  assert.equal(JSON.stringify(normalizeSong(full)), JSON.stringify(full));
 });

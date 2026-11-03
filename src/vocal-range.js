@@ -39,10 +39,6 @@ export function gapZone(gap) {
   return gap <= 3 ? 'challenge' : 'hard';
 }
 
-export function keyHint(gap) {
-  return gap > 0 ? `버거우면 −${Math.min(gap, 12)}키` : null;
-}
-
 /** Up to three picks: checked songs that fit the list intent, then unchecked ones; checked misfits are dropped. */
 export function pickRecommendations(items, { voice, intent }) {
   const list = Array.isArray(items) ? items : [];

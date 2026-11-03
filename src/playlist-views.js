@@ -4,8 +4,8 @@ import { PLAYLIST_LIMITS } from './playlists.js';
 import { noteName } from './pitch.js';
 import { voiceCard } from './onboarding-views.js';
 import { koreanNote } from './notes.js';
-import { rangeBar, zoneText } from './range-graphics.js';
-import { candidateShift, keyHint } from './vocal-range.js';
+import { keyRow, keyGuideHtml } from './range-graphics.js';
+import { candidateShift } from './vocal-range.js';
 
 const e = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const songsById = state => new Map(state.songs.map(song => [song.id, song]));
@@ -45,8 +45,8 @@ function recommendationRange(item, listSongs, voice) {
   }
   const shift = candidateShift(voice.voiceType, item.vocal ?? null);
   const gap = range.highestMidi + shift - voice.comfortableHighMidi;
-  const notes = [gap > 0 ? keyHint(gap) : '', shift < 0 ? '한 옥타브 아래 기준' : '', item.vocal === 'mixed' ? '듀엣 곡' : ''].filter(Boolean);
-  return `${rangeBar(gap)}<p class="rec-meta">최고음 ${e(koreanNote(range.highestMidi))} ✓ · ${zoneText(gap)}${notes.map(n => ` · ${n}`).join('')}</p>`;
+  const notes = [shift < 0 ? '한 옥타브 아래 기준' : '', item.vocal === 'mixed' ? '듀엣 곡' : ''].filter(Boolean);
+  return `<p class="rec-meta">최고음 ${e(koreanNote(range.highestMidi))} ✓${notes.map(n => ` · ${n}`).join('')}</p>${keyRow(gap)}${keyGuideHtml(gap)}`;
 }
 
 function recommendationCard(item, index, listSongs, voice) {
@@ -78,7 +78,7 @@ export function recommendationSection(v, playlist) {
 
 export function aiConsentView(v) {
   const back = 'data-action="consent-back"';
-  return `<div class="narrow"><button class="back-button" ${back}>‹ 돌아가기</button><div class="lesson-header"><h1>AI 추천과 곡 검색을 쓰기 전에</h1><p>추천과 최고음 찾기는 OpenAI로, 곡 검색은 MusicBrainz로 아래 정보를 보내요.<br>처음 한 번만 확인할게요.</p></div><section class="surface"><h2>OpenAI로 보내는 정보</h2><ul class="instructions"><li>플레이리스트 이름</li><li>이 리스트에 담긴 곡의 제목·가수·내 노래방 키·원곡 최고음·최저음</li><li>이미 담아둔 모든 곡의 제목·가수 (같은 곡을 다시 추천하지 않으려고요)</li><li>이 리스트에서 ‘별로예요’를 누른 곡</li><li>내 편한 최고음 (알려주신 경우)</li></ul><p class="subtle">곡 정보와 온보딩의 ‘최고음 찾기’는 그 곡의 제목과 가수만 보내요.</p><h2>MusicBrainz로 보내는 정보</h2><p class="subtle">곡을 찾을 때 입력한 검색어만 보내요. MusicBrainz는 누구나 쓰는 공개 음악 데이터베이스예요.</p><p><strong>녹음, 허밍 기록, 연습 기록은 보내지 않아요.</strong></p><p class="subtle">동의는 ‘나의 기록 → 기록과 개인정보 관리’에서 언제든 철회할 수 있어요.</p></section><div class="action-row"><button class="button" data-action="ai-consent-accept">동의하고 계속하기</button><button class="button secondary" ${back}>돌아가기</button></div></div>`;
+  return `<div class="narrow"><button class="back-button" ${back}>‹ 돌아가기</button><div class="lesson-header"><h1>AI 추천과 곡 검색을 쓰기 전에</h1><p>추천과 최고음 찾기는 OpenAI로, 곡 검색은 TJ미디어(안 되면 MusicBrainz)로 아래 정보를 보내요.<br>처음 한 번만 확인할게요.</p></div><section class="surface"><h2>OpenAI로 보내는 정보</h2><ul class="instructions"><li>플레이리스트 이름</li><li>이 리스트에 담긴 곡의 제목·가수·내 노래방 키·원곡 최고음·최저음</li><li>이미 담아둔 모든 곡의 제목·가수 (같은 곡을 다시 추천하지 않으려고요)</li><li>이 리스트에서 ‘별로예요’를 누른 곡</li><li>내 편한 최고음 (알려주신 경우)</li></ul><p class="subtle">곡 정보와 온보딩의 ‘최고음 찾기’는 그 곡의 제목과 가수만 보내요.</p><h2>곡 검색어를 보내는 곳</h2><p class="subtle">곡을 찾을 때 입력한 검색어는 TJ미디어 노래방 검색으로 가요(안 되면 MusicBrainz). MusicBrainz는 누구나 쓰는 공개 음악 데이터베이스예요. 검색 결과는 이 기기에서만 보여주고 따로 모으지 않아요.</p><p><strong>녹음, 허밍 기록, 연습 기록은 보내지 않아요.</strong></p><p class="subtle">동의는 ‘나의 기록 → 기록과 개인정보 관리’에서 언제든 철회할 수 있어요.</p></section><div class="action-row"><button class="button" data-action="ai-consent-accept">동의하고 계속하기</button><button class="button secondary" ${back}>돌아가기</button></div></div>`;
 }
 
 export function playlistView(v) {
@@ -88,7 +88,7 @@ export function playlistView(v) {
   const songs = playlist.songIds.map(id => byId.get(id)).filter(Boolean).reverse();
   const id = e(playlist.id);
   const list = songs.length
-    ? `<div class="playlist-songs">${songs.map(song => `<article class="playlist-song"><button class="song-title" data-action="song-detail" data-id="${e(song.id)}">${e(song.title)}<span aria-hidden="true">↗</span></button><p class="song-artist">${e(song.artist) || '가수 미입력'}</p><div class="playlist-song-meta"><span class="song-key">내 키 <strong>${keyLabel(song.keyOffset)}</strong></span><button class="text-button" data-action="playlist-remove-song" data-id="${e(song.id)}">빼기</button></div></article>`).join('')}</div>`
+    ? `<div class="playlist-songs">${songs.map(song => `<article class="playlist-song"><button class="song-title" data-action="song-detail" data-id="${e(song.id)}">${e(song.title)}<span aria-hidden="true">↗</span></button><p class="song-artist">${e(song.artist) || '가수 미입력'}</p><div class="playlist-song-meta"><span class="playlist-song-tags"><span class="song-key">내 키 <strong>${keyLabel(song.keyOffset)}</strong></span>${song.tjNumber ? `<span class="song-tj">TJ ${e(song.tjNumber)}</span>` : ""}</span><button class="text-button" data-action="playlist-remove-song" data-id="${e(song.id)}">빼기</button></div></article>`).join('')}</div>`
     : '<div class="playlist-note">아직 담은 곡이 없어요. ‘＋ 곡 담기’로 시작해 보세요.</div>';
   return `<div class="narrow">${backToLists()}<section class="playlist-heading"><h1>${e(playlist.name)}</h1><p class="song-result-count">${songs.length}곡</p><div class="playlist-actions"><button class="button" data-action="song-add" data-id="${id}">＋ 곡 담기</button><button class="text-button" data-action="playlist-rename" data-id="${id}">이름 바꾸기</button><button class="text-button" data-action="playlist-delete" data-id="${id}">삭제</button></div></section>${list}${recommendationSection(v, playlist)}</div>`;
 }
