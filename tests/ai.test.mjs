@@ -21,6 +21,21 @@ test('sends a Responses API request with web search and a JSON schema', async ()
   assert.deepEqual(seen.body.reasoning, { effort: 'low' });
 });
 
+test('the recommendation schema asks for the list intent, each song\'s highest-note claim and its original vocal', async () => {
+  let seen;
+  const fetchImpl = async (url, init) => { seen = JSON.parse(init.body); return ok('{"intent":"any","items":[]}')(); };
+  await fetchRecommendations(request, { apiKey: 'k', model: 'm', fetchImpl });
+  const schema = seen.text.format.schema;
+  assert.deepEqual(schema.properties.intent.enum, ['comfortable', 'challenge', 'any']);
+  assert.ok(schema.properties.items.items.required.includes('highest'));
+  assert.ok(schema.properties.items.items.required.includes('vocal'));
+  assert.match(seen.instructions, /8/);
+  assert.match(seen.instructions, /comfortableHigh/);
+  assert.match(seen.instructions, /한 가수당 1곡/);
+  assert.match(seen.instructions, /hiA = A4/);
+  assert.doesNotMatch(seen.instructions, /나무위키|namu/i);
+});
+
 test('both lookups wait up to 60 seconds by default before timing out', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   for (const call of [fetchImpl => fetchRecommendations(request, { apiKey: 'k', model: 'm', fetchImpl }), fetchImpl => fetchSongRange({ title: '봄날', artist: '' }, { apiKey: 'k', model: 'm', fetchImpl })]) {
@@ -49,4 +64,15 @@ test('song range lookup asks for one range with the same notation rule', async (
   assert.deepEqual(seen.reasoning, { effort: 'low' });
   assert.ok(seen.input.includes('봄날'));
   assert.match(seen.instructions, /2옥타브 라 = A4/);
+});
+
+test('song range lookup v2 asks for chest, falsetto, the exact quote and the original vocal', async () => {
+  let seen;
+  const fetchImpl = async (url, init) => { seen = JSON.parse(init.body); return ok('{"found":false}')(); };
+  await fetchSongRange({ title: '밤편지', artist: '아이유' }, { apiKey: 'k', model: 'm', fetchImpl });
+  assert.deepEqual(seen.text.format.schema.required, ['found', 'chestHighest', 'falsettoHighest', 'lowest', 'sourceUrl', 'sourceQuote', 'vocal']);
+  assert.match(seen.instructions, /hiA = A4/);
+  assert.match(seen.instructions, /2옥타브 라 = A4/);
+  assert.doesNotMatch(seen.instructions, /hiA = A5/);
+  assert.doesNotMatch(seen.instructions, /나무위키|namu/i);
 });

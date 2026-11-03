@@ -1,8 +1,13 @@
 import { localDay, weekDays, summarizeLesson, recommendedNote } from './lesson.js';
+import { hasCurrentConsent } from './consent.js';
 import { noteName } from './pitch.js';
 import { songFormView, songDetailView } from './song-views.js';
 import { HUM_SAMPLES, humSampleFor } from './voice.js';
 import { playlistHomeView, playlistView, playlistFormView, allSongsView, aiConsentView } from './playlist-views.js';
+import { voiceIntroView, voicePickView, voiceResultView, voiceManualView, songPickView } from './onboarding-views.js';
+
+// Onboarding pages need their state; after a reload there is none, so they fall back to the playlist home.
+const withOnboarding = view => v => v.onboarding ? view(v) : playlistHomeView(v);
 
 export const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const e = escapeHtml;
@@ -101,13 +106,19 @@ function result(v, history = false) {
   ${history ? `<section class="surface"><h2>시도별 기록</h2>${s.attempts.map((a, i) => `<div class="record-item"><div class="record-head"><div><h2>${i + 1}번째 · ${a.reliable ? e(note(a.midi)) : '미확인'}</h2><p>목표 ${a.targetMidi === null ? '자유롭게 시작' : e(note(a.targetMidi))} / ${e(comfortLabels[a.comfort])}</p></div>${a.recordingId ? button('듣기', 'play-saved', { class: 'secondary small', id: a.recordingId }) : ''}</div><div id="audio-${e(a.id)}"></div></div>`).join('')}${s.practice?.recordingId ? button('연습 녹음 듣기', 'play-saved', { class: 'secondary small', id: s.practice.recordingId }) : ''}<div id="saved-playback"></div></section>` : `<div class="action-row">${button('오늘은 여기까지 저장', 'save-session', { class: 'secondary', disabled: Boolean(v.busy) })}${s.stopReason !== 'pain' ? button('소리 없이 배우기', 'save-and-learn', { class: 'quiet', disabled: Boolean(v.busy) }) : ''}</div>`}</div>`;
 }
 
+function consentRow(settings) {
+  if (!settings.aiConsentAt) return '<div class="consent-row"><span>AI 추천과 곡 검색: 동의 안 함</span></div><p>추천이나 곡 검색을 쓸 때 무엇을 보내는지 먼저 보여드려요.</p>';
+  const status = hasCurrentConsent(settings) ? `동의함 · ${e(dateText(new Date(settings.aiConsentAt)))}` : '예전 동의 · 다음에 AI를 쓸 때 다시 확인해요';
+  return `<div class="consent-row"><span>AI 추천과 곡 검색: ${status}</span><button class="text-button" data-action="ai-consent-revoke">동의 철회</button></div>`;
+}
+
 function history(v) {
   return `<div class="narrow">${header('차곡차곡, 나의 기록.', '어제보다 높은 음보다,<br>내 목소리를 알아간 시간을 모아요.')}<section class="surface">${v.state.sessions.length ? v.state.sessions.slice().reverse().map(s => {
     const summary = summarizeLesson(s);
     return `<article class="record-item"><div class="record-head"><div><h2>${e(dateStringText(s.day))} · 편한 음 찾기</h2><p>${s.completedAt ? '탐색 마침' : '중간 기록'}${s.practice ? ' + 짧은 허밍' : ''}</p></div><span class="badge">허밍</span></div><div class="record-note">${summary.notes.length ? summary.notes.map(note).map(e).join(' / ') : '음높이 미확인 · 느낌 기록'}</div><div class="record-actions">${button('자세히 보기', 'detail', { class: 'secondary small', id: s.id })}${button('삭제', 'delete-session', { class: 'quiet small', id: s.id })}</div></article>`;
   }).join('') : `<div class="empty">${icon('history')}<h2>첫 기록을 기다리고 있어요</h2><p>편한 음을 찾아보고 오늘의 느낌을 남겨보세요.</p>${button('첫 레슨 시작하기', 'begin', { icon: 'arrow' })}</div>`}</section>
   ${v.state.activities.filter(a => a.type !== 'practice').length ? `<section class="surface"><h2>배움과 휴식</h2>${v.state.activities.filter(a => a.type !== 'practice').slice(-14).reverse().map(a => `<p>${e(dateStringText(a.day))} · ${a.type === 'learn' ? '연습 전 알아두기' : '목소리 쉬어가기'}</p>`).join('')}</section>` : ''}
-  <details class="settings"><summary>기록과 개인정보 관리</summary><p>이 브라우저에만 저장돼요. 사이트 데이터를 지우거나 저장 공간이 정리되면 기록이 없어질 수 있어요. 소중한 기록은 백업해 두세요.</p><label class="checkbox-label"><input id="keep-audio" type="checkbox" ${v.state.settings.keepAudio ? 'checked' : ''}><span>앞으로의 원음도 보관하기 (기존 녹음은 유지돼요)</span></label>${v.state.settings.aiConsentAt ? `<div class="consent-row"><span>AI 추천 동의 · ${e(dateText(new Date(v.state.settings.aiConsentAt)))}</span><button class="text-button" data-action="ai-consent-revoke">동의 철회</button></div>` : '<p>AI 추천 동의 전이에요. 추천을 받을 때 무엇을 보내는지 먼저 보여드려요.</p>'}<div class="action-row">${button('백업 내려받기', 'export', { class: 'secondary small', disabled: v.demo || Boolean(v.busy) })}${button('백업 가져오기', 'import', { class: 'secondary small', disabled: v.demo || Boolean(v.busy) })}</div><input class="file-input" type="file" id="backup-file" accept="application/json,.json"><p>곡과 플레이리스트도 함께 백업해요. 가져오면 현재 기록과 플레이리스트가 백업 내용으로 바뀝니다. 먼저 현재 기록을 백업해 주세요.</p>${button('모든 기록 삭제', 'clear', { class: 'quiet', disabled: v.demo || Boolean(v.busy) })}</details></div>`;
+  <details class="settings"><summary>기록과 개인정보 관리</summary><p>이 브라우저에만 저장돼요. 사이트 데이터를 지우거나 저장 공간이 정리되면 기록이 없어질 수 있어요. 소중한 기록은 백업해 두세요.</p><label class="checkbox-label"><input id="keep-audio" type="checkbox" ${v.state.settings.keepAudio ? 'checked' : ''}><span>앞으로의 원음도 보관하기 (기존 녹음은 유지돼요)</span></label>${consentRow(v.state.settings)}<div class="action-row">${button('백업 내려받기', 'export', { class: 'secondary small', disabled: v.demo || Boolean(v.busy) })}${button('백업 가져오기', 'import', { class: 'secondary small', disabled: v.demo || Boolean(v.busy) })}</div><input class="file-input" type="file" id="backup-file" accept="application/json,.json"><p>곡과 플레이리스트도 함께 백업해요. 가져오면 현재 기록과 플레이리스트가 백업 내용으로 바뀝니다. 먼저 현재 기록을 백업해 주세요.</p>${button('모든 기록 삭제', 'clear', { class: 'quiet', disabled: v.demo || Boolean(v.busy) })}</details></div>`;
 }
 
 function learn() {
@@ -125,7 +136,7 @@ function done(v) {
 }
 
 export function renderView(v) {
-  const renderers = { home, check, intro, explore: x => capture(x), result, practice: x => capture(x, true), done, history, detail: x => result(x, true), learn, rest, songs: playlistHomeView, playlist: playlistView, 'playlist-form': playlistFormView, 'all-songs': allSongsView, 'ai-consent': aiConsentView, 'song-form': songFormView, 'song-detail': songDetailView };
-  const nav = ['songs', 'playlist', 'playlist-form', 'all-songs', 'ai-consent', 'song-form', 'song-detail'].includes(v.page) ? 'songs' : v.page === 'learn' ? 'learn' : ['history', 'detail'].includes(v.page) ? 'history' : 'home';
+  const renderers = { home, check, intro, explore: x => capture(x), result, practice: x => capture(x, true), done, history, detail: x => result(x, true), learn, rest, songs: playlistHomeView, playlist: playlistView, 'playlist-form': playlistFormView, 'all-songs': allSongsView, 'ai-consent': aiConsentView, 'song-form': songFormView, 'song-detail': songDetailView, 'voice-intro': withOnboarding(voiceIntroView), 'voice-pick': withOnboarding(voicePickView), 'voice-result': withOnboarding(voiceResultView), 'voice-manual': withOnboarding(voiceManualView), 'song-pick': withOnboarding(songPickView) };
+  const nav = ['songs', 'playlist', 'playlist-form', 'all-songs', 'ai-consent', 'song-form', 'song-detail', 'voice-intro', 'voice-pick', 'voice-result', 'voice-manual', 'song-pick'].includes(v.page) ? 'songs' : v.page === 'learn' ? 'learn' : ['history', 'detail'].includes(v.page) ? 'history' : 'home';
   return `${v.demo ? '<div class="demo-banner">체험 모드 · 연습과 플레이리스트는 기기에 저장되지 않아요.<button data-action="exit-demo">체험 마치기</button></div>' : ''}<div class="wrap"><header class="site-header"><button class="brand" data-action="home" aria-label="SING 오늘의 연습"><span class="wordmark">sing<span>•</span></span><span class="brand-caption">나의 작은<br>보컬 연습실</span></button><nav class="navigation" aria-label="주요 메뉴">${[['home', '오늘의 연습', 'home'], ['songs', '뭐 부르지?', 'note'], ['learn', '알아두기', 'book'], ['history', '나의 기록', 'history']].map(([page, title, glyph]) => `<button class="nav-button ${nav === page ? 'active' : ''}" data-action="${page}" ${nav === page ? 'aria-current="page"' : ''}>${icon(glyph)}${title}</button>`).join('')}</nav></header><main id="main" class="page" tabindex="-1">${v.storageError ? `<div class="notice" role="alert">${e(v.storageError)} <button class="text-button" data-action="retry-storage">다시 저장</button></div>` : ''}${renderers[v.page]?.(v) || home(v)}</main><footer class="site-footer"><span>차근차근, 내 목소리의 속도로.<span class="prototype-label">개발 버전 0.1</span></span><span class="footer-lock">${icon('lock')}기록은 이 기기에만 · AI 추천은 동의할 때만</span></footer></div>`;
 }

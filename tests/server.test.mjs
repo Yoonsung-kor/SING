@@ -13,6 +13,28 @@ const start = opts => new Promise(resolve => {
 const post = (port, body, type = 'application/json') => fetch(`http://127.0.0.1:${port}/api/recommend`, { method: 'POST', headers: { 'Content-Type': type }, body });
 const valid = JSON.stringify({ playlistName: '도전하기', songs: [1, 2, 3].map(n => ({ title: `곡${n}`, artist: '', keyOffset: 0, lowestMidi: null, highestMidi: null, fromAi: false })), exclude: [], rejected: [] });
 
+test('song-search endpoint validates q and maps failures', async () => {
+  const get = (port, q, extra = '') => fetch(`http://127.0.0.1:${port}/api/song-search?q=${encodeURIComponent(q)}${extra}`);
+  let asked;
+  const answer = { results: [{ title: '밤편지', artist: '가수', tjNumber: '' }], source: 'musicbrainz', retriedWith: null, artist: null, hasMore: false };
+  const s = await start({ recommend: null, searchSongs: async args => { asked = args; return answer; } });
+  try {
+    assert.equal((await get(s.port, '  ')).status, 400);
+    assert.equal((await get(s.port, 'x'.repeat(121))).status, 400);
+    for (const bad of ['&scope=x', '&mode=x', '&page=0', '&page=21', '&page=1.5']) assert.equal((await get(s.port, '밤편지', bad)).status, 400, bad);
+    const ok = await get(s.port, '밤편지');
+    assert.equal(ok.status, 200);
+    assert.deepEqual(await ok.json(), answer);
+    assert.deepEqual(asked, { q: '밤편지', scope: 'kor', mode: 'search', page: 1 });
+    await get(s.port, '엠씨더맥스', '&scope=all&mode=artist&page=2');
+    assert.deepEqual(asked, { q: '엠씨더맥스', scope: 'all', mode: 'artist', page: 2 });
+  } finally { s.close(); }
+  const broken = await start({ recommend: null, searchSongs: async () => { throw new Error('down'); } });
+  try { assert.equal((await get(broken.port, '밤편지')).status, 502); } finally { broken.close(); }
+  const off = await start({ recommend: null });
+  try { assert.equal((await get(off.port, '밤편지')).status, 503); } finally { off.close(); }
+});
+
 test('static files keep their headers and secrets are never served', async () => {
   const { port, close } = await start({ recommend: null });
   const home = await fetch(`http://127.0.0.1:${port}/`);
@@ -26,21 +48,24 @@ test('static files keep their headers and secrets are never served', async () =>
 test('recommend endpoint validates input and maps failures to status codes', async () => {
   let received;
   const cases = [
-    [{ recommend: async body => { received = body; return [{ title: 'A' }]; } }, valid, 'application/json', 200],
+    [{ recommend: async body => { received = body; return { items: [{ title: 'A' }], intent: 'any', fallback: false }; } }, valid, 'application/json', 200],
+    [{ recommend: async () => ({ items: [], intent: 'challenge', fallback: false }) }, valid, 'application/json', 200],
     [{ recommend: async () => [] }, 'x'.repeat(1100000), 'application/json', 413],
     [{ recommend: async () => [] }, valid, 'text/plain', 415],
     [{ recommend: async () => [] }, '{bad', 'application/json', 400],
     [{ recommend: async () => [] }, JSON.stringify({ ...JSON.parse(valid), songs: [] }), 'application/json', 400],
     [{ recommend: null }, valid, 'application/json', 503],
     [{ recommend: async () => { throw new AiError('timeout', 't'); } }, valid, 'application/json', 504],
-    [{ recommend: async () => [] }, valid, 'application/json', 502],
+    [{ recommend: async () => null }, valid, 'application/json', 502],
   ];
   for (const [opts, body, type, status] of cases) {
     const { port, close } = await start(opts);
-    assert.equal((await post(port, body, type)).status, status, `${status}`);
-    close();
+    try { assert.equal((await post(port, body, type)).status, status, `${status}`); }
+    finally { close(); }
   }
   assert.equal(received.playlistName, '도전하기');
+  const shaped = await start({ recommend: async () => ({ items: [{ title: 'A' }], intent: 'challenge', fallback: true }) });
+  try { assert.deepEqual(await (await post(shaped.port, valid)).json(), { items: [{ title: 'A' }], intent: 'challenge', fallback: true }); } finally { shaped.close(); }
 });
 
 test('song-range endpoint validates input and returns a range or null', async () => {
@@ -66,6 +91,6 @@ test('a request at the app limits (500 songs, 200 rejected) fits under the body 
     rejected: Array.from({ length: 200 }, (_, i) => ({ title: `별로인 곡 ${i}`, artist: '가수' })),
   });
   assert.ok(Buffer.byteLength(big) > 16384);
-  const s = await start({ recommend: async () => [{ title: 'A' }] });
+  const s = await start({ recommend: async () => ({ items: [{ title: 'A' }], intent: 'any', fallback: false }) });
   try { assert.equal((await post(s.port, big)).status, 200); } finally { s.close(); }
 });

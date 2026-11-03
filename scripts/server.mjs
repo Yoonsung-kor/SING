@@ -56,10 +56,25 @@ async function handleJson(req, res, { maxBody, validate, run }) {
 const RECOMMEND_MAX_BODY = 1024 * 1024;
 const RANGE_MAX_BODY = 16 * 1024;
 
-export function createHandler({ root, recommend, lookupRange = null }) {
+async function handleSearch(req, res, searchSongs) {
+  const params = new URL(req.url, 'http://localhost').searchParams;
+  const q = (params.get('q') ?? '').trim();
+  const scope = params.get('scope') ?? 'kor';
+  const mode = params.get('mode') ?? 'search';
+  const page = Number(params.get('page') ?? '1');
+  if (!q || q.length > 120 || !['kor', 'all'].includes(scope) || !['search', 'artist'].includes(mode) || !Number.isInteger(page) || page < 1 || page > 20) {
+    return sendJson(res, 400, { error: 'bad-request' });
+  }
+  if (!searchSongs) return sendJson(res, 503, { error: 'not-configured' });
+  try { return sendJson(res, 200, await searchSongs({ q, scope, mode, page })); }
+  catch { return sendJson(res, 502, { error: 'upstream' }); }
+}
+
+export function createHandler({ root, recommend, lookupRange = null, searchSongs = null }) {
+  // An empty list is a real answer ("no song fits"); only a missing result counts as an upstream failure.
   const recommendRun = recommend && (async body => {
-    const items = await recommend(body);
-    return Array.isArray(items) && items.length ? { items } : null;
+    const result = await recommend(body);
+    return result && Array.isArray(result.items) ? { items: result.items, intent: result.intent, fallback: result.fallback } : null;
   });
   const rangeRun = lookupRange && (async body => ({ range: await lookupRange(body) ?? null }));
   return async (req, res) => {
@@ -67,6 +82,7 @@ export function createHandler({ root, recommend, lookupRange = null }) {
       const pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
       if (req.method === 'POST' && pathname === '/api/recommend') return await handleJson(req, res, { maxBody: RECOMMEND_MAX_BODY, validate: validateRecommendationRequest, run: recommendRun });
       if (req.method === 'POST' && pathname === '/api/song-range') return await handleJson(req, res, { maxBody: RANGE_MAX_BODY, validate: validateRangeRequest, run: rangeRun });
+      if (req.method === 'GET' && pathname === '/api/song-search') return await handleSearch(req, res, searchSongs);
       if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405).end(); return; }
       const relative = pathname === '/' ? 'index.html' : pathname.slice(1);
       if (!/^(index\.html|src\/[\w.-]+|assets\/[\w.-]+|tests\/browser[\w.-]*)$/.test(relative)) { res.writeHead(404).end('Not found'); return; }

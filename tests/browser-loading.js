@@ -44,6 +44,13 @@ function waitForRenderAfter(action) {
     action();
   });
 }
+async function waitFor(selector, timeout = 3000) {
+  const started = Date.now();
+  while (!document.querySelector(selector)) {
+    if (Date.now() - started > timeout) throw new Error(`${selector} 없음`);
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+}
 function click(action) {
   const target = document.querySelector(`[data-action="${action}"]`);
   assert(target && !target.disabled, `${action} 버튼 없음`);
@@ -119,6 +126,11 @@ try {
     click('exit-demo');
     assert(document.querySelector('#app')?.textContent.includes('이어서 연습하기'), '실제 레슨 초안이 보이지 않음');
     click('songs');
+    // The first real visit opens the '내 음역' onboarding; '나중에 할게요' saves the dismissal and returns to the lists.
+    if (document.querySelector('[data-action="voice-later"]')) {
+      click('voice-later');
+      await waitFor('[data-action="all-songs"]');
+    }
     // Layout A keeps every song under the '모든 곡' card rather than on the tab's first screen.
     click('all-songs');
     assert(document.querySelector('#main')?.textContent.includes(title), '실제 곡이 보이지 않음');
