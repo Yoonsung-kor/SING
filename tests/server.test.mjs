@@ -14,14 +14,20 @@ const post = (port, body, type = 'application/json') => fetch(`http://127.0.0.1:
 const valid = JSON.stringify({ playlistName: '도전하기', songs: [1, 2, 3].map(n => ({ title: `곡${n}`, artist: '', keyOffset: 0, lowestMidi: null, highestMidi: null, fromAi: false })), exclude: [], rejected: [] });
 
 test('song-search endpoint validates q and maps failures', async () => {
-  const get = (port, q) => fetch(`http://127.0.0.1:${port}/api/song-search?q=${encodeURIComponent(q)}`);
-  const s = await start({ recommend: null, searchSongs: async q => [{ title: q, artist: '가수' }] });
+  const get = (port, q, extra = '') => fetch(`http://127.0.0.1:${port}/api/song-search?q=${encodeURIComponent(q)}${extra}`);
+  let asked;
+  const answer = { results: [{ title: '밤편지', artist: '가수', tjNumber: '' }], source: 'musicbrainz', retriedWith: null, artist: null, hasMore: false };
+  const s = await start({ recommend: null, searchSongs: async args => { asked = args; return answer; } });
   try {
     assert.equal((await get(s.port, '  ')).status, 400);
     assert.equal((await get(s.port, 'x'.repeat(121))).status, 400);
+    for (const bad of ['&scope=x', '&mode=x', '&page=0', '&page=21', '&page=1.5']) assert.equal((await get(s.port, '밤편지', bad)).status, 400, bad);
     const ok = await get(s.port, '밤편지');
     assert.equal(ok.status, 200);
-    assert.deepEqual(await ok.json(), { results: [{ title: '밤편지', artist: '가수' }] });
+    assert.deepEqual(await ok.json(), answer);
+    assert.deepEqual(asked, { q: '밤편지', scope: 'kor', mode: 'search', page: 1 });
+    await get(s.port, '엠씨더맥스', '&scope=all&mode=artist&page=2');
+    assert.deepEqual(asked, { q: '엠씨더맥스', scope: 'all', mode: 'artist', page: 2 });
   } finally { s.close(); }
   const broken = await start({ recommend: null, searchSongs: async () => { throw new Error('down'); } });
   try { assert.equal((await get(broken.port, '밤편지')).status, 502); } finally { broken.close(); }

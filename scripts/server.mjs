@@ -57,10 +57,16 @@ const RECOMMEND_MAX_BODY = 1024 * 1024;
 const RANGE_MAX_BODY = 16 * 1024;
 
 async function handleSearch(req, res, searchSongs) {
-  const q = (new URL(req.url, 'http://localhost').searchParams.get('q') ?? '').trim();
-  if (!q || q.length > 120) return sendJson(res, 400, { error: 'bad-request' });
+  const params = new URL(req.url, 'http://localhost').searchParams;
+  const q = (params.get('q') ?? '').trim();
+  const scope = params.get('scope') ?? 'kor';
+  const mode = params.get('mode') ?? 'search';
+  const page = Number(params.get('page') ?? '1');
+  if (!q || q.length > 120 || !['kor', 'all'].includes(scope) || !['search', 'artist'].includes(mode) || !Number.isInteger(page) || page < 1 || page > 20) {
+    return sendJson(res, 400, { error: 'bad-request' });
+  }
   if (!searchSongs) return sendJson(res, 503, { error: 'not-configured' });
-  try { return sendJson(res, 200, { results: await searchSongs(q) }); }
+  try { return sendJson(res, 200, await searchSongs({ q, scope, mode, page })); }
   catch { return sendJson(res, 502, { error: 'upstream' }); }
 }
 
