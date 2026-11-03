@@ -55,12 +55,17 @@ function toClaim(highest) {
 export function toCandidates(raw, exclude) {
   const intent = INTENTS.includes(raw?.intent) ? raw.intent : 'any';
   const candidates = [];
+  // One song per artist, so three picks never come from the same singer. Unknown artists are not merged.
+  const artists = new Set();
   for (const item of Array.isArray(raw?.items) ? raw.items : []) {
     if (candidates.length >= MAX_CANDIDATES) break;
     if (!item || typeof item !== 'object') continue;
     const candidate = { title: trimmed(item.title), artist: trimmed(item.artist), reason: shortReason(item.reason), songUrl: trimmed(item.songUrl), claim: toClaim(item.highest), vocal: VOCALS.includes(item.vocal) ? item.vocal : null };
     if (!isValidRecItem({ ...candidate, range: null })) continue;
     if ([...exclude, ...candidates].some(other => sameSong(other, candidate))) continue;
+    const artistKey = normalizeKey(candidate.artist);
+    if (artistKey && artists.has(artistKey)) continue;
+    if (artistKey) artists.add(artistKey);
     candidates.push(candidate);
   }
   return { intent, candidates };

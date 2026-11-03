@@ -55,6 +55,7 @@ export const RECOMMEND_INSTRUCTIONS = [
   '규칙:',
   '1. intent를 정한다. 리스트 이름과 담긴 곡을 보고 편하게 부르는 곡이면 comfortable, 도전할 곡이면 challenge, 친구들과 신나게 부르는 곡처럼 음역이 중요하지 않으면 any다.',
   '2. 이 리스트에 어울리는 곡 8개를 고른다. voice가 있으면 intent에 맞춰 고른다: challenge는 원곡 최고음이 comfortableHigh보다 반음 1~3개 높은 곡, comfortable은 comfortableHigh 이하인 곡이다. 남자 키 사용자가 여자 곡을 부르면 한 옥타브 아래로 부른다고 본다.',
+  '   한 가수당 1곡까지만 고른다. 리스트에 이미 담긴 가수의 곡은 8개 중 2개까지만 고른다.',
   '3. 웹 검색으로 곡이 실제로 있는지 확인하고, 그 곡을 보여 주는 https 페이지 주소를 songUrl에 넣는다. 확인하지 못한 곡은 넣지 않는다.',
   '4. exclude와 rejected에 있는 곡은 고르지 않는다.',
   '5. reason은 한국어 한 문장, 80자 이내로 쓰고, 담긴 곡과의 공통점을 말한다.',

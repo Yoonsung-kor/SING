@@ -25,7 +25,7 @@ test('without a key the AI services are off', () => {
 });
 
 const pageFor = { 'https://example.org/c1': '<p>최고음 2옥타브 시(B4)</p>', 'https://example.org/c2': '<p>최고음 3옥타브 도(C5)</p>' };
-const candidate = (i, claim = null, vocal = 'male') => ({ title: `후보${i}`, artist: '가수', reason: '리스트와 어울려요.', songUrl: `https://example.org/song${i}`, highest: claim, vocal });
+const candidate = (i, claim = null, vocal = 'male') => ({ title: `후보${i}`, artist: `가수${i}`, reason: '리스트와 어울려요.', songUrl: `https://example.org/song${i}`, highest: claim, vocal });
 const claimOf = (note, url, quote) => ({ chestHighest: note, falsettoHighest: null, lowest: null, sourceUrl: url, sourceQuote: quote });
 const recBody = (voice, extra = {}) => ({ playlistName: '도전하기', songs: [], exclude: [], rejected: [], voice, ...extra });
 function fakeOpenAi({ intent, items }) {

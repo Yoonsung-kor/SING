@@ -31,6 +31,7 @@ test('the recommendation schema asks for the list intent, each song\'s highest-n
   assert.ok(schema.properties.items.items.required.includes('vocal'));
   assert.match(seen.instructions, /8/);
   assert.match(seen.instructions, /comfortableHigh/);
+  assert.match(seen.instructions, /한 가수당 1곡/);
   assert.match(seen.instructions, /hiA = A4/);
   assert.doesNotMatch(seen.instructions, /나무위키|namu/i);
 });
