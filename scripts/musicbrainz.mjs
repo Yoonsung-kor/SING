@@ -1,6 +1,7 @@
 // Song search through MusicBrainz (open music database). The server asks on the browser's behalf,
 // at most once a second as MusicBrainz requires, and drops queries the user has already typed past.
 import { normalizeKey } from '../src/recommend.js';
+import { createQueue, STALE } from './throttle.mjs';
 
 const USER_AGENT = 'SING/0.1 (class project; https://github.com/Yoonsung-kor/SING)';
 const ENDPOINT = 'https://musicbrainz.org/ws/2/recording?fmt=json&limit=15&query=';
@@ -25,36 +26,13 @@ export function toSearchResults(json) {
   return results;
 }
 
-export function createSearcher({ fetchImpl = fetch, now = Date.now, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), minIntervalMs = 1000 } = {}) {
-  let lastSent = -Infinity;
-  let chain = Promise.resolve();
-  let latest = 0;
-  let pending = 0;
-
+export function createSearcher({ fetchImpl = fetch, now = Date.now, sleep, minIntervalMs = 1000 } = {}) {
+  const run = createQueue({ now, sleep, minIntervalMs });
   async function send(q) {
     const response = await fetchImpl(ENDPOINT + encodeURIComponent(q), { headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' }, signal: AbortSignal.timeout(10000) });
     if (!response.ok) throw new Error(`MusicBrainz ${response.status}`);
     return toSearchResults(await response.json());
   }
-
-  return function search(q) {
-    const ticket = ++latest;
-    // Only a query that arrives when nothing is pending goes out no matter what; queued ones can go stale.
-    const queued = pending > 0;
-    pending++;
-    const run = chain.then(async () => {
-      if (queued && ticket !== latest) return [];
-      const wait = lastSent + minIntervalMs - now();
-      if (wait > 0) {
-        await sleep(wait);
-        // A newer query arrived while this one waited its turn; the user no longer needs it.
-        if (ticket !== latest) return [];
-      }
-      lastSent = now();
-      return send(q);
-    });
-    const settled = run.finally(() => { pending--; });
-    chain = settled.catch(() => {});
-    return settled;
-  };
+  // A query the user typed past while it waited its turn comes back empty.
+  return async q => { const results = await run(() => send(q)); return results === STALE ? [] : results; };
 }
