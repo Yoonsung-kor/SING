@@ -4,8 +4,8 @@ import { PLAYLIST_LIMITS } from './playlists.js';
 import { noteName } from './pitch.js';
 import { voiceCard } from './onboarding-views.js';
 import { koreanNote } from './notes.js';
-import { rangeBar, zoneText } from './range-graphics.js';
-import { candidateShift, keyHint } from './vocal-range.js';
+import { keyRow, keyGuideHtml } from './range-graphics.js';
+import { candidateShift } from './vocal-range.js';
 
 const e = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const songsById = state => new Map(state.songs.map(song => [song.id, song]));
@@ -45,8 +45,8 @@ function recommendationRange(item, listSongs, voice) {
   }
   const shift = candidateShift(voice.voiceType, item.vocal ?? null);
   const gap = range.highestMidi + shift - voice.comfortableHighMidi;
-  const notes = [gap > 0 ? keyHint(gap) : '', shift < 0 ? '한 옥타브 아래 기준' : '', item.vocal === 'mixed' ? '듀엣 곡' : ''].filter(Boolean);
-  return `${rangeBar(gap)}<p class="rec-meta">최고음 ${e(koreanNote(range.highestMidi))} ✓ · ${zoneText(gap)}${notes.map(n => ` · ${n}`).join('')}</p>`;
+  const notes = [shift < 0 ? '한 옥타브 아래 기준' : '', item.vocal === 'mixed' ? '듀엣 곡' : ''].filter(Boolean);
+  return `<p class="rec-meta">최고음 ${e(koreanNote(range.highestMidi))} ✓${notes.map(n => ` · ${n}`).join('')}</p>${keyRow(gap)}${keyGuideHtml(gap)}`;
 }
 
 function recommendationCard(item, index, listSongs, voice) {

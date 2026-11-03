@@ -1,8 +1,7 @@
 import { noteName } from './pitch.js';
 import { searchSongs } from './songs.js';
 import { koreanNote } from './notes.js';
-import { rangeBar, zoneText } from './range-graphics.js';
-import { keyHint } from './vocal-range.js';
+import { keyRow, keyGuideHtml } from './range-graphics.js';
 
 const e = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const note = midi => noteName(midi)?.label || '미입력';
@@ -46,10 +45,11 @@ function rangeFacts(song) {
   return `<div><dt>원곡 최고음</dt><dd>${e(top)}</dd></div>${song.lowestMidi !== null ? `<div><dt>원곡 최저음</dt><dd>${e(koreanNote(song.lowestMidi))}</dd></div>` : ''}<div><dt>내 노래방 키</dt><dd>${keyLabel(song.keyOffset)}</dd></div>${song.octaveShift ? `<div><dt>부르는 옥타브</dt><dd>${octaveName(song.octaveShift)}</dd></div>` : ''}${sung !== null && sung !== song.highestMidi && sung >= 0 && sung <= 127 ? `<div><dt>내가 부르는 최고음</dt><dd>${e(koreanNote(sung))}</dd></div>` : ''}`;
 }
 
-function myRangeBar(song, voice) {
+// The row starts from the original key in the octave I sing it; my saved karaoke key is ringed on it.
+function myKeyRow(song, voice) {
   if (!voice || song.highestMidi === null) return '';
-  const gap = song.highestMidi + song.keyOffset + song.octaveShift - voice.comfortableHighMidi;
-  return `<div class="song-range">${rangeBar(gap)}<p class="subtle">내 편한 최고음 기준 · ${zoneText(gap)}${gap > 0 ? ` · ${keyHint(gap)}` : ''}</p></div>`;
+  const gap = song.highestMidi + song.octaveShift - voice.comfortableHighMidi;
+  return `<div class="song-range">${keyRow(gap, song.keyOffset)}${keyGuideHtml(gap, song.keyOffset)}</div>`;
 }
 
 export function songDetailView(v) {
@@ -59,5 +59,5 @@ export function songDetailView(v) {
   const lists = (v.state.playlists || []).filter(p => p.songIds.includes(song.id)).map(p => e(p.name));
   const aiNote = song.origin !== 'ai' ? '' : voice ? '<div class="hint">AI 추천으로 담은 곡 · 원키로 담았어요. 불러본 뒤 키를 고쳐 주세요.</div>' : '<div class="hint">AI 추천으로 담은 곡 · 키는 추천값이에요. 불러본 뒤 곡 정보에서 고쳐 주세요.</div>';
   const origin = song.rangeQuote ? '최고음은 출처에서 확인한 값이에요. ' : song.rangeSourceUrl ? '예전에 AI가 찾은 값이라 아직 확인 전이에요. ' : '직접 입력한 정보예요. ';
-  return `<div class="narrow">${back()}<section class="song-detail-heading"><h1>${e(song.title)}</h1><p>${e(song.artist) || '가수 미입력'}${song.tjNumber ? ` · TJ ${e(song.tjNumber)}` : ''}</p><p class="song-lists">${lists.length ? `담긴 플레이리스트: ${lists.join(', ')}` : '아직 어느 플레이리스트에도 없어요.'}</p>${aiNote}</section><section class="surface"><h2>내가 적어둔 곡 정보</h2><dl class="song-detail-facts"><div><dt>원곡 키</dt><dd>${e(song.originalKey) || '아직 미입력'}</dd></div>${rangeFacts(song)}</dl>${myRangeBar(song, voice)}<p class="subtle">${origin}원곡·라이브·편곡 버전은 키나 음역이 다를 수 있어요.</p>${song.lyricsUrl ? `<a class="button secondary" href="${e(song.lyricsUrl)}" target="_blank" rel="noopener noreferrer">가사 페이지 열기 ↗</a>` : ''}</section><section class="surface"><h2>나를 위한 메모</h2><p class="song-full-note">${song.note ? e(song.note) : '아직 메모가 없어요. 직접 불러본 느낌을 남겨보세요.'}</p></section><div class="action-row"><button class="button" data-action="song-edit" data-id="${e(song.id)}">곡 정보 수정</button><button class="button quiet" data-action="song-delete" data-id="${e(song.id)}">곡 삭제</button></div><p class="subtle">곡과 플레이리스트도 이 기기에 저장돼요. ‘나의 기록 → 기록과 개인정보 관리’에서 함께 백업할 수 있어요.</p></div>`;
+  return `<div class="narrow">${back()}<section class="song-detail-heading"><h1>${e(song.title)}</h1><p>${e(song.artist) || '가수 미입력'}${song.tjNumber ? ` · TJ ${e(song.tjNumber)}` : ''}</p><p class="song-lists">${lists.length ? `담긴 플레이리스트: ${lists.join(', ')}` : '아직 어느 플레이리스트에도 없어요.'}</p>${aiNote}</section><section class="surface"><h2>내가 적어둔 곡 정보</h2><dl class="song-detail-facts"><div><dt>원곡 키</dt><dd>${e(song.originalKey) || '아직 미입력'}</dd></div>${rangeFacts(song)}</dl>${myKeyRow(song, voice)}<p class="subtle">${origin}원곡·라이브·편곡 버전은 키나 음역이 다를 수 있어요.</p>${song.lyricsUrl ? `<a class="button secondary" href="${e(song.lyricsUrl)}" target="_blank" rel="noopener noreferrer">가사 페이지 열기 ↗</a>` : ''}</section><section class="surface"><h2>나를 위한 메모</h2><p class="song-full-note">${song.note ? e(song.note) : '아직 메모가 없어요. 직접 불러본 느낌을 남겨보세요.'}</p></section><div class="action-row"><button class="button" data-action="song-edit" data-id="${e(song.id)}">곡 정보 수정</button><button class="button quiet" data-action="song-delete" data-id="${e(song.id)}">곡 삭제</button></div><p class="subtle">곡과 플레이리스트도 이 기기에 저장돼요. ‘나의 기록 → 기록과 개인정보 관리’에서 함께 백업할 수 있어요.</p></div>`;
 }
