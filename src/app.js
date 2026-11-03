@@ -8,8 +8,8 @@ import { createPlaylist, renamePlaylist, removeSong, applyMembership, removeSong
 import { buildRecommendationRequest, suggestKey, sameSong } from './recommend.js';
 import { playlistHomeResults } from './playlist-views.js';
 import { hasCurrentConsent, withConsent, withoutConsent } from './consent.js';
-import { shouldShowOnboarding, startOnboarding, addPick, applyLookup, setVoiceType, setPickKey, toggleOctave, removePick, onboardingResult, commitOnboarding, commitManual, dismissOnboarding, emptySearch, markSlow } from './onboarding.js';
-import { searchResultsHtml, voicePicksHtml, voiceActionsHtml } from './onboarding-views.js';
+import { shouldShowOnboarding, startOnboarding, addPick, applyLookup, setVoiceType, setPickKey, toggleOctave, removePick, onboardingResult, commitOnboarding, commitManual, dismissOnboarding, emptySearch, markSlow, startPicker, commitPicks } from './onboarding.js';
+import { searchResultsHtml, voicePicksHtml, pickActionsHtml } from './onboarding-views.js';
 import { RANGE_BOUNDS, candidateShift } from './vocal-range.js';
 
 const root = document.querySelector('#app');
@@ -39,6 +39,9 @@ let playlistError = '';
 let recLoading = null;
 let recError = null;
 let consentReturn = 'playlist';
+let pendingPickList = null;
+// Pages that own the shared pick state: onboarding and '곡 찾아 담기'.
+const isPickerPage = target => target.startsWith('voice-') || target === 'song-pick';
 let rangeToken = 0;
 let toastTimer;
 // '내 음역' onboarding: the epoch changes whenever onboarding restarts or the user leaves it,
@@ -84,7 +87,7 @@ function cancelCapture() {
 
 function navigate(target) {
   rangeToken++;
-  if (!target.startsWith('voice-')) leaveOnboarding();
+  if (!isPickerPage(target)) leaveOnboarding();
   cancelCapture();
   error = '';
   page = target;
@@ -105,11 +108,11 @@ function beginOnboarding(target) {
 
 // Partial updates keep focus in the search box while answers arrive.
 function refreshPicks() {
-  if (page !== 'voice-pick' || !onboarding) return;
+  if (!['voice-pick', 'song-pick'].includes(page) || !onboarding) return;
   const picks = document.querySelector('#voice-picks');
   const actions = document.querySelector('#voice-actions');
   if (picks) picks.innerHTML = voicePicksHtml(onboarding);
-  if (actions) actions.innerHTML = voiceActionsHtml(onboarding);
+  if (actions) actions.innerHTML = pickActionsHtml(onboarding);
   const title = document.querySelector('.voice-picked-title');
   if (title) title.textContent = '고른 곡 ' + onboarding.picks.length;
 }
@@ -217,9 +220,41 @@ async function lookup(job, pick) {
 }
 
 function advanceWhenReady() {
-  if (!onboarding?.waiting || onboarding.picks.some(p => p.status === 'looking') || page !== 'voice-pick') return;
-  onboarding = { ...onboarding, waiting: false };
-  navigate('voice-result');
+  if (!onboarding?.waiting || onboarding.picks.some(p => p.status === 'looking')) return;
+  if (onboarding.kind === 'songs' && page === 'song-pick') return savePicked();
+  if (onboarding.kind !== 'songs' && page === 'voice-pick') {
+    onboarding = { ...onboarding, waiting: false };
+    navigate('voice-result');
+  }
+}
+
+function beginPicker(playlistId) {
+  onboarding = startPicker(state, playlistId);
+  leaveOnboarding();
+  navigate('song-pick');
+}
+
+function openManualSongForm(playlistId) {
+  songDraft = { status: 'want', keyOffset: 0, lowestMidi: null, highestMidi: null, playlistIds: state.playlists.some(p => p.id === playlistId) ? [playlistId] : [] };
+  songError = '';
+  onboarding = null;
+  navigate('song-form');
+}
+
+async function savePicked() {
+  let next;
+  try { next = commitPicks(state, onboarding, new Date()); }
+  catch (err) { onboarding = { ...onboarding, waiting: false }; refreshPicks(); return toast(err.message); }
+  const { playlistId } = onboarding;
+  const count = onboarding.picks.length;
+  busy = 'saving'; render();
+  const saved = await persist(next);
+  busy = false;
+  if (!saved) return render();
+  onboarding = null;
+  selectedPlaylistId = playlistId && state.playlists.some(p => p.id === playlistId) ? playlistId : null;
+  navigate(selectedPlaylistId ? 'playlist' : 'all-songs');
+  toast(`${count}곡을 담았어요.`);
 }
 
 async function saveVoice(next, message) {
@@ -710,6 +745,12 @@ async function playSaved(id) {
 }
 
 async function handleVoice(action, id) {
+  if (action === 'pick-manual') return openManualSongForm(onboarding?.playlistId ?? null);
+  if (action === 'pick-save' || action === 'pick-save-now') {
+    if (!onboarding || onboarding.kind !== 'songs' || busy) return;
+    if (action === 'pick-save' && onboarding.picks.some(p => p.status === 'looking')) { onboarding = { ...onboarding, waiting: true }; return refreshPicks(); }
+    return savePicked();
+  }
   if (action === 'voice-start') return beginOnboarding(state.settings.voice && hasCurrentConsent(state.settings) ? 'voice-pick' : 'voice-intro');
   if (!onboarding) onboarding = startOnboarding(state);
   if (action === 'voice-intro') return navigate('voice-intro');
@@ -774,7 +815,7 @@ async function handle(action, id) {
   // Tapping the tab you are already on keeps an onboarding in progress instead of starting it over.
   if (action === 'songs' && page.startsWith('voice-') && onboarding) return;
   if (action === 'songs' && shouldShowOnboarding(state, { demo, initialized })) return beginOnboarding('voice-intro');
-  if (action.startsWith('voice-')) return handleVoice(action, id);
+  if (/^(voice|search|pick)-/.test(action)) return handleVoice(action, id);
   if (['home', 'learn', 'history', 'songs', 'all-songs'].includes(action)) return navigate(action);
   if (action === 'playlist-new' || action === 'playlist-rename') {
     if (!initialized && !demo) return toast('저장소가 준비되지 않았어요. 체험 모드에서 먼저 둘러볼 수 있어요.');
@@ -789,10 +830,14 @@ async function handle(action, id) {
   if (action === 'rec-add') return addRecommendation(id);
   if (action === 'rec-nope') return rejectRecommendationAt(id);
   if (action === 'song-range') return lookupSongRange();
-  if (action === 'consent-back') return navigate(consentReturn === 'song-form' ? 'song-form' : state.playlists.some(p => p.id === selectedPlaylistId) ? 'playlist' : 'songs');
+  if (action === 'consent-back') {
+    if (consentReturn === 'song-pick') return openManualSongForm(pendingPickList);
+    return navigate(consentReturn === 'song-form' ? 'song-form' : state.playlists.some(p => p.id === selectedPlaylistId) ? 'playlist' : 'songs');
+  }
   if (action === 'ai-consent-accept') {
     if (!(await persist({ ...state, settings: withConsent(state.settings, new Date()) }))) return;
     if (consentReturn === 'song-form') { navigate('song-form'); return lookupSongRange(); }
+    if (consentReturn === 'song-pick') return beginPicker(pendingPickList);
     navigate('playlist');
     return requestRecommendations(selectedPlaylistId);
   }
@@ -801,11 +846,15 @@ async function handle(action, id) {
     render();
     return toast('AI 추천과 곡 검색 동의를 철회했어요.');
   }
-  if (action === 'song-add' || action === 'song-edit') {
+  if (action === 'song-add') {
     if (!initialized && !demo) return toast('저장소가 준비되지 않았어요. 체험 모드에서 먼저 둘러볼 수 있어요.');
-    songDraft = action === 'song-edit'
-      ? { ...state.songs.find(s => s.id === id), playlistIds: state.playlists.filter(p => p.songIds.includes(id)).map(p => p.id) }
-      : { status: 'want', keyOffset: 0, lowestMidi: null, highestMidi: null, playlistIds: state.playlists.some(p => p.id === id) ? [id] : [] };
+    const listId = state.playlists.some(p => p.id === id) ? id : null;
+    if (!hasCurrentConsent(state.settings)) { pendingPickList = listId; consentReturn = 'song-pick'; return navigate('ai-consent'); }
+    return beginPicker(listId);
+  }
+  if (action === 'song-edit') {
+    if (!initialized && !demo) return toast('저장소가 준비되지 않았어요. 체험 모드에서 먼저 둘러볼 수 있어요.');
+    songDraft = { ...state.songs.find(s => s.id === id), playlistIds: state.playlists.filter(p => p.songIds.includes(id)).map(p => p.id) };
     songError = '';
     return navigate('song-form');
   }

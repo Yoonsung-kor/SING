@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { voiceIntroView, voicePickView, voiceResultView, voiceManualView, voiceCard, searchResultsHtml } from '../src/onboarding-views.js';
-import { startOnboarding, addPick, applyLookup, setPickKey, emptySearch, markSlow } from '../src/onboarding.js';
+import { voiceIntroView, voicePickView, voiceResultView, voiceManualView, voiceCard, searchResultsHtml, songPickView } from '../src/onboarding-views.js';
+import { startOnboarding, addPick, applyLookup, setPickKey, emptySearch, markSlow, startPicker } from '../src/onboarding.js';
 import { defaultState } from '../src/storage.js';
 
 const consented = { ...defaultState(), settings: { ...defaultState().settings, aiConsentAt: '2026-11-03T01:00:00.000Z', aiConsentVersion: 3 } };
@@ -101,4 +101,17 @@ test('the pick screen has a pop toggle, and a slow lookup says so', () => {
   assert.match(html, /id="search-pop"/);
   assert.match(html, /최고음 찾는 중… 조금 오래 걸려요/);
   assert.match(html, /TJ 46009/);
+});
+
+test('the add-by-search screen has no voice type, offers manual entry, and can save without waiting', () => {
+  const picker = startPicker(defaultState(), null);
+  const added = addPick(picker, { title: '어디에도', artist: 'MC THE MAX', tjNumber: '46009' });
+  const html = songPickView({ state: consented, onboarding: added.onboarding });
+  assert.doesNotMatch(html, /data-action="voice-type"/);
+  assert.match(html, /id="voice-search"/);
+  assert.match(html, /data-action="pick-manual"/);
+  assert.match(html, /data-action="pick-save"[^>]*>1곡 담기/);
+  assert.match(html, /내 노래방 키/);
+  const waiting = songPickView({ state: consented, onboarding: { ...added.onboarding, waiting: true } });
+  assert.match(waiting, /찾는 중인 곡을 기다리고 있어요…[\s\S]*data-action="pick-save-now"[^>]*>기다리지 않고 담기/);
 });

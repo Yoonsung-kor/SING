@@ -61,11 +61,24 @@ function pickRow(p, o) {
   const keys = Array.from({ length: 25 }, (_, i) => i - 12).map(value => `<option value="${value}"${value === p.keyOffset ? ' selected' : ''}>${keyText(value)}</option>`).join('');
   const octave = choice ? `<label class="checkbox-label pick-octave"><input type="checkbox" data-action="voice-octave" data-id="${e(p.key)}"${p.octaveShift !== 0 ? ' checked' : ''}> <span>${choice.shift < 0 ? '한 옥타브 아래로 불렀어요' : '한 옥타브 위로 불렀어요'}</span></label>` : '';
   const duet = p.vocal === 'mixed' ? `<p class="field-help">${DUET_NOTE}</p>` : '';
-  return `<article class="voice-pick-row"><div class="pick-head"><span class="pick-title">${e(p.title)}${p.artist ? `<small> · ${e(p.artist)}</small>` : ''}${p.tjNumber ? `<small> · TJ ${e(p.tjNumber)}</small>` : ''}</span>${pickStatus(p)}</div><div class="pick-controls"><label class="pick-key"><span>불렀던 키</span><select name="pickKey" data-key="${e(p.key)}">${keys}</select></label><button class="text-button" data-action="voice-remove" data-id="${e(p.key)}">빼기</button></div>${octave}${duet}</article>`;
+  return `<article class="voice-pick-row"><div class="pick-head"><span class="pick-title">${e(p.title)}${p.artist ? `<small> · ${e(p.artist)}</small>` : ''}${p.tjNumber ? `<small> · TJ ${e(p.tjNumber)}</small>` : ''}</span>${pickStatus(p)}</div><div class="pick-controls"><label class="pick-key"><span>${o.kind === 'songs' ? '내 노래방 키' : '불렀던 키'}</span><select name="pickKey" data-key="${e(p.key)}">${keys}</select></label><button class="text-button" data-action="voice-remove" data-id="${e(p.key)}">빼기</button></div>${octave}${duet}</article>`;
 }
 
 export function voicePicksHtml(o) {
   return o.picks.length ? o.picks.map(p => pickRow(p, o)).join('') : '<p class="subtle">아직 고른 곡이 없어요.</p>';
+}
+
+/** The bottom buttons for either screen. */
+export function pickActionsHtml(o) {
+  if (o.kind !== 'songs') return voiceActionsHtml(o);
+  if (o.waiting) return '<p class="subtle" role="status">찾는 중인 곡을 기다리고 있어요…</p><button class="button secondary" data-action="pick-save-now">기다리지 않고 담기</button>';
+  return `<button class="button" data-action="pick-save"${o.picks.length ? '' : ' disabled'}>${o.picks.length}곡 담기</button>`;
+}
+
+export function songPickView(v) {
+  const o = v.onboarding;
+  const list = o.playlistId ? (v.state.playlists || []).find(p => p.id === o.playlistId) : null;
+  return `<div class="narrow voice-pick song-pick"><button class="back-button" data-action="song-back">‹ 돌아가기</button><div class="lesson-header"><h1>곡 찾아 담기</h1><p>${list ? `‘${e(list.name)}’에 담아요. ` : ''}검색해서 고르면 최고음은 출처에서 찾아 채워요.</p></div>${searchPanelHtml(o)}<p class="field-help">찾는 곡이 없나요? <button class="text-button" data-action="pick-manual">직접 입력</button></p><h2 class="voice-picked-title">고른 곡 ${o.picks.length}</h2><div id="voice-picks" class="voice-picks" aria-live="polite">${voicePicksHtml(o)}</div><div id="voice-actions" class="action-row">${pickActionsHtml(o)}</div></div>`;
 }
 
 export function voiceActionsHtml(o) {
