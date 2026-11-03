@@ -28,6 +28,14 @@ test('playlist page lists newest songs first with remove buttons, and names are 
   assert.ok(html.includes('&lt;img') && !html.includes('<img'));
 });
 
+test('playlist song cards show the TJ number, so it can be read without opening the song', () => {
+  const numbered = createSong({ title: '바라보기', artist: 'MC THE MAX', tjNumber: '39408' }), plain = createSong({ title: '번호 없는 곡' });
+  const list = [numbered, plain].reduce((p, s) => addSong(p, s.id), createPlaylist([], '도전하기'));
+  const html = playlistView({ state: state([list], [numbered, plain]), selectedPlaylistId: list.id });
+  assert.match(html, /바라보기[^]*?<span class="song-tj">TJ 39408<\/span>[^]*?<\/article>/);
+  assert.equal((html.match(/class="song-tj"/g) || []).length, 1);
+});
+
 test('playlist form prefills a rename and shows an escaped error', () => {
   const html = playlistFormView({ playlistDraft: { id: 'x', name: '"퇴근길' }, playlistError: '<b>같은 이름</b>' });
   assert.ok(html.includes('value="&quot;퇴근길"') && html.includes('&lt;b&gt;'));
