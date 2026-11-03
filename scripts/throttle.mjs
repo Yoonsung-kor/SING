@@ -1,5 +1,6 @@
 // One request queue per outside service: requests leave at least minIntervalMs apart, and a request that had to
 // queue behind another is dropped (STALE) once a newer one has arrived, because the user has typed past it.
+// A job that makes several requests (a search and its retries) runs as one task and checks isStale() between them.
 export const STALE = Symbol('stale');
 
 export function createQueue({ now = Date.now, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), minIntervalMs = 1000 } = {}) {
@@ -20,7 +21,8 @@ export function createQueue({ now = Date.now, sleep = ms => new Promise(resolve 
         if (ticket !== latest) return STALE;
       }
       lastSent = now();
-      return task();
+      try { return await task({ isStale: () => ticket !== latest }); }
+      finally { lastSent = now(); }
     });
     const settled = result.finally(() => { pending--; });
     chain = settled.catch(() => {});

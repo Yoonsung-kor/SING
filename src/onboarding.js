@@ -143,7 +143,7 @@ export function commitPicks(state, picker, now = new Date()) {
   const list = picker.playlistId ? state.playlists.find(p => p.id === picker.playlistId) : null;
   if (picker.playlistId && !list) throw new Error('담을 플레이리스트를 찾지 못했어요. 목록에서 다시 골라 주세요.');
   const voice = state.settings.voice;
-  const picks = picker.picks.map(p => ({ ...p, octaveShift: voice ? candidateShift(voice.voiceType, p.vocal) : 0 }));
+  const picks = picker.picks.map(p => ({ ...p, octaveShift: voice && !state.songs.some(song => sameSong(song, p)) ? candidateShift(voice.voiceType, p.vocal) : 0 }));
   const { songs, ids } = savePicksToSongs(state, picks, now);
   const playlists = list ? state.playlists.map(p => p.id === list.id ? ids.reduce((acc, id) => addSong(acc, id, now), p) : p) : state.playlists;
   return { ...state, songs, playlists };

@@ -135,7 +135,7 @@ function scheduleSearch(query) {
 const SEARCH_FAILED = '곡 검색이 안 돼요. 잠시 후 다시 찾거나 아래에서 직접 적어 주세요.';
 
 /** One search request. append adds the next page to the rows already shown. */
-async function runSearch({ term, mode = 'search', page = 1, append = false, artistTitle = null }) {
+async function runSearch({ term, mode = 'search', page = 1, append = false, artistTitle = null, retried = false }) {
   if (!onboarding || !hasCurrentConsent(state.settings)) return;
   const token = ++searchToken;
   const epoch = onboardingEpoch;
@@ -153,8 +153,12 @@ async function runSearch({ term, mode = 'search', page = 1, append = false, arti
   } catch { /* network failure: body stays null */ }
   clearTimeout(slow);
   if (token !== searchToken || epoch !== onboardingEpoch || !onboarding) return;
-  // The server dropped this request for a newer one, which will answer instead.
-  if (body?.stale) return;
+  // The server dropped this request for a newer one. If this is still the latest search (another tab or device
+  // was the newer one), ask once more; a second drop shows the error so the panel never waits forever.
+  if (body?.stale) {
+    if (!retried) return runSearch({ term, mode, page, append, artistTitle, retried: true });
+    body = null;
+  }
   if (!body || !Array.isArray(body.results)) {
     if (append) { setSearch({ loadingMore: false }); toast(SEARCH_FAILED); }
     else setSearch({ status: 'error' });
@@ -745,7 +749,11 @@ async function playSaved(id) {
 }
 
 async function handleVoice(action, id) {
-  if (action === 'pick-manual') return openManualSongForm(onboarding?.playlistId ?? null);
+  if (action === 'pick-manual') {
+    const count = onboarding?.picks.length ?? 0;
+    if (count && !confirm(`고른 곡 ${count}개는 담지 않고 곡 정보 입력 화면으로 갈까요?`)) return;
+    return openManualSongForm(onboarding?.playlistId ?? null);
+  }
   if (action === 'pick-save' || action === 'pick-save-now') {
     if (!onboarding || onboarding.kind !== 'songs' || busy) return;
     if (action === 'pick-save' && onboarding.picks.some(p => p.status === 'looking')) { onboarding = { ...onboarding, waiting: true }; return refreshPicks(); }

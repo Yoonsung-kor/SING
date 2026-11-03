@@ -1,7 +1,6 @@
 // TJ Media karaoke search, read on demand only: one page per user search, nothing collected or stored.
 // TJ has no public API (checked 2026-11-03); its search page returns plain HTML, read here with regular expressions.
 import { normalizeKey } from '../src/recommend.js';
-import { STALE } from './throttle.mjs';
 
 const ENDPOINT = 'https://www.tjmedia.com/song/accompaniment_search';
 const USER_AGENT = 'SING/0.1 (class project; https://github.com/Yoonsung-kor/SING)';
@@ -22,8 +21,10 @@ const textOf = html => unescapeHtml(html.replace(/<[^>]*>/g, ' ')).replace(/\s+/
 /** Rows of { title, artist, tjNumber }; rows that do not fit the expected shape are skipped. */
 export function parseTjResults(html) {
   const rows = [];
-  const pattern = /<span class="num2">([^<]*)<\/span>[\s\S]*?<li class="grid-item title3">([\s\S]*?)<li class="grid-item title4 singer">([\s\S]*?)<\/li>/g;
-  for (const [, number, titleCell, artistCell] of String(html ?? '').matchAll(pattern)) {
+  for (const block of String(html ?? '').split(/<ul class="grid-container/).slice(1)) {
+    const match = /<span class="num2">([^<]*)<\/span>[\s\S]*?<li class="grid-item title3">([\s\S]*?)<li class="grid-item title4 singer">([\s\S]*?)<\/li>/.exec(block);
+    if (!match) continue;
+    const [, number, titleCell, artistCell] = match;
     const tjNumber = number.trim();
     const spans = [...titleCell.matchAll(/<span[^>]*>([\s\S]*?)<\/span>/g)].map(m => textOf(m[1])).filter(Boolean);
     const title = spans.at(-1) ?? '';
@@ -93,18 +94,14 @@ export function tjSearchUrl({ query, scope = 'kor', mode = 'search', page = 1 })
   return `${ENDPOINT}?${params}`;
 }
 
-/** One TJ search page through the given queue; throws when TJ cannot be reached or answers with an error. */
-export function createTjClient({ fetchImpl = fetch, queue }) {
+/** One TJ search page; throws when TJ cannot be reached or answers with an error. Spacing is the caller's queue. */
+export function createTjClient({ fetchImpl = fetch } = {}) {
   return async function search({ query, scope, mode, page }) {
-    const answer = await queue(async () => {
-      const response = await fetchImpl(tjSearchUrl({ query, scope, mode, page }), { headers: { 'User-Agent': USER_AGENT, Accept: 'text/html' }, signal: AbortSignal.timeout(TIMEOUT_MS) });
-      if (!response.ok) throw new Error(`TJ ${response.status}`);
-      const html = await response.text();
-      if (html.length > MAX_CHARS) throw new Error('TJ page too large');
-      return html;
-    });
-    if (answer === STALE) return STALE;
-    const rows = parseTjResults(answer);
+    const response = await fetchImpl(tjSearchUrl({ query, scope, mode, page }), { headers: { 'User-Agent': USER_AGENT, Accept: 'text/html' }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    if (!response.ok) throw new Error(`TJ ${response.status}`);
+    const html = await response.text();
+    if (html.length > MAX_CHARS) throw new Error('TJ page too large');
+    const rows = parseTjResults(html);
     return { rows, hasMore: rows.length >= PAGE_ROWS };
   };
 }

@@ -6,7 +6,7 @@ import { createSearcher } from './musicbrainz.mjs';
 import { createSongSearch } from './song-search.mjs';
 
 const QUERIES = ['엠씨더맥스', '앰씨더맥스', '바라보기', '너의 모든 순간', 'Hype Boy'];
-const search = createSongSearch({ tj: createTjClient({ queue: createQueue() }), musicbrainz: createSearcher() });
+const search = createSongSearch({ tj: createTjClient(), musicbrainz: createSearcher(), queue: createQueue() });
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 for (const q of QUERIES) {

@@ -64,6 +64,11 @@ function pickRow(p, o) {
   return `<article class="voice-pick-row"><div class="pick-head"><span class="pick-title">${e(p.title)}${p.artist ? `<small> · ${e(p.artist)}</small>` : ''}${p.tjNumber ? `<small> · TJ ${e(p.tjNumber)}</small>` : ''}</span>${pickStatus(p)}</div><div class="pick-controls"><label class="pick-key"><span>${o.kind === 'songs' ? '내 노래방 키' : '불렀던 키'}</span><select name="pickKey" data-key="${e(p.key)}">${keys}</select></label><button class="text-button" data-action="voice-remove" data-id="${e(p.key)}">빼기</button></div>${octave}${duet}</article>`;
 }
 
+/** A title typed by hand becomes a pick too (with its own top-note lookup). */
+function directFormHtml() {
+  return '<form id="voice-direct-form" class="voice-direct"><p class="field-help">검색에 없으면 직접 적어 주세요.</p><input name="title" maxlength="120" placeholder="노래 제목" required autocomplete="off"><input name="artist" maxlength="120" placeholder="가수" autocomplete="off"><button class="button secondary small" type="submit">추가</button></form>';
+}
+
 export function voicePicksHtml(o) {
   return o.picks.length ? o.picks.map(p => pickRow(p, o)).join('') : '<p class="subtle">아직 고른 곡이 없어요.</p>';
 }
@@ -78,7 +83,7 @@ export function pickActionsHtml(o) {
 export function songPickView(v) {
   const o = v.onboarding;
   const list = o.playlistId ? (v.state.playlists || []).find(p => p.id === o.playlistId) : null;
-  return `<div class="narrow voice-pick song-pick"><button class="back-button" data-action="song-back">‹ 돌아가기</button><div class="lesson-header"><h1>곡 찾아 담기</h1><p>${list ? `‘${e(list.name)}’에 담아요. ` : ''}검색해서 고르면 최고음은 출처에서 찾아 채워요.</p></div>${searchPanelHtml(o)}<p class="field-help">찾는 곡이 없나요? <button class="text-button" data-action="pick-manual">직접 입력</button></p><h2 class="voice-picked-title">고른 곡 ${o.picks.length}</h2><div id="voice-picks" class="voice-picks" aria-live="polite">${voicePicksHtml(o)}</div><div id="voice-actions" class="action-row">${pickActionsHtml(o)}</div></div>`;
+  return `<div class="narrow voice-pick song-pick"><button class="back-button" data-action="song-back">‹ 돌아가기</button><div class="lesson-header"><h1>곡 찾아 담기</h1><p>${list ? `‘${e(list.name)}’에 담아요. ` : ''}검색해서 고르면 최고음은 출처에서 찾아 채워요.</p></div>${searchPanelHtml(o)}${directFormHtml()}<p class="field-help">키·음역·메모까지 한 곡씩 적으려면 <button class="text-button" data-action="pick-manual">곡 정보 직접 입력</button></p><h2 class="voice-picked-title">고른 곡 ${o.picks.length}</h2><div id="voice-picks" class="voice-picks" aria-live="polite">${voicePicksHtml(o)}</div><div id="voice-actions" class="action-row">${pickActionsHtml(o)}</div></div>`;
 }
 
 export function voiceActionsHtml(o) {
@@ -90,7 +95,7 @@ export function voiceActionsHtml(o) {
 
 export function voicePickView(v) {
   const o = v.onboarding;
-  return `<div class="narrow voice-pick"><button class="back-button" data-action="voice-intro">‹ 돌아가기</button><div class="lesson-header"><h1>자신 있게 부르는 곡</h1><p>고르는 동안 최고음을 미리 찾아둘게요. 불렀던 키도 골라 주세요.</p></div>${voiceTypePicker(o)}${searchPanelHtml(o)}<form id="voice-direct-form" class="voice-direct"><p class="field-help">검색에 없으면 직접 적어 주세요.</p><input name="title" maxlength="120" placeholder="노래 제목" required autocomplete="off"><input name="artist" maxlength="120" placeholder="가수" autocomplete="off"><button class="button secondary small" type="submit">추가</button></form><h2 class="voice-picked-title">고른 곡 ${o.picks.length}</h2><div id="voice-picks" class="voice-picks" aria-live="polite">${voicePicksHtml(o)}</div><div id="voice-actions" class="action-row">${voiceActionsHtml(o)}</div></div>`;
+  return `<div class="narrow voice-pick"><button class="back-button" data-action="voice-intro">‹ 돌아가기</button><div class="lesson-header"><h1>자신 있게 부르는 곡</h1><p>고르는 동안 최고음을 미리 찾아둘게요. 불렀던 키도 골라 주세요.</p></div>${voiceTypePicker(o)}${searchPanelHtml(o)}${directFormHtml()}<h2 class="voice-picked-title">고른 곡 ${o.picks.length}</h2><div id="voice-picks" class="voice-picks" aria-live="polite">${voicePicksHtml(o)}</div><div id="voice-actions" class="action-row">${voiceActionsHtml(o)}</div></div>`;
 }
 
 function basisLine(p) {

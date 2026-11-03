@@ -18,7 +18,7 @@ const apiKey = process.env.OPENAI_API_KEY;
 const model = process.env.OPENAI_MODEL;
 // Song search needs no key, so it stays on even when the AI is off.
 // TJ first (one page per user search, nothing stored), MusicBrainz when TJ has nothing or is down.
-const search = createSongSearch({ tj: createTjClient({ queue: createQueue() }), musicbrainz: createSearcher() });
+const search = createSongSearch({ tj: createTjClient(), musicbrainz: createSearcher(), queue: createQueue() });
 const { lookupRange, recommend, searchSongs } = createServices({ apiKey, model, search });
 
 const server = http.createServer(createHandler({ root, recommend, lookupRange, searchSongs }));

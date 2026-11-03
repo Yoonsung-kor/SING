@@ -181,3 +181,11 @@ test('adding by search without a list saves songs only; a missing list or a full
   assert.throws(() => commitPicks(full, tooMany, now), /500곡/);
   assert.throws(() => commitPicks(state, startPicker(state, null), now), /골라 주세요/);
 });
+
+test('final #4: adding a song that is already saved keeps the octave the user set', () => {
+  const kept = createSong({ title: '사건의 지평선', artist: '윤하', highestMidi: 74, vocal: 'female', octaveShift: 0 }, now);
+  const voice = { comfortableHighMidi: 71, voiceType: 'male', method: 'songs', updatedAt: now.toISOString(), basis: [] };
+  const state = { ...defaultState(), songs: [kept], settings: { ...defaultState().settings, voice } };
+  const picker = pickFound(startPicker(state, null), '사건의 지평선', '윤하', '49095', checked(74, 'female'));
+  assert.equal(commitPicks(state, picker, now).songs[0].octaveShift, 0);
+});

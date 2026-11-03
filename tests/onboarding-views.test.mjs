@@ -115,3 +115,8 @@ test('the add-by-search screen has no voice type, offers manual entry, and can s
   const waiting = songPickView({ state: consented, onboarding: { ...added.onboarding, waiting: true } });
   assert.match(waiting, /찾는 중인 곡을 기다리고 있어요…[\s\S]*data-action="pick-save-now"[^>]*>기다리지 않고 담기/);
 });
+
+test('final #3: the add-by-search screen takes a typed title as a pick instead of leaving the screen', () => {
+  const html = songPickView({ state: consented, onboarding: startPicker(defaultState(), null) });
+  assert.match(html, /id="voice-direct-form"/);
+});

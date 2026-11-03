@@ -56,14 +56,30 @@ test('the queue runs a task on an idle queue and drops queued tasks the user typ
 });
 
 test('the TJ client identifies itself, throws on non-200 and reports hasMore for a full page', async () => {
-  const queue = createQueue({ now: () => 0, sleep: async () => {} });
-  const bad = createTjClient({ fetchImpl: async () => ({ ok: false, status: 503, text: async () => '' }), queue });
+  const bad = createTjClient({ fetchImpl: async () => ({ ok: false, status: 503, text: async () => '' }) });
   await assert.rejects(bad({ query: 'x', scope: 'kor', mode: 'search', page: 1 }));
   const full = Array.from({ length: 100 }, (_, i) => row(String(1000 + i), `곡${i}`, '가수')).join('');
   let seen;
-  const ok = createTjClient({ fetchImpl: async (url, init) => { seen = { url, ua: init.headers['User-Agent'] }; return { ok: true, status: 200, text: async () => full }; }, queue });
+  const ok = createTjClient({ fetchImpl: async (url, init) => { seen = { url, ua: init.headers['User-Agent'] }; return { ok: true, status: 200, text: async () => full }; } });
   const result = await ok({ query: '가수', scope: 'kor', mode: 'artist', page: 1 });
   assert.deepEqual([result.rows.length, result.hasMore], [100, true]);
   assert.match(seen.url, /strType=2/);
   assert.equal(seen.ua, 'SING/0.1 (class project; https://github.com/Yoonsung-kor/SING)');
+});
+
+test('final #2: a row with a changed title cell is skipped instead of borrowing the next row\'s song', () => {
+  const broken = row('11111', '깨진 곡', '가수').replace('grid-item title3', 'grid-item title3 new');
+  assert.deepEqual(parseTjResults(broken + row('46009', '어디에도', 'MC THE MAX')), [r('어디에도', 'MC THE MAX', '46009')]);
+});
+
+test('final #1: a running task can tell that a newer one arrived', async () => {
+  let release;
+  const run = createQueue({ now: () => 0, sleep: async () => {} });
+  const seen = [];
+  const first = run(async ({ isStale }) => { await new Promise(res => { release = res; }); seen.push(isStale()); return 'a'; });
+  await new Promise(res => setImmediate(res));
+  const second = run(async () => 'b');
+  release();
+  assert.deepEqual(await Promise.all([first, second]), ['a', 'b']);
+  assert.deepEqual(seen, [true]);
 });
