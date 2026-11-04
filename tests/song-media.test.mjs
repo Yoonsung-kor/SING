@@ -242,3 +242,13 @@ test('the current lyric line is the last one that has begun, 0.2 s early', () =>
   assert.equal(lyricIndex(lines, 100), 2);
   assert.equal(lyricIndex([], 10), -1);
 });
+
+import { withProvisionalOriginal } from '../src/song-media.js';
+
+test('an original picked without the song length is provisional and searched again later', () => {
+  const media = withProvisionalOriginal(emptyMedia(), [{ videoId: A, kind: 'mv' }, { videoId: B, kind: 'audio' }], now);
+  assert.deepEqual(media.mv, { videoId: A, source: 'auto', foundAt: now.toISOString(), candidates: [{ videoId: A }, { videoId: B }] });
+  validateMedia(media);
+  assert.equal(mediaNeeds(media).mv, true);
+  assert.deepEqual(withProvisionalOriginal(emptyMedia(), [], now).mv, { none: true, foundAt: now.toISOString() });
+});

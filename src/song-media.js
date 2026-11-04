@@ -243,3 +243,6 @@ export function lyricIndex(lines, songTime) {
   lines.forEach((line, i) => { if (line.t <= songTime + 0.2) current = i; });
   return current;
 }
+
+/** An original picked by title alone (the song's length unknown): no kind, so it is searched again once the length is known. */
+export const withProvisionalOriginal = (media, candidates, now) => withCandidates(media, 'mv', candidates.map(({ videoId }) => ({ videoId })), now);

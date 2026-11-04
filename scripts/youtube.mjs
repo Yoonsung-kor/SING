@@ -44,7 +44,7 @@ export function pickMv(items, songTitle) {
 }
 
 // The official audio track ("Artist - Topic" channel) follows the release's timing, so lyric timing fits it as is.
-const AUDIO_NOT = /\b(inst|instrumental|mr|piano|acoustic|live|remix|karaoke|version|ver|japanese|english|chinese|sped|slowed|demo)\b|tv size|반주|라이브|버전/i;
+const AUDIO_NOT = /\b(inst|instrumental|mr|piano|acoustic|live|remix|karaoke|version|ver|edition|remaster(?:ed)?|japanese|english|chinese|sped|slowed|demo)\b|\(\s*with\b|tv size|반주|라이브|버전/i;
 const SAME_LENGTH_S = 2;
 
 /** "PT4M3S" → 243; null for anything else. */
@@ -65,20 +65,43 @@ export const videosUrl = (ids, apiKey) => `https://www.googleapis.com/youtube/v3
 
 const topicItems = items => (Array.isArray(items) ? items : []).filter(item => VIDEO_ID.test(item?.id?.videoId ?? '') && String(item?.snippet?.channelTitle ?? '').endsWith(' - Topic') && !AUDIO_NOT.test(titleOf(item)));
 
+const hasHangul = text => /\p{Script=Hangul}/u.test(text);
+
 /**
- * Audio tracks of this song: Topic channels only, other versions left out. Their titles are often English, so the
- * song's length decides; a title that names the song wins, and two different titles of the same length are too
- * ambiguous to guess (the MV stands in). Without a length only a track titled exactly like the song counts.
+ * Does the Topic channel ("Artist - Topic") belong to this artist? In the same script the names must match;
+ * a romanized channel cannot be compared with a Korean name (IU / 아이유): null, and the length has to decide.
  */
-export function pickAudio(items, durations, { title, duration }) {
+function artistFits(item, artist) {
+  const channel = String(item.snippet.channelTitle).replace(/ - Topic$/, '');
+  if (!artist || hasHangul(channel) !== hasHangul(artist)) return null;
+  const a = matchKey(artist);
+  const c = matchKey(channel);
+  return Boolean(a && c && (c.includes(a) || a.includes(c)));
+}
+
+/**
+ * Audio tracks of this song (checked on 31 songs, 2026-11-05). A track titled like the song is taken when its
+ * artist fits, or, when the artist cannot be compared, when its length fits. A track with another (often
+ * English) title that only fits the length is a guess (check: true): the caller confirms it against MV titles.
+ * Two different titles of the same length are never guessed between. Without a length the title must be exact.
+ */
+export function pickAudio(items, durations, { title, artist, duration }) {
   const toCandidates = list => list.map(item => ({ videoId: item.id.videoId, kind: 'audio' })).slice(0, MAX_CANDIDATES);
-  const topics = topicItems(items);
+  const known = Number.isFinite(duration);
+  const fitsLength = item => known && Math.abs((durations.get(item.id.videoId) ?? -1) - duration) <= SAME_LENGTH_S;
   const plainKey = item => matchKey(coreTitle(titleOf(item)));
-  if (!Number.isFinite(duration)) return toCandidates(topics.filter(item => plainKey(item) === matchKey(coreTitle(title))));
-  const fits = topics.filter(item => Math.abs((durations.get(item.id.videoId) ?? -1) - duration) <= SAME_LENGTH_S);
-  const named = fits.filter(item => titleMatches(titleOf(item), title));
-  if (named.length) return toCandidates(named);
-  return new Set(fits.map(plainKey)).size > 1 ? [] : toCandidates(fits);
+  const titled = item => known ? titleMatches(titleOf(item), title) : plainKey(item) === matchKey(coreTitle(title));
+  const topics = topicItems(items);
+  const sure = topics.filter(item => {
+    if (!titled(item)) return false;
+    const fits = artistFits(item, artist);
+    if (fits === false || (known && !fitsLength(item))) return false;
+    return fits === true || known;
+  });
+  if (sure.length) return toCandidates(sure);
+  if (!known) return [];
+  const guesses = topics.filter(item => fitsLength(item) && artistFits(item, artist) !== false);
+  return new Set(guesses.map(plainKey)).size === 1 ? toCandidates(guesses).map(candidate => ({ ...candidate, check: true })) : [];
 }
 
 export function createYoutubeClient({ apiKey, fetchImpl = fetch, queue = createQueue({ minIntervalMs: 250 }) }) {
@@ -90,7 +113,10 @@ export function createYoutubeClient({ apiKey, fetchImpl = fetch, queue = createQ
     try { body = await response.json(); } catch { body = null; }
     if (!response.ok) {
       const reason = body?.error?.errors?.[0]?.reason;
-      throw new YoutubeError(response.status === 403 && ['quotaExceeded', 'dailyLimitExceeded'].includes(reason) ? 'quota' : 'upstream');
+      // The daily quota is a 403 quotaExceeded; a rate limit (429, or 403 rateLimitExceeded) passes: try again later.
+      if (response.status === 403 && ['quotaExceeded', 'dailyLimitExceeded'].includes(reason)) throw new YoutubeError('quota');
+      if (response.status === 429 || reason === 'rateLimitExceeded' || reason === 'userRateLimitExceeded') throw new YoutubeError('busy');
+      throw new YoutubeError('upstream');
     }
     return body;
   }
@@ -104,8 +130,17 @@ export function createYoutubeClient({ apiKey, fetchImpl = fetch, queue = createQ
         const details = (await getJson(videosUrl(topics.map(item => item.id.videoId), apiKey)))?.items ?? [];
         lengths = new Map(details.map(video => [video.id, parseIsoDuration(video.contentDetails?.duration)]));
       }
-      const audio = pickAudio(found, lengths, { title, duration });
-      if (audio.length) return { candidates: audio };
+      const audio = pickAudio(found, lengths, { title, artist, duration });
+      if (audio.length && !audio[0].check) return { candidates: audio };
+      const mv = (await getJson(searchUrl({ side: 'mv', title, artist, apiKey })))?.items;
+      // A track found by length alone counts only when an MV title of this song names it ("Every Moment Of You").
+      const mvKeys = (Array.isArray(mv) ? mv : []).map(item => matchKey(titleOf(item)));
+      const confirmed = audio.filter(candidate => {
+        const key = matchKey(coreTitle(titleOf(found.find(item => item.id.videoId === candidate.videoId))));
+        return key.length >= 4 && mvKeys.some(mvKey => mvKey.includes(key));
+      });
+      if (confirmed.length) return { candidates: confirmed.map(({ check: _check, ...candidate }) => candidate) };
+      return { candidates: pickMv(mv, title).map(candidate => ({ ...candidate, kind: 'mv' })) };
     }
     // No audio track for this song: the MV stands in.
     const mv = (await getJson(searchUrl({ side: 'mv', title, artist, apiKey })))?.items;

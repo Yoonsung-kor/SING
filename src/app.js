@@ -6,7 +6,7 @@ import { renderView, pageNotice } from './views.js';
 import { songDetailParts } from './song-views.js';
 import { defaultSongUi, currentVideoId } from './song-media-views.js';
 import { createSongPlayer } from './song-player.js';
-import { readMedia, validateMedia, expireMedia, mediaNeeds, withSections, withNoTiming, withPasted, withCandidates, upgradeOriginal, canSearchOriginal, dropCandidate, nextCandidate, setStart, canSetStart, startOf, toVideoTime, pinVideoTime, addPin, removePin, currentSectionIndex, lyricIndex, parseYoutubeLink, sameSongQuery } from './song-media.js';
+import { readMedia, validateMedia, expireMedia, mediaNeeds, withSections, withNoTiming, withPasted, withCandidates, withProvisionalOriginal, upgradeOriginal, canSearchOriginal, dropCandidate, nextCandidate, setStart, canSetStart, startOf, toVideoTime, pinVideoTime, addPin, removePin, currentSectionIndex, lyricIndex, parseYoutubeLink, sameSongQuery } from './song-media.js';
 import { createSong, updateSong } from './songs.js';
 import { createPlaylist, renamePlaylist, removeSong, applyMembership, removeSongEverywhere, addSong, setRecommendations, takeRecommendation, rejectRecommendation, isValidRecItem, PLAYLIST_LIMITS } from './playlists.js';
 import { buildRecommendationRequest, suggestKey, sameSong } from './recommend.js';
@@ -186,18 +186,19 @@ function loadOriginal(songId) {
   const media = readMedia(song);
   if (!mediaNeeds(media).mv) return;
   if (canSearchOriginal(media)) return loadVideos(songId, 'mv');
-  if (onSongScreen(songId) && !currentVideoId(song, 'mv')) { songUi = { ...songUi, videos: { ...songUi.videos, mv: 'failed' } }; render(); }
+  // While lyric timing is busy the original is found by title alone and kept as provisional (searched again with the length later).
+  if (!currentVideoId(song, 'mv')) return loadVideos(songId, 'mv', { provisional: true });
 }
 
-async function loadVideos(songId, side) {
+async function loadVideos(songId, side, { provisional = false } = {}) {
   const song = state.songs.find(s => s.id === songId);
   const key = `${songId}:${side}`;
   if (!song || !hasCurrentConsent(state.settings) || lookupsInFlight.has(key)) return;
   lookupsInFlight.add(key);
-  try { await searchVideos(song, side); } finally { lookupsInFlight.delete(key); }
+  try { await searchVideos(song, side, provisional); } finally { lookupsInFlight.delete(key); }
 }
 
-async function searchVideos(song, side) {
+async function searchVideos(song, side, provisional) {
   const songId = song.id;
   const query = { title: song.title, artist: song.artist };
   const mark = status => { if (onSongScreen(songId)) songUi = { ...songUi, videos: { ...songUi.videos, [side]: status } }; };
@@ -216,16 +217,17 @@ async function searchVideos(song, side) {
   if (!sameSongQuery(state.songs.find(s => s.id === songId), query)) return;
   const candidates = status === 200 && Array.isArray(body?.candidates) ? body.candidates : null;
   let found = false;
+  // The original side upgrades an old MV only with something found; it never turns a playing video into "none".
+  // A pick made without the song's length is provisional (searched again once the length is known).
+  const apply = (media, now) => provisional ? withProvisionalOriginal(media, candidates, now) : side === 'mv' ? upgradeOriginal(media, candidates, now) : withCandidates(media, side, candidates, now);
   if (candidates) {
-    // The original side upgrades an old MV only with something found; it never turns a playing video into "none".
-    const apply = (media, now) => side === 'mv' ? upgradeOriginal(media, candidates, now) : withCandidates(media, side, candidates, now);
     try { validateMedia(apply(readMedia(song), new Date())); found = true; } catch { found = false; }
   }
   mark(found ? 'idle' : status === 429 ? 'quota' : status === 503 && body?.error === 'not-configured' ? 'not-configured' : 'failed');
   if (!found) return render();
   // Something the user chose meanwhile (a pasted link) is never overwritten by a late answer.
   if (!mediaNeeds(readMedia(state.songs.find(s => s.id === songId)))[side]) return render();
-  await saveMedia(songId, media => side === 'mv' ? upgradeOriginal(media, candidates, new Date()) : withCandidates(media, side, candidates, new Date()));
+  await saveMedia(songId, media => apply(media, new Date()));
   if (onSongScreen(songId) && songUi.side === side) showCurrentVideo();
 }
 
