@@ -69,7 +69,7 @@ test('the change panel always offers a YouTube search for this song and side', (
   const panel = songMediaBelow(songWith({ mv: mvEntry() }), ui({ panel: 'change' }));
   const link = /<div class="media-change">[\s\S]*?href="([^"]+)"[^>]*>유튜브에서 찾아보기 ↗/.exec(panel);
   assert.ok(link, 'search link inside the change panel');
-  assert.equal(new URL(link[1].replace(/&amp;/g, '&')).searchParams.get('search_query'), '성시경 너의 모든 순간 MV');
+  assert.equal(new URL(link[1].replace(/&amp;/g, '&')).searchParams.get('search_query'), '성시경 너의 모든 순간');
   const karaoke = songMediaBelow(songWith({}), ui({ side: 'karaoke', panel: 'change' }));
   assert.ok(/<div class="media-change">[\s\S]*search_query=%EA%B8%88%EC%98%81/.test(karaoke));
 });
@@ -87,7 +87,7 @@ test('pins are listed by time in the current video and their text is escaped', (
 test('the TJ card searches YouTube for the TJ video with the number, and nothing uses inline styles', () => {
   const evil = songWith({ mv: mvEntry(), sections: { duration: 243, items, checkedAt: when }, pins: [{ id: 'p', videoId: MV, t: 1, text: 'x' }] }, { title: '"><script>x</script>' });
   const html = songMediaBelow(evil, ui({ panel: 'pin' }));
-  assert.ok(html.includes('TJ 노래방 영상 보기 ↗') && html.includes('유튜브에서 열려요 · TJ 38028') && html.includes('search_query=TJ'));
+  assert.ok(html.includes('TJ 노래방 영상 보기 ↗') && html.includes('유튜브에서 열려요 · TJ 38028') && html.includes('/channel/UCZUhx8ClCv6paFW7qi3qljg/search?query='));
   assert.ok(!html.includes('<script'));
   for (const view of [html, songMediaBelow(songWith({}), ui({ consent: false })), songMediaSides(ui())]) assert.ok(!view.includes('style="'));
 });

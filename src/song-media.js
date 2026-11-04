@@ -31,14 +31,17 @@ function checkSide(entry, side) {
   if (!isObject(entry)) fail();
   if (entry.none === true) { if (!keysAre(entry, ['none', 'foundAt']) || !isTime(entry.foundAt)) fail(); return; }
   const karaoke = side === 'karaoke';
-  if (!keysAre(entry, ['videoId', 'source', 'foundAt', 'candidates'], karaoke ? ['kind'] : [])) fail();
+  // The original side says whether it plays the audio track or an MV; older and pasted entries have no kind.
+  const kinds = karaoke ? ['basic', 'mr'] : ['audio', 'mv'];
+  if (!keysAre(entry, ['videoId', 'source', 'foundAt', 'candidates'], ['kind'])) fail();
   if (!isVideoId(entry.videoId) || !['auto', 'pasted'].includes(entry.source) || !isTime(entry.foundAt)) fail();
   if (karaoke && !['basic', 'mr', 'unknown'].includes(entry.kind)) fail();
+  if (!karaoke && entry.kind !== undefined && !kinds.includes(entry.kind)) fail();
   const { candidates } = entry;
   if (!Array.isArray(candidates) || candidates.length < 1 || candidates.length > MAX_CANDIDATES) fail();
   for (const candidate of candidates) {
-    if (!isObject(candidate) || !keysAre(candidate, ['videoId'], karaoke ? ['kind'] : []) || !isVideoId(candidate.videoId)) fail();
-    if (candidate.kind !== undefined && !['basic', 'mr'].includes(candidate.kind)) fail();
+    if (!isObject(candidate) || !keysAre(candidate, ['videoId'], ['kind']) || !isVideoId(candidate.videoId)) fail();
+    if (candidate.kind !== undefined && !kinds.includes(candidate.kind)) fail();
   }
   if (!candidates.some(candidate => candidate.videoId === entry.videoId)) fail();
 }
@@ -79,7 +82,9 @@ export function expireMedia(media, now) {
   let changed = false;
   for (const side of SIDES) {
     const entry = media[side];
-    if ((entry?.none && olderThan(entry.foundAt, NONE_DAYS, now)) || (entry?.source === 'auto' && olderThan(entry.foundAt, AUTO_DAYS, now))) { next[side] = null; changed = true; }
+    // An original found before audio tracks were searched has no kind: it is searched again.
+    const stale = entry?.source === 'auto' && (olderThan(entry.foundAt, AUTO_DAYS, now) || (side === 'mv' && !entry.kind));
+    if ((entry?.none && olderThan(entry.foundAt, NONE_DAYS, now)) || stale) { next[side] = null; changed = true; }
   }
   if (media.sections?.none && olderThan(media.sections.checkedAt, NONE_DAYS, now)) { next.sections = null; changed = true; }
   return changed ? next : media;
@@ -87,8 +92,10 @@ export function expireMedia(media, now) {
 
 export const mediaNeeds = media => ({ mv: media.mv === null, karaoke: media.karaoke === null, sections: media.sections === null });
 
+const kindOf = (side, chosen) => side === 'karaoke' ? { kind: chosen.kind ?? 'unknown' } : chosen.kind ? { kind: chosen.kind } : {};
+
 function autoEntry(side, chosen, candidates, foundAt) {
-  return { videoId: chosen.videoId, ...(side === 'karaoke' ? { kind: chosen.kind ?? 'unknown' } : {}), source: 'auto', foundAt, candidates };
+  return { videoId: chosen.videoId, ...kindOf(side, chosen), source: 'auto', foundAt, candidates };
 }
 
 export function withCandidates(media, side, candidates, now) {
@@ -117,7 +124,8 @@ export function nextCandidate(media, side) {
   if (!hasOtherCandidates(entry)) return media;
   const index = entry.candidates.findIndex(candidate => candidate.videoId === entry.videoId);
   const chosen = entry.candidates[(index + 1) % entry.candidates.length];
-  return { ...media, [side]: { ...entry, videoId: chosen.videoId, ...(side === 'karaoke' ? { kind: chosen.kind ?? 'unknown' } : {}) } };
+  const { kind: _old, ...rest } = entry;
+  return { ...media, [side]: { ...rest, videoId: chosen.videoId, ...kindOf(side, chosen) } };
 }
 
 export function withPasted(media, side, videoId, now) {
@@ -206,8 +214,10 @@ export function parseYoutubeLink(text) {
 export const youtubeWatchUrl = videoId => `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
 export const youtubeSearchUrl = query => `https://www.youtube.com/results?${new URLSearchParams({ search_query: query })}`;
 const joinWords = words => words.map(word => String(word ?? '').trim()).filter(Boolean).join(' ');
-export const videoSearchQuery = (song, side) => side === 'mv' ? joinWords([song.artist, song.title, 'MV']) : joinWords(['금영노래방', song.title, song.artist]);
-export const tjVideoSearchUrl = (title, artist) => youtubeSearchUrl(joinWords(['TJ노래방', title, artist]));
+export const videoSearchQuery = (song, side) => side === 'mv' ? joinWords([song.artist, song.title]) : joinWords(['금영노래방', song.title, song.artist]);
+// TJ videos cannot play inside the app, so the link searches inside TJ's own YouTube channel.
+export const TJ_CHANNEL_ID = 'UCZUhx8ClCv6paFW7qi3qljg';
+export const tjVideoSearchUrl = (title, artist) => `https://www.youtube.com/channel/${TJ_CHANNEL_ID}/search?${new URLSearchParams({ query: joinWords([title, artist]) })}`;
 
 export function formatTime(seconds) {
   const whole = Math.floor(Math.max(0, Number(seconds) || 0));
