@@ -125,7 +125,7 @@ flowchart TD
     UI -->|편안함 응답| Lesson
     Lesson -->|결과 · 다음 과제| UI
     UI <--> Songs[플레이리스트 · 곡 입력 / 검색 / 키 기록]
-    UI <--> SongScreen[노래 화면 · MV · 금영 노래방 · 구간 · 구간 메모]
+    UI <--> SongScreen[노래 화면 · 원곡(음원/MV) · 금영 노래방 · 구간 · 가사 · 구간 메모]
     SongScreen -->|재생| YTPlayer[YouTube 플레이어 · nocookie]
     UI <--> Store[storage.js · IndexedDB]
     Store <--> Backup[사용자 백업 파일]
@@ -137,9 +137,9 @@ flowchart TD
     TJ -->|없으면| MB[MusicBrainz]
     TJ -->|곡 검색 결과 · 노래방 번호| UI
     MB -->|곡 검색 결과| UI
-    Server -->|/api/song-videos · 곡마다 한 번| YT[YouTube Data API]
-    YT -->|MV · 금영 노래방 영상 후보| SongScreen
-    Server -->|/api/song-sections · 곡마다 한 번| LRC[LRCLIB 가사 시간]
+    Server -->|/api/song-videos · 쪽마다 30일에 한 번| YT[YouTube Data API]
+    YT -->|원곡(음원 트랙, 없으면 MV) · 금영 노래방 영상 후보| SongScreen
+    Server -->|/api/song-sections · 곡 화면을 열 때 · 가사는 앱을 켠 동안 한 번| LRC[LRCLIB 가사 시간]
     LRC -->|구간 · 가사 줄(화면에만, 저장 안 함)| SongScreen
 ```
 
@@ -234,7 +234,7 @@ npm start
 2. `node scripts/check-ai.mjs`로 키와 모델이 웹 검색과 함께 동작하는지 먼저 확인합니다.
 3. `npm start`를 실행하면 시작 메시지에 `AI 추천: 켜짐`이 표시됩니다.
 
-노래 화면의 영상 자동 찾기는 YouTube Data API v3 키를 씁니다. Google Cloud 프로젝트에서 YouTube Data API v3를 켜고 만든 키를 `.env`의 `YOUTUBE_API_KEY`에 넣으면 시작 메시지에 `영상 찾기: 켜짐`이 표시됩니다. 키가 없으면 링크 붙여넣기만 됩니다. 검색 1번에 100단위를 쓰고 기본 할당량은 하루 10,000단위라, 새 곡 50개쯤까지 찾을 수 있습니다(곡마다 MV·노래방 각 한 번, 한 번 찾은 영상은 30일 동안 다시 찾지 않음).
+노래 화면의 영상 자동 찾기는 YouTube Data API v3 키를 씁니다. Google Cloud 프로젝트에서 YouTube Data API v3를 켜고 만든 키를 `.env`의 `YOUTUBE_API_KEY`에 넣으면 시작 메시지에 `영상 찾기: 켜짐`이 표시됩니다. 키가 없으면 링크 붙여넣기만 됩니다. 검색 1번에 100단위, 영상 길이 확인에 1단위를 쓰고 기본 할당량은 하루 10,000단위입니다. 새 곡 하나에 200~400단위(원곡 음원 검색, 확인용 MV 검색, 노래방 검색)를 써서 하루에 새 곡 25~50곡쯤 찾을 수 있습니다. 한 번 찾은 영상은 30일 동안 다시 찾지 않습니다. 할당량을 넘거나 잠시 막히면 화면에서 링크 붙여넣기와 다시 열기를 안내합니다.
 
 `.env`는 `.gitignore`에 포함되어 커밋되지 않습니다. 키가 없으면 앱은 그대로 동작하고, 추천과 최고음 찾기만 "아직 AI가 설정되지 않았어요."로 안내합니다. 곡 검색(MusicBrainz)은 키가 없어도 동작합니다. `node scripts/check-range.mjs`로 10곡의 최고음 찾기와 확인 결과를 점검할 수 있습니다(AI 호출 약 10번).
 

@@ -17,7 +17,7 @@ flowchart TD
     UI <--> Songs[플레이리스트 · 곡 입력 / 검색 / AI 추천]
     UI <--> SongScreen[노래 화면 · 영상 · 구간 · 구간 메모]
     SongScreen -->|재생 · nocookie 플레이어| YTPlayer[YouTube 플레이어]
-    SongScreen -->|동의 후 · 곡마다 한 번| Server
+    SongScreen -->|동의 후 · 곡 화면을 열 때| Server
     UI <--> Voice[내 음역 온보딩 · 오선지 · 노래방 키 줄]
     Songs -->|동의 후| Server[로컬 서버 · /api/recommend · /api/song-range · /api/song-search]
     Voice -->|동의 후| Server
@@ -42,7 +42,7 @@ flowchart TD
 | 곡과 플레이리스트 | 곡 검증, 제목·가수 검색, 키 변경 표시, 사용자 이름 플레이리스트와 AI 추천 | `src/songs.js`, `src/song-views.js`, `src/playlists.js`, `src/playlist-views.js`, `src/recommend.js` |
 | 내 음역 | 자신 있는 곡으로 편한 최고음 어림, 남녀 곡 옥타브 제안, 편함·도전·무리 분류, 오선지와 노래방 키 줄(원키 가운데, 맞는 키 표시) | `src/onboarding.js`, `src/onboarding-views.js`, `src/vocal-range.js`, `src/notes.js`, `src/range-graphics.js` |
 | AI와 외부 연결 | 추천·최고음 찾기 흐름, 출처 확인, 곡 검색(TJ 우선, MusicBrainz 대체), 요청 간격, 동의 버전 | `scripts/services.mjs`, `scripts/ai.mjs`, `scripts/verify-source.mjs`, `scripts/song-search.mjs`, `scripts/tj.mjs`, `scripts/throttle.mjs`, `scripts/musicbrainz.mjs`, `src/consent.js` |
-| 노래 화면 | 원곡 MV·금영 노래방 영상 재생(플레이어를 지운 채 다시 그리지 않음), 자동 구간과 흐름 막대, 영상별 시작 맞추기, 구간 메모, 영상 바꾸기·링크 붙여넣기 | `src/song-media.js`, `src/song-media-views.js`, `src/song-player.js`, `src/sections.js`, `scripts/youtube.mjs`, `scripts/lrclib.mjs`, `scripts/title-match.mjs` |
+| 노래 화면 | 원곡(음원 트랙, 없으면 MV)·금영 노래방 영상 재생(플레이어를 지운 채 다시 그리지 않음), 자동 구간과 흐름 막대, 영상별 시작 맞추기, 구간 메모, 영상 바꾸기·링크 붙여넣기 | `src/song-media.js`, `src/song-media-views.js`, `src/song-player.js`, `src/sections.js`, `scripts/youtube.mjs`, `scripts/lrclib.mjs`, `scripts/title-match.mjs` |
 | 저장 | 상태/원음 저장, 백업 검증과 복원 | `src/storage.js` |
 | 개발 서버 | 허용된 정적 파일 제공과 API 전달(입력 한도, 키는 `.env`) | `scripts/serve.mjs`, `scripts/server.mjs` |
 
