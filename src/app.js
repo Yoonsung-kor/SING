@@ -63,6 +63,10 @@ let playerFor = null;
 let pendingPaste = null;
 let pinDraft = null;
 let mediaTicker = null;
+// Lyrics live in memory only (per song, gone when the app reloads); they are never saved or backed up.
+const songLyrics = new Map();
+let lyricsStyle = 'karaoke';
+let lyricsScrollAt = 0;
 const songPlayer = createSongPlayer({ onState: handlePlayerState, onError: handlePlayerError, onLoadFail: () => toast('영상 플레이어를 불러오지 못했어요. 잠시 후 다시 열어 주세요.') });
 const LOOKUP_CONCURRENCY = 3;
 const SEARCH_SLOW_MS = 3000;
@@ -77,7 +81,7 @@ function toast(message) {
 }
 
 function render(focus = false) {
-  const v = { page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, recLoading, recError, onboarding, loading: !initialized && !demo, songUi: { ...songUi, consent: hasCurrentConsent(state.settings) } };
+  const v = { page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, recLoading, recError, onboarding, loading: !initialized && !demo, songUi: { ...songUi, consent: hasCurrentConsent(state.settings) }, lyricsLines: songLyrics.get(selectedSongId) ?? null };
   // While a song's player is mounted, only the parts around it are redrawn: moving an iframe would reload the video.
   if (!focus && page === 'song-detail' && playerFor === selectedSongId && document.querySelector('#song-player-slot')) {
     const parts = songDetailParts(v);
@@ -115,7 +119,7 @@ function navigate(target) {
   stopSongPlayer();
   error = '';
   page = target;
-  if (target === 'song-detail') songUi = defaultSongUi();
+  if (target === 'song-detail') songUi = { ...defaultSongUi(), lyricsStyle };
   render(true);
   if (target === 'song-detail') openSongDetail();
 }
@@ -156,8 +160,10 @@ async function openSongDetail() {
   showCurrentVideo();
   mediaTicker = setInterval(tickMedia, 300);
   if (!hasCurrentConsent(state.settings)) return;
-  if (mediaNeeds(readMedia(selectedSong())).sections) loadSections();
-  loadMissingVideos(song.id);
+  // Sections and lyric lines come first: the original side matches its audio track by the song's length.
+  const stored = readMedia(selectedSong()).sections;
+  if (stored === null || (!stored.none && !songLyrics.has(song.id))) await loadSections();
+  if (onSongScreen(song.id)) loadMissingVideos(song.id);
 }
 
 /** The side on screen first, then the other; each side is searched only when nothing (not even "none") is stored. */
@@ -179,7 +185,9 @@ async function loadVideos(songId, side) {
   let status = 0;
   let body = null;
   try {
-    const response = await fetch(`/api/song-videos?${new URLSearchParams({ side, ...query })}`);
+    // The song's length lets the server tell this song's audio track from other versions.
+    const duration = side === 'mv' ? readMedia(song).sections?.duration : undefined;
+    const response = await fetch(`/api/song-videos?${new URLSearchParams({ side, ...query, ...(Number.isFinite(duration) ? { duration: String(duration) } : {}) })}`);
     status = response.status;
     body = await response.json().catch(() => null);
   } catch { status = 0; }
@@ -196,11 +204,13 @@ async function loadVideos(songId, side) {
   if (onSongScreen(songId) && songUi.side === side) showCurrentVideo();
 }
 
+/** Sections (stored on the song when missing) and lyric lines (kept in memory only) from one lookup. */
 async function loadSections() {
   const song = selectedSong();
   if (!song) return;
   const query = { title: song.title, artist: song.artist };
-  songUi = { ...songUi, sections: 'loading' };
+  const needsSections = readMedia(song).sections === null;
+  songUi = { ...songUi, sections: needsSections ? 'loading' : songUi.sections, lyrics: 'loading' };
   render();
   let status = 0;
   let body = null;
@@ -215,9 +225,16 @@ async function loadSections() {
   if (status === 200) {
     try { validateMedia(withSections(readMedia(song), body, new Date())); found = true; } catch { found = false; }
   }
-  if (onSongScreen(song.id)) songUi = { ...songUi, sections: found || status === 404 ? 'idle' : 'busy' };
-  if (found) return saveMedia(song.id, media => withSections(media, body, new Date()));
-  if (status === 404) return saveMedia(song.id, media => withNoTiming(media, new Date()));
+  if (found) {
+    const lines = (Array.isArray(body.lines) ? body.lines : []).filter(line => Number.isFinite(line?.t) && typeof line.text === 'string');
+    if (lines.length) songLyrics.set(song.id, lines);
+  }
+  if (onSongScreen(song.id)) {
+    const failed = !found && status !== 404;
+    songUi = { ...songUi, sections: needsSections && failed ? 'busy' : 'idle', lyrics: found && songLyrics.has(song.id) ? 'idle' : failed ? 'busy' : 'none' };
+  }
+  if (found && needsSections) return saveMedia(song.id, media => withSections(media, body, new Date()));
+  if (status === 404 && needsSections) return saveMedia(song.id, media => withNoTiming(media, new Date()));
   render();
 }
 
@@ -239,6 +256,33 @@ function tickMedia() {
     document.querySelectorAll('.media-chip').forEach(chip => chip.classList.toggle('now', Number(chip.dataset.id) === index));
   }
   document.querySelectorAll('.media-pin-list li[data-t]').forEach(li => li.classList.toggle('now', Math.abs(Number(li.dataset.t) - t) < 4));
+  showLyric(song.id, media, songTime);
+}
+
+/** Puts the current lyric line in the subtitle and the full list; text and classes only, never a redraw. */
+function showLyric(songId, media, songTime) {
+  const lines = songLyrics.get(songId);
+  if (!lines?.length) return;
+  let index = -1;
+  lines.forEach((line, i) => { if (line.t <= songTime + 0.2) index = i; });
+  const cur = document.querySelector('#lyric-cur');
+  // Before the first line the hint stays; a fresh redraw (no marker) is filled again on the next tick.
+  if (cur && cur.dataset.line !== String(index) && !(index === -1 && cur.dataset.line === undefined)) {
+    const next = lines.findIndex((line, i) => i > index && line.text);
+    const items = media.sections?.items ?? [];
+    document.querySelector('#lyric-section').textContent = items[currentSectionIndex(items, songTime)]?.label ?? '';
+    cur.textContent = index >= 0 && lines[index].text ? lines[index].text : '♪';
+    document.querySelector('#lyric-next').textContent = next >= 0 ? lines[next].text : '';
+    cur.dataset.line = String(index);
+  }
+  const full = document.querySelector('#lyrics-full');
+  if (full && full.dataset.line !== String(index)) {
+    full.querySelectorAll('.lyric-line').forEach(button => { const n = Number(button.dataset.id); button.classList.toggle('now', n === index); button.classList.toggle('past', n < index); });
+    full.dataset.line = String(index);
+    const now = full.querySelector('.lyric-line.now');
+    // The list follows the song unless the user scrolled it in the last 3 seconds.
+    if (now && !full.hidden && Date.now() - lyricsScrollAt > 3000) full.scrollTop = now.offsetTop - full.clientHeight / 2 + now.clientHeight / 2;
+  }
 }
 
 function handlePlayerState(code, videoId) {
@@ -365,6 +409,18 @@ async function handleMedia(action, id) {
     return;
   }
   if (action === 'media-pin-delete') return saveMedia(song.id, current => removePin(current, id));
+  if (action === 'media-lyrics-style') {
+    if (!['karaoke', 'full'].includes(id)) return;
+    lyricsStyle = id;
+    songUi = { ...songUi, lyricsStyle: id };
+    render();
+    return tickMedia();
+  }
+  if (action === 'media-lyric') {
+    const line = songLyrics.get(song.id)?.[Number(id)];
+    if (line && videoId) songPlayer.seekTo(toVideoTime(media, videoId, Math.max(0, line.t - 0.3)));
+    return;
+  }
   if (action === 'media-next') {
     songUi = { ...songUi, panel: null, playerError: null };
     await saveMedia(song.id, current => nextCandidate(current, songUi.side));
@@ -785,7 +841,8 @@ async function saveSong(form) {
   const playlists = applyMembership(state.playlists, song.id, songDraft.playlistIds || [], new Date());
   const saved = await persist({ ...state, songs: exists ? state.songs.map(s => s.id === song.id ? song : s) : [...state.songs, song], playlists });
   busy = false;
-  if (saved) { selectedSongId = song.id; navigate('song-detail'); toast('곡을 저장했어요.'); }
+  // Lyrics fetched for the old title may belong to another song; they are fetched again on the next visit.
+  if (saved) { songLyrics.delete(song.id); selectedSongId = song.id; navigate('song-detail'); toast('곡을 저장했어요.'); }
   else render();
 }
 
@@ -1227,6 +1284,9 @@ root.addEventListener('change', async event => {
     toast('백업을 가져오지 못했어요. 파일 형식을 확인해 주세요. 기존 기록은 유지했어요.');
   }
 });
+
+// Scrolling the full lyrics by hand pauses its follow-along for a moment.
+for (const type of ['wheel', 'touchmove']) root.addEventListener(type, event => { if (event.target.closest?.('#lyrics-full')) lyricsScrollAt = Date.now(); }, { passive: true });
 
 root.addEventListener('input', event => {
   if (event.target.id === 'voice-search') scheduleSearch(event.target.value);
