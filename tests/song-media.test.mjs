@@ -174,3 +174,17 @@ test('links out to YouTube and the time label', () => {
   assert.equal(formatTime(0), '0:00');
   assert.equal(formatTime(-3), '0:00');
 });
+
+import { canSetStart } from '../src/song-media.js';
+
+test('the start can be set only while the shown video is playing or paused, never when only cued', () => {
+  const ok = { videoId: MV, shownId: MV, time: 40, playerState: 1 };
+  assert.equal(canSetStart(ok), true);
+  assert.equal(canSetStart({ ...ok, playerState: 2 }), true);
+  assert.equal(canSetStart({ ...ok, time: 0, playerState: 5 }), false);
+  assert.equal(canSetStart({ ...ok, playerState: -1 }), false);
+  assert.equal(canSetStart({ ...ok, playerState: null }), false);
+  assert.equal(canSetStart({ ...ok, time: null }), false);
+  assert.equal(canSetStart({ ...ok, shownId: KA }), false);
+  assert.equal(canSetStart({ ...ok, videoId: null }), false);
+});

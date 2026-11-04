@@ -13,7 +13,9 @@ export function coreTitle(title) {
 export const matchKey = text => String(text ?? '').normalize('NFKC').toLocaleLowerCase().replace(/[\s\p{P}\p{S}]/gu, '');
 
 export function titleMatches(candidateTitle, songTitle) {
-  const want = matchKey(coreTitle(songTitle));
+  let want = matchKey(coreTitle(songTitle));
+  // A one-syllable core ("꽃" of "꽃(FLOWER)") is too short to search inside other titles; the whole title is not.
+  if (want.length < 2) want = matchKey(songTitle) || want;
   const have = matchKey(candidateTitle);
   if (!want) return false;
   return want.length < 2 ? have === want : have.includes(want);

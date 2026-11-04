@@ -65,6 +65,15 @@ test('the change panel offers another candidate only when there is one', () => {
   assert.ok(!songMediaBelow(songWith({ mv: two }), ui()).includes('id="media-paste-form"'));
 });
 
+test('the change panel always offers a YouTube search for this song and side', () => {
+  const panel = songMediaBelow(songWith({ mv: mvEntry() }), ui({ panel: 'change' }));
+  const link = /<div class="media-change">[\s\S]*?href="([^"]+)"[^>]*>유튜브에서 찾아보기 ↗/.exec(panel);
+  assert.ok(link, 'search link inside the change panel');
+  assert.equal(new URL(link[1].replace(/&amp;/g, '&')).searchParams.get('search_query'), '성시경 너의 모든 순간 MV');
+  const karaoke = songMediaBelow(songWith({}), ui({ side: 'karaoke', panel: 'change' }));
+  assert.ok(/<div class="media-change">[\s\S]*search_query=%EA%B8%88%EC%98%81/.test(karaoke));
+});
+
 test('pins are listed by time in the current video and their text is escaped', () => {
   const pins = [{ id: 'p3', videoId: MV, t: 90, text: '셋' }, { id: 'p1', videoId: MV, t: 10, text: '<b>하나</b>' }, { id: 'p2', videoId: MV, t: 50, text: '둘' }];
   const html = songMediaBelow(songWith({ mv: mvEntry(), pins }), ui({ panel: 'pin' }));

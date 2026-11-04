@@ -26,11 +26,13 @@ export function createSongPlayer({ onState = () => {}, onError = () => {}, onLoa
   let ready = false;
   let shown = null;
   let cued = null;
+  let playerState = null;
   let generation = 0;
 
   function cue(videoId) {
     if (!ready || cued === videoId) return;
     cued = videoId;
+    playerState = null;
     player.cueVideoById(videoId);
   }
 
@@ -53,7 +55,7 @@ export function createSongPlayer({ onState = () => {}, onError = () => {}, onLoa
         playerVars: { playsinline: 1, rel: 0, origin: location.origin },
         events: {
           onReady: () => { if (mine !== generation) return; ready = true; if (shown) cue(shown); },
-          onStateChange: event => { if (mine === generation) onState(event.data, eventVideo()); },
+          onStateChange: event => { if (mine !== generation) return; playerState = event.data; onState(event.data, eventVideo()); },
           onError: event => { if (mine !== generation) return; const videoId = eventVideo(); cued = null; onError(event.data, videoId); },
         },
       });
@@ -76,12 +78,14 @@ export function createSongPlayer({ onState = () => {}, onError = () => {}, onLoa
     },
     currentTime() { return ready && shown ? player.getCurrentTime() : null; },
     currentVideoId() { return shown; },
+    /** The last IFrame API state of the shown video (1 playing, 2 paused, 5 cued…), null before any. */
+    playbackState() { return playerState; },
     destroy() {
       generation++;
       if (ready) player.destroy();
       player = null;
       ready = false;
-      shown = cued = null;
+      shown = cued = playerState = null;
     },
   };
 }

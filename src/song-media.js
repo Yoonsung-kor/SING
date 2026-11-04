@@ -213,3 +213,6 @@ export function formatTime(seconds) {
   const whole = Math.floor(Math.max(0, Number(seconds) || 0));
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`;
 }
+
+// "지금이 노래 시작" needs a video that has actually been started (playing 1 or paused 2): a cued video reports time 0.
+export const canSetStart = ({ videoId, shownId, time, playerState }) => Boolean(videoId) && shownId === videoId && time !== null && [1, 2].includes(playerState);

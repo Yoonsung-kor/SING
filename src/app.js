@@ -6,7 +6,7 @@ import { renderView, pageNotice } from './views.js';
 import { songDetailParts } from './song-views.js';
 import { defaultSongUi, currentVideoId } from './song-media-views.js';
 import { createSongPlayer } from './song-player.js';
-import { readMedia, validateMedia, expireMedia, mediaNeeds, withSections, withNoTiming, withPasted, withCandidates, dropCandidate, nextCandidate, setStart, startOf, toVideoTime, pinVideoTime, addPin, removePin, currentSectionIndex, parseYoutubeLink, sameSongQuery } from './song-media.js';
+import { readMedia, validateMedia, expireMedia, mediaNeeds, withSections, withNoTiming, withPasted, withCandidates, dropCandidate, nextCandidate, setStart, canSetStart, startOf, toVideoTime, pinVideoTime, addPin, removePin, currentSectionIndex, parseYoutubeLink, sameSongQuery } from './song-media.js';
 import { createSong, updateSong } from './songs.js';
 import { createPlaylist, renamePlaylist, removeSong, applyMembership, removeSongEverywhere, addSong, setRecommendations, takeRecommendation, rejectRecommendation, isValidRecItem, PLAYLIST_LIMITS } from './playlists.js';
 import { buildRecommendationRequest, suggestKey, sameSong } from './recommend.js';
@@ -339,7 +339,7 @@ async function handleMedia(action, id) {
   if (action === 'media-sections-retry') return loadSections();
   if (action === 'media-align') {
     const t = songPlayer.currentTime();
-    if (!videoId || t === null || songPlayer.currentVideoId() !== videoId) return toast('영상을 먼저 틀어 주세요.');
+    if (!canSetStart({ videoId, shownId: songPlayer.currentVideoId(), time: t, playerState: songPlayer.playbackState() })) return toast('영상을 먼저 틀어 주세요.');
     return saveMedia(song.id, current => setStart(current, videoId, t));
   }
   if (action === 'media-section') {

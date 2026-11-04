@@ -92,3 +92,12 @@ test('a title without spaces is retried with its first syllables, two, then thre
   await createLrclibClient({ fetchImpl: async url => { asked.push(new URL(url).searchParams.get('q')); return json(200, []); }, queue: run })({ title: '너의 모든 순간', artist: '성시경' });
   assert.deepEqual(asked, ['너의 모든 순간 성시경']);
 });
+
+test('a title that is one syllable without its brackets is matched with the brackets kept', () => {
+  assert.equal(titleMatches('JISOO - ‘꽃(FLOWER)’ M/V', '꽃(FLOWER)'), true);
+  assert.equal(titleMatches('꽃(FLOWER) - 지수 (KY.12345) / KY Karaoke', '꽃(FLOWER)'), true);
+  assert.equal(titleMatches('[MV] Zion.T _ Snow(눈) (Feat. 이문세)', '눈(Feat.이문세)'), true);
+  assert.equal(pickHit([hit({ trackName: '꽃 (FLOWER)' })], '꽃(FLOWER)').id, 1);
+  assert.equal(titleMatches('꽃길', '꽃'), false);
+  assert.equal(titleMatches('꽃', '꽃'), true);
+});

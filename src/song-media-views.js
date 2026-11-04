@@ -43,10 +43,10 @@ function videoStatus(song, media, ui, videoId) {
   return parts.join('');
 }
 
-function changePanel(media, ui) {
+function changePanel(song, media, ui) {
   if (ui.panel !== 'change') return '';
   const next = hasOtherCandidates(media[ui.side]) ? '<button class="button secondary small" data-action="media-next">다른 후보</button>' : '';
-  return `<div class="media-change">${next}<form id="media-paste-form" class="media-paste"><label for="media-link">유튜브 링크</label><input id="media-link" name="link" type="url" inputmode="url" placeholder="https://youtu.be/…" autocomplete="off"><button class="button small" type="submit">넣기</button></form>${ui.pasteError ? `<p class="media-error" role="alert">${e(ui.pasteError)}</p>` : ''}<button class="text-button" data-action="media-panel-close">닫기</button></div>`;
+  return `<div class="media-change">${next}${out(youtubeSearchUrl(videoSearchQuery(song, ui.side)), '유튜브에서 찾아보기 ↗')}<form id="media-paste-form" class="media-paste"><label for="media-link">유튜브 링크</label><input id="media-link" name="link" type="url" inputmode="url" placeholder="https://youtu.be/…" autocomplete="off"><button class="button small" type="submit">넣기</button></form>${ui.pasteError ? `<p class="media-error" role="alert">${e(ui.pasteError)}</p>` : ''}<button class="text-button" data-action="media-panel-close">닫기</button></div>`;
 }
 
 const toX = (t, duration) => Math.round(Math.min(1000, Math.max(0, t / duration * 1000)) * 10) / 10;
@@ -86,5 +86,5 @@ export function songMediaBelow(song, ui) {
   const media = readMedia(song);
   const videoId = currentVideoId(song, ui.side);
   const tj = `<a class="media-tj" href="${e(tjVideoSearchUrl(song.title, song.artist))}" target="_blank" rel="noopener noreferrer"><strong>TJ 노래방 영상 보기 ↗</strong><span>유튜브에서 열려요${song.tjNumber ? ` · TJ ${e(song.tjNumber)}` : ''}</span></a>`;
-  return `<section class="song-media">${videoStatus(song, media, ui, videoId)}${changePanel(media, ui)}${tj}${sectionsBlock(media, ui, videoId)}</section>${pinsBlock(media, ui, videoId)}`;
+  return `<section class="song-media">${videoStatus(song, media, ui, videoId)}${changePanel(song, media, ui)}${tj}${sectionsBlock(media, ui, videoId)}</section>${pinsBlock(media, ui, videoId)}`;
 }
