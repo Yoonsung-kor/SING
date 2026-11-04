@@ -43,21 +43,75 @@ export function pickMv(items, songTitle) {
   return usable(items, songTitle).filter(item => MV_MARK.test(titleOf(item)) && !NOT_MV.test(titleOf(item))).map(item => ({ videoId: item.id.videoId })).slice(0, MAX_CANDIDATES);
 }
 
+// The official audio track ("Artist - Topic" channel) follows the release's timing, so lyric timing fits it as is.
+const AUDIO_NOT = /inst|instrumental|\bmr\b|piano|acoustic|live|remix|ver\.|karaoke|반주|라이브/i;
+const SAME_LENGTH_S = 2;
+
+/** "PT4M3S" → 243; null for anything else. */
+export function parseIsoDuration(text) {
+  const match = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/.exec(String(text ?? ''));
+  if (!match || !match.slice(1).some(Boolean)) return null;
+  const [, h = 0, m = 0, sec = 0] = match;
+  return Number(h) * 3600 + Number(m) * 60 + Number(sec);
+}
+
+// "topic" in the query brings the "Artist - Topic" audio tracks up (checked 2026-11-05).
+export function audioSearchUrl({ title, artist, apiKey }) {
+  const params = { part: 'snippet', type: 'video', maxResults: '10', regionCode: 'KR', videoEmbeddable: 'true', q: [artist, coreTitle(title), 'topic'].map(w => String(w ?? '').trim()).filter(Boolean).join(' ') };
+  return `${ENDPOINT}?${new URLSearchParams({ ...params, key: apiKey })}`;
+}
+
+export const videosUrl = (ids, apiKey) => `https://www.googleapis.com/youtube/v3/videos?${new URLSearchParams({ part: 'contentDetails', id: ids.join(','), key: apiKey })}`;
+
+const topicItems = items => (Array.isArray(items) ? items : []).filter(item => VIDEO_ID.test(item?.id?.videoId ?? '') && String(item?.snippet?.channelTitle ?? '').endsWith(' - Topic') && !AUDIO_NOT.test(titleOf(item)));
+
+/**
+ * Audio tracks of this song: Topic channels only, other versions left out. Their titles are often English,
+ * so with the song's length known the length decides; without it the title has to match.
+ */
+export function pickAudio(items, durations, { title, duration }) {
+  const known = Number.isFinite(duration);
+  return topicItems(items)
+    .filter(item => known ? Math.abs((durations.get(item.id.videoId) ?? -1) - duration) <= SAME_LENGTH_S : titleMatches(titleOf(item), title))
+    .map(item => ({ videoId: item.id.videoId, kind: 'audio' }))
+    .slice(0, MAX_CANDIDATES);
+}
+
 export function createYoutubeClient({ apiKey, fetchImpl = fetch, queue = createQueue({ minIntervalMs: 250 }) }) {
-  return async function findVideos({ side, title, artist }) {
-    const result = await queue(async () => {
-      let response;
-      try { response = await fetchImpl(searchUrl({ side, title, artist, apiKey }), { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(TIMEOUT_MS) }); }
-      catch { throw new YoutubeError('upstream'); }
-      let body = null;
-      try { body = await response.json(); } catch { body = null; }
-      if (!response.ok) {
-        const reason = body?.error?.errors?.[0]?.reason;
-        throw new YoutubeError(response.status === 403 && ['quotaExceeded', 'dailyLimitExceeded'].includes(reason) ? 'quota' : 'upstream');
+  async function getJson(url) {
+    let response;
+    try { response = await fetchImpl(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(TIMEOUT_MS) }); }
+    catch { throw new YoutubeError('upstream'); }
+    let body = null;
+    try { body = await response.json(); } catch { body = null; }
+    if (!response.ok) {
+      const reason = body?.error?.errors?.[0]?.reason;
+      throw new YoutubeError(response.status === 403 && ['quotaExceeded', 'dailyLimitExceeded'].includes(reason) ? 'quota' : 'upstream');
+    }
+    return body;
+  }
+
+  async function findOriginal({ title, artist, duration }) {
+    const found = (await getJson(audioSearchUrl({ title, artist, apiKey })))?.items;
+    const topics = topicItems(found);
+    if (topics.length) {
+      let lengths = new Map();
+      if (Number.isFinite(duration)) {
+        const details = (await getJson(videosUrl(topics.map(item => item.id.videoId), apiKey)))?.items ?? [];
+        lengths = new Map(details.map(video => [video.id, parseIsoDuration(video.contentDetails?.duration)]));
       }
-      const items = body?.items;
-      return { candidates: side === 'mv' ? pickMv(items, title) : pickKaraoke(items, title) };
-    });
+      const audio = pickAudio(found, lengths, { title, duration });
+      if (audio.length) return { candidates: audio };
+    }
+    // No audio track for this song: the MV stands in.
+    const mv = (await getJson(searchUrl({ side: 'mv', title, artist, apiKey })))?.items;
+    return { candidates: pickMv(mv, title).map(candidate => ({ ...candidate, kind: 'mv' })) };
+  }
+
+  return async function findVideos({ side, title, artist, duration }) {
+    const result = await queue(async () => side === 'mv'
+      ? findOriginal({ title, artist, duration })
+      : { candidates: pickKaraoke((await getJson(searchUrl({ side, title, artist, apiKey })))?.items, title) });
     if (result === STALE) throw new YoutubeError('busy');
     return result;
   };

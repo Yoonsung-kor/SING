@@ -46,5 +46,57 @@ test('the client maps quota, stale and other failures, and never puts the key in
     await assert.rejects(find(fetchImpl, queue)({ side: 'mv', title: 'x', artist: '' }), error => error instanceof YoutubeError && error.code === code && !String(error.message).includes('SECRETKEY') && !String(error.stack).includes('SECRETKEY'));
   }
   const ok = await find(async () => reply(200, { items: [item(ids.E, '[MV] 성시경 _ Every Moment Of You(너의 모든 순간)')] }))({ side: 'mv', title: TJ_TITLE, artist: '성시경' });
-  assert.deepEqual(ok, { candidates: [{ videoId: ids.E }] });
+  assert.deepEqual(ok, { candidates: [{ videoId: ids.E, kind: 'mv' }] });
+});
+
+// --- Audio track (YouTube "Topic") for the original side ---
+import { parseIsoDuration, audioSearchUrl, videosUrl, pickAudio } from '../scripts/youtube.mjs';
+
+const topic = (videoId, title, channelTitle = 'Sung Si Kyung - Topic') => ({ id: { kind: 'youtube#video', videoId }, snippet: { title, channelTitle } });
+const AUD = 'izssDYTMXis', PIA = 'Ps2UeoRG-U8', INS = 'Ja4cIsLZ8YI', LYR = '1qzbXDsUd2E', KOR = 'KORKORKORKO';
+const audioItems = [topic(AUD, 'Every Moment Of You (Original)'), topic(PIA, 'Every Moment Of You (Piano Ver.)'), topic(INS, 'Every moment of you (Instrumental)'), topic(LYR, '성시경 - 너의 모든 순간 [별에서 온 그대 OST] [가사/Lyrics]', '웅키')];
+
+test('ISO 8601 video lengths become seconds', () => {
+  assert.equal(parseIsoDuration('PT4M3S'), 243);
+  assert.equal(parseIsoDuration('PT1H2M3S'), 3723);
+  assert.equal(parseIsoDuration('PT45S'), 45);
+  assert.equal(parseIsoDuration('4:03'), null);
+});
+
+test('audio search and length urls', () => {
+  const search = new URL(audioSearchUrl({ title: TJ_TITLE, artist: '성시경', apiKey: 'k' }));
+  assert.equal(search.searchParams.get('q'), '성시경 너의모든순간 topic');
+  assert.equal(search.searchParams.get('videoEmbeddable'), 'true');
+  assert.equal(search.searchParams.get('channelId'), null);
+  const videos = new URL(videosUrl([AUD, PIA], 'k'));
+  assert.equal(videos.origin + videos.pathname, 'https://www.googleapis.com/youtube/v3/videos');
+  assert.deepEqual(['part', 'id', 'key'].map(k => videos.searchParams.get(k)), ['contentDetails', `${AUD},${PIA}`, 'k']);
+});
+
+test('audio picks: a Topic track of the same length, never other versions or other channels', () => {
+  const lengths = new Map([[AUD, 243], [PIA, 250], [INS, 243], [LYR, 243]]);
+  assert.deepEqual(pickAudio(audioItems, lengths, { title: TJ_TITLE, duration: 243 }), [{ videoId: AUD, kind: 'audio' }]);
+  assert.deepEqual(pickAudio(audioItems, lengths, { title: TJ_TITLE, duration: 300 }), []);
+  // Without a known length only a title that matches can tell it is this song.
+  const korean = [...audioItems, topic(KOR, '너의 모든 순간')];
+  assert.deepEqual(pickAudio(korean, new Map(), { title: TJ_TITLE }), [{ videoId: KOR, kind: 'audio' }]);
+});
+
+test('the original side asks for the audio track first and falls back to an MV search', async () => {
+  const asked = [];
+  const mvItems = [item(ids.E, '[MV] 성시경 _ Every Moment Of You(너의 모든 순간) (Original)')];
+  const fake = withAudio => async url => {
+    const u = new URL(url);
+    if (u.pathname.endsWith('/videos')) { asked.push('videos'); return reply(200, { items: u.searchParams.get('id').split(',').map(id => ({ id, contentDetails: { duration: id === AUD ? 'PT4M3S' : 'PT4M10S' } })) }); }
+    const isMv = u.searchParams.get('q').endsWith(' MV');
+    asked.push(isMv ? 'mv-search' : 'audio-search');
+    return reply(200, { items: isMv ? mvItems : withAudio ? audioItems : [] });
+  };
+  const found = await createYoutubeClient({ apiKey: 'k', fetchImpl: fake(true), queue: run })({ side: 'mv', title: TJ_TITLE, artist: '성시경', duration: 243 });
+  assert.deepEqual(found, { candidates: [{ videoId: AUD, kind: 'audio' }] });
+  assert.deepEqual(asked, ['audio-search', 'videos']);
+  asked.length = 0;
+  const fallback = await createYoutubeClient({ apiKey: 'k', fetchImpl: fake(false), queue: run })({ side: 'mv', title: TJ_TITLE, artist: '성시경', duration: 243 });
+  assert.deepEqual(fallback, { candidates: [{ videoId: ids.E, kind: 'mv' }] });
+  assert.deepEqual(asked, ['audio-search', 'mv-search']);
 });

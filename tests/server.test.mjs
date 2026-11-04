@@ -133,7 +133,11 @@ test('song-videos endpoint validates the side and maps YouTube failures', async 
     assert.equal((await get(s.port, { side: 'mv' })).status, 400);
     const ok = await get(s.port, { side: 'karaoke', title: ' 너의 모든 순간 ', artist: '성시경' });
     assert.deepEqual([ok.status, await ok.json()], [200, { candidates: [{ videoId: 'AAAAAAAAAAA' }] }]);
-    assert.deepEqual(asked, { side: 'karaoke', title: '너의 모든 순간', artist: '성시경' });
+    assert.deepEqual(asked, { side: 'karaoke', title: '너의 모든 순간', artist: '성시경', duration: undefined });
+    assert.equal((await get(s.port, { side: 'mv', title: 'a', duration: 'abc' })).status, 400);
+    assert.equal((await get(s.port, { side: 'mv', title: 'a', duration: '0' })).status, 400);
+    assert.equal((await get(s.port, { side: 'mv', title: 'a', duration: '243.46' })).status, 200);
+    assert.equal(asked.duration, 243.46);
     for (const [error, status, body] of [[new YoutubeError('quota'), 429, 'quota'], [new YoutubeError('busy'), 503, 'busy'], [new Error('x'), 502, 'upstream']]) {
       answer = error;
       const response = await get(s.port, { side: 'mv', title: 'a' });
