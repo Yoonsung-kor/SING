@@ -107,9 +107,9 @@ function result(v, history = false) {
 }
 
 function consentRow(settings) {
-  if (!settings.aiConsentAt) return '<div class="consent-row"><span>AI 추천과 곡 검색: 동의 안 함</span></div><p>추천이나 곡 검색을 쓸 때 무엇을 보내는지 먼저 보여드려요.</p>';
+  if (!settings.aiConsentAt) return '<div class="consent-row"><span>AI 추천·곡 검색·영상 찾기: 동의 안 함</span></div><p>추천이나 곡 검색을 쓸 때 무엇을 보내는지 먼저 보여드려요.</p>';
   const status = hasCurrentConsent(settings) ? `동의함 · ${e(dateText(new Date(settings.aiConsentAt)))}` : '예전 동의 · 다음에 AI를 쓸 때 다시 확인해요';
-  return `<div class="consent-row"><span>AI 추천과 곡 검색: ${status}</span><button class="text-button" data-action="ai-consent-revoke">동의 철회</button></div>`;
+  return `<div class="consent-row"><span>AI 추천·곡 검색·영상 찾기: ${status}</span><button class="text-button" data-action="ai-consent-revoke">동의 철회</button></div>`;
 }
 
 function history(v) {

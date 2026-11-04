@@ -840,19 +840,21 @@ async function handle(action, id) {
   if (action === 'song-range') return lookupSongRange();
   if (action === 'consent-back') {
     if (consentReturn === 'song-pick') return openManualSongForm(pendingPickList);
+    if (consentReturn === 'song-detail') return navigate('song-detail');
     return navigate(consentReturn === 'song-form' ? 'song-form' : state.playlists.some(p => p.id === selectedPlaylistId) ? 'playlist' : 'songs');
   }
   if (action === 'ai-consent-accept') {
     if (!(await persist({ ...state, settings: withConsent(state.settings, new Date()) }))) return;
     if (consentReturn === 'song-form') { navigate('song-form'); return lookupSongRange(); }
     if (consentReturn === 'song-pick') return beginPicker(pendingPickList);
+    if (consentReturn === 'song-detail') return navigate('song-detail');
     navigate('playlist');
     return requestRecommendations(selectedPlaylistId);
   }
   if (action === 'ai-consent-revoke') {
     await persist({ ...state, settings: withoutConsent(state.settings) });
     render();
-    return toast('AI 추천과 곡 검색 동의를 철회했어요.');
+    return toast('AI 추천·곡 검색·영상 찾기 동의를 철회했어요.');
   }
   if (action === 'song-add') {
     if (!initialized && !demo) return toast('저장소가 준비되지 않았어요. 체험 모드에서 먼저 둘러볼 수 있어요.');
