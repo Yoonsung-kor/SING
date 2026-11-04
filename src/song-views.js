@@ -2,6 +2,7 @@ import { noteName } from './pitch.js';
 import { searchSongs } from './songs.js';
 import { koreanNote } from './notes.js';
 import { keyRow, keyGuideHtml } from './range-graphics.js';
+import { defaultSongUi, songMediaSides, songMediaBelow } from './song-media-views.js';
 
 const e = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const note = midi => noteName(midi)?.label || '미입력';
@@ -52,12 +53,25 @@ function myKeyRow(song, voice) {
   return `<div class="song-range">${keyRow(gap, song.keyOffset)}${keyGuideHtml(gap, song.keyOffset)}</div>`;
 }
 
-export function songDetailView(v) {
+/**
+ * The detail page around the video player: `top` sits above the player slot and `rest` below it. The app redraws
+ * these two in place while the player is mounted, so a playing video is never reloaded.
+ */
+export function songDetailParts(v) {
   const song = (v.state.songs || []).find(s => s.id === v.selectedSongId);
-  if (!song) return `<div class="narrow">${back()}<div class="empty"><h2>곡을 찾지 못했어요</h2><p>삭제되었거나 다른 기기에서 바뀐 곡일 수 있어요.</p></div></div>`;
+  if (!song) return null;
+  const ui = v.songUi ?? defaultSongUi();
   const voice = v.state.settings?.voice ?? null;
   const lists = (v.state.playlists || []).filter(p => p.songIds.includes(song.id)).map(p => e(p.name));
   const aiNote = song.origin !== 'ai' ? '' : voice ? '<div class="hint">AI 추천으로 담은 곡 · 원키로 담았어요. 불러본 뒤 키를 고쳐 주세요.</div>' : '<div class="hint">AI 추천으로 담은 곡 · 키는 추천값이에요. 불러본 뒤 곡 정보에서 고쳐 주세요.</div>';
   const origin = song.rangeQuote ? '최고음은 출처에서 확인한 값이에요. ' : song.rangeSourceUrl ? '예전에 AI가 찾은 값이라 아직 확인 전이에요. ' : '직접 입력한 정보예요. ';
-  return `<div class="narrow">${back()}<section class="song-detail-heading"><h1>${e(song.title)}</h1><p>${e(song.artist) || '가수 미입력'}${song.tjNumber ? ` · TJ ${e(song.tjNumber)}` : ''}</p><p class="song-lists">${lists.length ? `담긴 플레이리스트: ${lists.join(', ')}` : '아직 어느 플레이리스트에도 없어요.'}</p>${aiNote}</section><section class="surface"><h2>내가 적어둔 곡 정보</h2><dl class="song-detail-facts"><div><dt>원곡 키</dt><dd>${e(song.originalKey) || '아직 미입력'}</dd></div>${rangeFacts(song)}</dl>${myKeyRow(song, voice)}<p class="subtle">${origin}원곡·라이브·편곡 버전은 키나 음역이 다를 수 있어요.</p>${song.lyricsUrl ? `<a class="button secondary" href="${e(song.lyricsUrl)}" target="_blank" rel="noopener noreferrer">가사 페이지 열기 ↗</a>` : ''}</section><section class="surface"><h2>나를 위한 메모</h2><p class="song-full-note">${song.note ? e(song.note) : '아직 메모가 없어요. 직접 불러본 느낌을 남겨보세요.'}</p></section><div class="action-row"><button class="button" data-action="song-edit" data-id="${e(song.id)}">곡 정보 수정</button><button class="button quiet" data-action="song-delete" data-id="${e(song.id)}">곡 삭제</button></div><p class="subtle">곡과 플레이리스트도 이 기기에 저장돼요. ‘나의 기록 → 기록과 개인정보 관리’에서 함께 백업할 수 있어요.</p></div>`;
+  const top = `${back()}<section class="song-detail-heading"><h1>${e(song.title)}</h1><p>${e(song.artist) || '가수 미입력'}${song.tjNumber ? ` · TJ ${e(song.tjNumber)}` : ''}</p><p class="song-lists">${lists.length ? `담긴 플레이리스트: ${lists.join(', ')}` : '아직 어느 플레이리스트에도 없어요.'}</p>${aiNote}</section>${songMediaSides(ui)}`;
+  const rest = `${songMediaBelow(song, ui)}<section class="surface"><h2>내가 적어둔 곡 정보</h2><dl class="song-detail-facts"><div><dt>원곡 키</dt><dd>${e(song.originalKey) || '아직 미입력'}</dd></div>${rangeFacts(song)}</dl>${myKeyRow(song, voice)}<p class="subtle">${origin}원곡·라이브·편곡 버전은 키나 음역이 다를 수 있어요.</p>${song.lyricsUrl ? `<a class="button secondary" href="${e(song.lyricsUrl)}" target="_blank" rel="noopener noreferrer">가사 페이지 열기 ↗</a>` : ''}</section><section class="surface"><h2>나를 위한 메모</h2><p class="song-full-note">${song.note ? e(song.note) : '아직 메모가 없어요. 직접 불러본 느낌을 남겨보세요.'}</p></section><div class="action-row"><button class="button" data-action="song-edit" data-id="${e(song.id)}">곡 정보 수정</button><button class="button quiet" data-action="song-delete" data-id="${e(song.id)}">곡 삭제</button></div><p class="subtle">곡과 플레이리스트도 이 기기에 저장돼요. ‘나의 기록 → 기록과 개인정보 관리’에서 함께 백업할 수 있어요.</p>`;
+  return { top, rest };
+}
+
+export function songDetailView(v) {
+  const parts = songDetailParts(v);
+  if (!parts) return `<div class="narrow">${back()}<div class="empty"><h2>곡을 찾지 못했어요</h2><p>삭제되었거나 다른 기기에서 바뀐 곡일 수 있어요.</p></div></div>`;
+  return `<div class="narrow"><div id="song-detail-top">${parts.top}</div><div id="song-player-slot" class="media-player" hidden></div><div id="song-detail-rest">${parts.rest}</div></div>`;
 }
