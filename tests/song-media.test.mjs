@@ -210,3 +210,11 @@ test('an original found before audio tracks existed is searched again; pasted on
   const pasted = { videoId: P, source: 'pasted', foundAt: yesterday, candidates: [{ videoId: P }] };
   assert.deepEqual(expireMedia({ ...emptyMedia(), mv: pasted }, now).mv, pasted);
 });
+
+test('lyric lines that arrive with sections are never stored', () => {
+  const items = [{ t: 17.6, label: '노래 시작 · 1절', kind: 'start' }];
+  const media = withSections(emptyMedia(), { duration: 243, sections: items, lines: [{ t: 17.6, text: 'word-a' }] }, now);
+  assert.deepEqual(Object.keys(media.sections), ['duration', 'items', 'checkedAt']);
+  assert.ok(!JSON.stringify(media).includes('word-'));
+  assert.throws(() => validateMedia({ ...media, sections: { ...media.sections, lines: [{ t: 1, text: 'x' }] } }), /곡 영상 정보/);
+});

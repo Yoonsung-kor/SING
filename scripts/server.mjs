@@ -88,7 +88,8 @@ async function handleSections(req, res, findSections) {
   try { result = await findSections(song); }
   catch { return sendJson(res, 503, { error: 'busy' }); }
   if (!result) return sendJson(res, 404, { error: 'no-timing' });
-  return sendJson(res, 200, { duration: result.duration, sections: result.sections });
+  // Lyric lines are passed through to the screen only; the server keeps nothing.
+  return sendJson(res, 200, { duration: result.duration, sections: result.sections, lines: Array.isArray(result.lines) ? result.lines : [] });
 }
 
 async function handleVideos(req, res, findVideos) {
