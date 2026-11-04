@@ -2,7 +2,11 @@ import { createLesson, recordAttempt, nextTarget, finishLesson, summarizeLesson,
 import { defaultState, openStore } from './storage.js';
 import { AudioEngine, microphoneError } from './audio.js';
 import { noteName, frequencyToMidi } from './pitch.js';
-import { renderView } from './views.js';
+import { renderView, pageNotice } from './views.js';
+import { songDetailParts } from './song-views.js';
+import { defaultSongUi, currentVideoId } from './song-media-views.js';
+import { createSongPlayer } from './song-player.js';
+import { readMedia, validateMedia, expireMedia, mediaNeeds, withSections, withNoTiming, withPasted, withCandidates, dropCandidate, nextCandidate, setStart, canSetStart, startOf, toVideoTime, pinVideoTime, addPin, removePin, currentSectionIndex, parseYoutubeLink, sameSongQuery } from './song-media.js';
 import { createSong, updateSong } from './songs.js';
 import { createPlaylist, renamePlaylist, removeSong, applyMembership, removeSongEverywhere, addSong, setRecommendations, takeRecommendation, rejectRecommendation, isValidRecItem, PLAYLIST_LIMITS } from './playlists.js';
 import { buildRecommendationRequest, suggestKey, sameSong } from './recommend.js';
@@ -53,6 +57,13 @@ let searchToken = 0;
 let lookupQueue = [];
 let lookupActive = 0;
 let aiOffToastShown = false;
+// Song screen: the player stays mounted while the song is open (playerFor), so render() redraws around it.
+let songUi = defaultSongUi();
+let playerFor = null;
+let pendingPaste = null;
+let pinDraft = null;
+let mediaTicker = null;
+const songPlayer = createSongPlayer({ onState: handlePlayerState, onError: handlePlayerError, onLoadFail: () => toast('영상 플레이어를 불러오지 못했어요. 잠시 후 다시 열어 주세요.') });
 const LOOKUP_CONCURRENCY = 3;
 const SEARCH_SLOW_MS = 3000;
 const LOOKUP_SLOW_MS = 15000;
@@ -66,7 +77,19 @@ function toast(message) {
 }
 
 function render(focus = false) {
-  root.innerHTML = renderView({ page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, recLoading, recError, onboarding, loading: !initialized && !demo });
+  const v = { page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, recLoading, recError, onboarding, loading: !initialized && !demo, songUi: { ...songUi, consent: hasCurrentConsent(state.settings) } };
+  // While a song's player is mounted, only the parts around it are redrawn: moving an iframe would reload the video.
+  if (!focus && page === 'song-detail' && playerFor === selectedSongId && document.querySelector('#song-player-slot')) {
+    const parts = songDetailParts(v);
+    if (parts) {
+      document.querySelector('#song-detail-top').innerHTML = parts.top;
+      document.querySelector('#song-detail-rest').innerHTML = parts.rest;
+      document.querySelector('#page-notice').innerHTML = pageNotice(v);
+      return;
+    }
+    stopSongPlayer();
+  }
+  root.innerHTML = renderView(v);
   if (focus) { document.querySelector('#main')?.focus({ preventScroll: true }); window.scrollTo(0, 0); }
 }
 
@@ -89,9 +112,264 @@ function navigate(target) {
   rangeToken++;
   if (!isPickerPage(target)) leaveOnboarding();
   cancelCapture();
+  stopSongPlayer();
   error = '';
   page = target;
+  if (target === 'song-detail') songUi = defaultSongUi();
   render(true);
+  if (target === 'song-detail') openSongDetail();
+}
+
+function stopSongPlayer() {
+  clearInterval(mediaTicker);
+  mediaTicker = null;
+  if (playerFor !== null) songPlayer.destroy();
+  playerFor = pendingPaste = pinDraft = null;
+}
+
+const selectedSong = () => state.songs.find(s => s.id === selectedSongId);
+const onSongScreen = songId => page === 'song-detail' && selectedSongId === songId;
+
+/** Saves a change to one song's media; the song may have been deleted meanwhile, then nothing happens. */
+async function saveMedia(songId, change) {
+  const song = state.songs.find(s => s.id === songId);
+  if (!song) return false;
+  const media = change(readMedia(song));
+  const saved = await persist({ ...state, songs: state.songs.map(s => s.id === songId ? { ...s, media } : s) });
+  render();
+  return saved;
+}
+
+function showCurrentVideo() {
+  const song = selectedSong();
+  if (song && playerFor === song.id) songPlayer.show(document.querySelector('#song-player-slot'), currentVideoId(song, songUi.side));
+}
+
+async function openSongDetail() {
+  const song = selectedSong();
+  if (!song) return;
+  const media = readMedia(song);
+  const fresh = expireMedia(media, new Date());
+  if (fresh !== media) await saveMedia(song.id, () => fresh);
+  if (!onSongScreen(song.id)) return;
+  playerFor = song.id;
+  showCurrentVideo();
+  mediaTicker = setInterval(tickMedia, 300);
+  if (!hasCurrentConsent(state.settings)) return;
+  if (mediaNeeds(readMedia(selectedSong())).sections) loadSections();
+  loadMissingVideos(song.id);
+}
+
+/** The side on screen first, then the other; each side is searched only when nothing (not even "none") is stored. */
+async function loadMissingVideos(songId) {
+  for (const side of songUi.side === 'mv' ? ['mv', 'karaoke'] : ['karaoke', 'mv']) {
+    const song = state.songs.find(s => s.id === songId);
+    if (!song || !onSongScreen(songId)) return;
+    if (mediaNeeds(readMedia(song))[side]) await loadVideos(songId, side);
+  }
+}
+
+async function loadVideos(songId, side) {
+  const song = state.songs.find(s => s.id === songId);
+  if (!song || !hasCurrentConsent(state.settings)) return;
+  const query = { title: song.title, artist: song.artist };
+  const mark = status => { if (onSongScreen(songId)) songUi = { ...songUi, videos: { ...songUi.videos, [side]: status } }; };
+  mark('loading');
+  render();
+  let status = 0;
+  let body = null;
+  try {
+    const response = await fetch(`/api/song-videos?${new URLSearchParams({ side, ...query })}`);
+    status = response.status;
+    body = await response.json().catch(() => null);
+  } catch { status = 0; }
+  // A late answer for a renamed, deleted or other song is dropped; a failed search is not stored, so the next visit tries again.
+  if (!sameSongQuery(state.songs.find(s => s.id === songId), query)) return;
+  const candidates = status === 200 && Array.isArray(body?.candidates) ? body.candidates : null;
+  let found = false;
+  if (candidates) {
+    try { validateMedia(withCandidates(readMedia(song), side, candidates, new Date())); found = true; } catch { found = false; }
+  }
+  mark(found ? 'idle' : status === 429 ? 'quota' : status === 503 && body?.error === 'not-configured' ? 'not-configured' : 'failed');
+  if (!found) return render();
+  await saveMedia(songId, media => withCandidates(media, side, candidates, new Date()));
+  if (onSongScreen(songId) && songUi.side === side) showCurrentVideo();
+}
+
+async function loadSections() {
+  const song = selectedSong();
+  if (!song) return;
+  const query = { title: song.title, artist: song.artist };
+  songUi = { ...songUi, sections: 'loading' };
+  render();
+  let status = 0;
+  let body = null;
+  try {
+    const response = await fetch(`/api/song-sections?${new URLSearchParams(query)}`);
+    status = response.status;
+    if (status === 200) body = await response.json();
+  } catch { status = 0; }
+  // A late answer for a renamed, deleted or other song is dropped.
+  if (!sameSongQuery(state.songs.find(s => s.id === song.id), query)) return;
+  let found = false;
+  if (status === 200) {
+    try { validateMedia(withSections(readMedia(song), body, new Date())); found = true; } catch { found = false; }
+  }
+  if (onSongScreen(song.id)) songUi = { ...songUi, sections: found || status === 404 ? 'idle' : 'busy' };
+  if (found) return saveMedia(song.id, media => withSections(media, body, new Date()));
+  if (status === 404) return saveMedia(song.id, media => withNoTiming(media, new Date()));
+  render();
+}
+
+function tickMedia() {
+  const song = selectedSong();
+  if (!song || page !== 'song-detail') return;
+  const media = readMedia(song);
+  const videoId = currentVideoId(song, songUi.side);
+  const t = songPlayer.currentTime();
+  if (t === null || !videoId || songPlayer.currentVideoId() !== videoId) return;
+  const songTime = t - startOf(media, videoId);
+  const sections = media.sections;
+  if (sections?.items?.length) {
+    const x = String(Math.min(1000, Math.max(0, songTime / sections.duration * 1000)));
+    const head = document.querySelector('#media-head');
+    head?.setAttribute('x1', x);
+    head?.setAttribute('x2', x);
+    const index = currentSectionIndex(sections.items, songTime);
+    document.querySelectorAll('.media-chip').forEach(chip => chip.classList.toggle('now', Number(chip.dataset.id) === index));
+  }
+  document.querySelectorAll('.media-pin-list li[data-t]').forEach(li => li.classList.toggle('now', Math.abs(Number(li.dataset.t) - t) < 4));
+}
+
+function handlePlayerState(code, videoId) {
+  // A pasted link is kept only once the player has it ready (cued) or playing.
+  if (pendingPaste && pendingPaste.videoId === videoId && (code === 5 || code === 1)) {
+    const { songId, side } = pendingPaste;
+    pendingPaste = null;
+    if (onSongScreen(songId)) songUi = { ...songUi, panel: null, pasteError: '', playerError: null };
+    saveMedia(songId, media => withPasted(media, side, videoId, new Date()));
+  }
+}
+
+const GONE_OR_BLOCKED = [100, 101, 150];
+
+async function handlePlayerError(code, videoId) {
+  if (pendingPaste && pendingPaste.videoId === videoId) {
+    const { previous } = pendingPaste;
+    pendingPaste = null;
+    songUi = { ...songUi, playerError: { code, videoId } };
+    render();
+    songPlayer.show(document.querySelector('#song-player-slot'), previous);
+    return;
+  }
+  // An error about a video no longer on screen (left behind while switching) changes nothing.
+  if (videoId !== songPlayer.currentVideoId()) return;
+  const song = selectedSong();
+  const side = songUi.side;
+  const entry = song && readMedia(song)[side];
+  if (GONE_OR_BLOCKED.includes(code) && entry && !entry.none && entry.videoId === videoId) {
+    // A found candidate that will not play gives way to the next one; a saved pasted link is cleared and explained.
+    if (entry.source === 'pasted') songUi = { ...songUi, playerError: { code, videoId } };
+    await saveMedia(song.id, media => dropCandidate(media, side, videoId, new Date()));
+    return showCurrentVideo();
+  }
+  songUi = { ...songUi, playerError: { code, videoId } };
+  render();
+}
+
+function pasteLink(form) {
+  const song = selectedSong();
+  if (!song || playerFor !== song.id) return;
+  const raw = String(new FormData(form).get('link') ?? '');
+  const videoId = parseYoutubeLink(raw);
+  if (!videoId) {
+    songUi = { ...songUi, pasteError: '유튜브 영상 링크를 붙여 넣어 주세요' };
+    render();
+    const input = document.querySelector('#media-link');
+    if (input) { input.value = raw; input.focus(); }
+    return;
+  }
+  pendingPaste = { songId: song.id, side: songUi.side, videoId, previous: currentVideoId(song, songUi.side) };
+  songUi = { ...songUi, pasteError: '', playerError: null };
+  render();
+  songPlayer.show(document.querySelector('#song-player-slot'), videoId);
+}
+
+async function savePin(form) {
+  const song = selectedSong();
+  if (!song || !pinDraft) return;
+  const text = String(new FormData(form).get('text') ?? '');
+  let next;
+  try { next = addPin(readMedia(song), { ...pinDraft, text }, crypto.randomUUID()); }
+  catch (err) {
+    songUi = { ...songUi, pinError: err.message };
+    render();
+    const input = document.querySelector('#media-pin-form input');
+    if (input) { input.value = text; input.focus(); }
+    return;
+  }
+  pinDraft = null;
+  songUi = { ...songUi, panel: null, pinError: '' };
+  await saveMedia(song.id, () => next);
+}
+
+async function handleMedia(action, id) {
+  const song = selectedSong();
+  if (!song || page !== 'song-detail') return;
+  const media = readMedia(song);
+  const videoId = currentVideoId(song, songUi.side);
+  if (action === 'media-side') {
+    if (!['mv', 'karaoke'].includes(id) || id === songUi.side) return;
+    pendingPaste = null;
+    songUi = { ...songUi, side: id, panel: null, pasteError: '', pinError: '', playerError: null };
+    render();
+    return showCurrentVideo();
+  }
+  if (action === 'media-consent') { consentReturn = 'song-detail'; return navigate('ai-consent'); }
+  if (action === 'media-change') {
+    songUi = { ...songUi, panel: 'change', pasteError: '' };
+    render();
+    return document.querySelector('#media-link')?.focus();
+  }
+  if (action === 'media-panel-close' || action === 'media-pin-cancel') {
+    pinDraft = null;
+    songUi = { ...songUi, panel: null, pasteError: '', pinError: '' };
+    return render();
+  }
+  if (action === 'media-sections-retry') return loadSections();
+  if (action === 'media-align') {
+    const t = songPlayer.currentTime();
+    if (!canSetStart({ videoId, shownId: songPlayer.currentVideoId(), time: t, playerState: songPlayer.playbackState() })) return toast('영상을 먼저 틀어 주세요.');
+    return saveMedia(song.id, current => setStart(current, videoId, t));
+  }
+  if (action === 'media-section') {
+    const item = media.sections?.items?.[Number(id)];
+    if (item && videoId) songPlayer.seekTo(toVideoTime(media, videoId, item.t));
+    return;
+  }
+  if (action === 'media-seek') {
+    const fraction = Number(id);
+    if (!videoId || !media.sections?.duration || !Number.isFinite(fraction)) return;
+    return songPlayer.seekTo(toVideoTime(media, videoId, Math.min(1, Math.max(0, fraction)) * media.sections.duration));
+  }
+  if (action === 'media-pin-open') {
+    if (!videoId) return;
+    pinDraft = { videoId, t: songPlayer.currentTime() ?? 0 };
+    songUi = { ...songUi, panel: 'pin', pinError: '' };
+    render();
+    return document.querySelector('#media-pin-form input')?.focus();
+  }
+  if (action === 'media-pin-go') {
+    const pin = media.pins.find(p => p.id === id);
+    if (pin && videoId) songPlayer.seekTo(pinVideoTime(media, pin, videoId));
+    return;
+  }
+  if (action === 'media-pin-delete') return saveMedia(song.id, current => removePin(current, id));
+  if (action === 'media-next') {
+    songUi = { ...songUi, panel: null, playerError: null };
+    await saveMedia(song.id, current => nextCandidate(current, songUi.side));
+    return showCurrentVideo();
+  }
 }
 
 function leaveOnboarding() {
@@ -824,6 +1102,7 @@ async function handle(action, id) {
   if (action === 'songs' && page.startsWith('voice-') && onboarding) return;
   if (action === 'songs' && shouldShowOnboarding(state, { demo, initialized })) return beginOnboarding('voice-intro');
   if (/^(voice|search|pick)-/.test(action)) return handleVoice(action, id);
+  if (action.startsWith('media-')) return handleMedia(action, id);
   if (['home', 'learn', 'history', 'songs', 'all-songs'].includes(action)) return navigate(action);
   if (action === 'playlist-new' || action === 'playlist-rename') {
     if (!initialized && !demo) return toast('저장소가 준비되지 않았어요. 체험 모드에서 먼저 둘러볼 수 있어요.');
@@ -840,19 +1119,21 @@ async function handle(action, id) {
   if (action === 'song-range') return lookupSongRange();
   if (action === 'consent-back') {
     if (consentReturn === 'song-pick') return openManualSongForm(pendingPickList);
+    if (consentReturn === 'song-detail') return navigate('song-detail');
     return navigate(consentReturn === 'song-form' ? 'song-form' : state.playlists.some(p => p.id === selectedPlaylistId) ? 'playlist' : 'songs');
   }
   if (action === 'ai-consent-accept') {
     if (!(await persist({ ...state, settings: withConsent(state.settings, new Date()) }))) return;
     if (consentReturn === 'song-form') { navigate('song-form'); return lookupSongRange(); }
     if (consentReturn === 'song-pick') return beginPicker(pendingPickList);
+    if (consentReturn === 'song-detail') return navigate('song-detail');
     navigate('playlist');
     return requestRecommendations(selectedPlaylistId);
   }
   if (action === 'ai-consent-revoke') {
     await persist({ ...state, settings: withoutConsent(state.settings) });
     render();
-    return toast('AI 추천과 곡 검색 동의를 철회했어요.');
+    return toast('AI 추천·곡 검색·영상 찾기 동의를 철회했어요.');
   }
   if (action === 'song-add') {
     if (!initialized && !demo) return toast('저장소가 준비되지 않았어요. 체험 모드에서 먼저 둘러볼 수 있어요.');
@@ -919,7 +1200,10 @@ async function handle(action, id) {
 root.addEventListener('click', async event => {
   const target = event.target.closest('[data-action]');
   if (!target || target.disabled) return;
-  try { await handle(target.dataset.action, target.dataset.id); }
+  let id = target.dataset.id;
+  // The song timeline passes where it was tapped, as a fraction of its width.
+  if (target.dataset.action === 'media-seek') { const box = target.getBoundingClientRect(); id = String((event.clientX - box.left) / box.width); }
+  try { await handle(target.dataset.action, id); }
   catch (err) {
     busy = false;
     render();
@@ -966,6 +1250,8 @@ root.addEventListener('submit', async event => {
     await savePlaylist(event.target);
     return;
   }
+  if (event.target.id === 'media-paste-form') { event.preventDefault(); return pasteLink(event.target); }
+  if (event.target.id === 'media-pin-form') { event.preventDefault(); return savePin(event.target); }
   if (event.target.id !== 'song-form') return;
   event.preventDefault();
   await saveSong(event.target);

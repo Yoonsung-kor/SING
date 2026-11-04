@@ -1,3 +1,5 @@
+import { validateMedia, readMedia, clearAutoMedia } from './song-media.js';
+
 const STATUSES = ['want', 'practicing', 'comfortable'];
 const ORIGINS = ['user', 'ai'];
 const VOCALS = ['male', 'female', 'mixed'];
@@ -62,6 +64,8 @@ export function validateSong(song) {
   if (!song || typeof song !== 'object' || Array.isArray(song)) fail('곡 정보가 올바르지 않아요.');
   if (typeof song.id !== 'string' || !UUID.test(song.id)) fail('곡 ID가 올바르지 않아요.');
   checkFields(song);
+  // Media (videos, sections, pins) is optional: songs saved before the song screen have none.
+  if (song.media !== undefined) validateMedia(song.media);
   time(song.createdAt, '생성 날짜');
   time(song.updatedAt, '수정 날짜');
   return song;
@@ -114,7 +118,10 @@ export function updateSong(existing, fields, now = new Date()) {
   validateSong(normalizeSong(existing));
   const timestamp = isoNow(now);
   const data = buildFields(fields, normalizeSong(existing));
-  return { ...existing, ...data, updatedAt: timestamp };
+  const updated = { ...existing, ...data, updatedAt: timestamp };
+  // Videos and sections found for the old title or artist would be for another song.
+  if (existing.media !== undefined && (data.title !== existing.title || data.artist !== existing.artist)) updated.media = clearAutoMedia(readMedia(existing));
+  return updated;
 }
 
 function searchText(value) {

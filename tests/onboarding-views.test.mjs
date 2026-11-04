@@ -4,7 +4,7 @@ import { voiceIntroView, voicePickView, voiceResultView, voiceManualView, voiceC
 import { startOnboarding, addPick, applyLookup, setPickKey, emptySearch, markSlow, startPicker } from '../src/onboarding.js';
 import { defaultState } from '../src/storage.js';
 
-const consented = { ...defaultState(), settings: { ...defaultState().settings, aiConsentAt: '2026-11-03T01:00:00.000Z', aiConsentVersion: 3 } };
+const consented = { ...defaultState(), settings: { ...defaultState().settings, aiConsentAt: '2026-11-03T01:00:00.000Z', aiConsentVersion: 4 } };
 const checked = (highestMidi, vocal = 'male') => ({ highestMidi, falsettoHighestMidi: null, lowestMidi: null, sourceUrl: 'https://example.org/s', sourceQuote: `최고음 ${highestMidi}`, vocal });
 function withPick(voiceType, title, artist, result, keyOffset = 0) {
   let onb = { ...startOnboarding(defaultState()), voiceType };
@@ -12,6 +12,13 @@ function withPick(voiceType, title, artist, result, keyOffset = 0) {
   onb = applyLookup(added.onboarding, added.key, result);
   return setPickKey(onb, added.key, keyOffset);
 }
+
+test('the intro says the song screen sends title and artist to video search and lyric timing', () => {
+  const html = voiceIntroView({ state: defaultState() });
+  assert.ok(html.includes('가사 시간 정보 서비스'));
+  assert.ok(html.includes('YouTube'));
+  assert.ok(!html.includes('LRCLIB'));
+});
 
 test('the intro asks for consent only when it is not current', () => {
   const fresh = voiceIntroView({ state: defaultState() });

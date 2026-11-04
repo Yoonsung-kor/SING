@@ -81,7 +81,13 @@ test('consent page names OpenAI, what is sent, and what is not', () => {
 
 test('consent v2 also covers MusicBrainz search and my comfortable high', () => {
   const html = aiConsentView({ state: defaultState(), selectedPlaylistId: 'p' });
-  for (const text of ['AI 추천과 곡 검색을 쓰기 전에', 'MusicBrainz', '내 편한 최고음', '동의하고 계속하기', '최고음 찾기']) assert.ok(html.includes(text), text);
+  for (const text of ['AI 추천·곡 검색·영상 찾기를 쓰기 전에', 'MusicBrainz', '내 편한 최고음', '동의하고 계속하기', '최고음 찾기']) assert.ok(html.includes(text), text);
+});
+
+test('consent v4 says the song screen sends title and artist to YouTube search and lyric timing', () => {
+  const html = aiConsentView({ state: defaultState(), selectedPlaylistId: 'p' });
+  for (const text of ['곡 상세 화면에서 보내는 정보', 'YouTube 검색', '가사 시간 정보 서비스', '구간 시간만 남겨요']) assert.ok(html.includes(text), text);
+  assert.ok(!html.includes('LRCLIB'));
 });
 
 test('cards for songs already in the library are hidden but keep their index', () => {

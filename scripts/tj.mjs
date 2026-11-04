@@ -9,7 +9,7 @@ const TIMEOUT_MS = 8000;
 const MAX_CHARS = 2 * 1024 * 1024;
 
 const ENTITIES = { lt: '<', gt: '>', quot: '"', '#39': "'", nbsp: ' ' };
-function unescapeHtml(text) {
+export function unescapeHtml(text) {
   return text
     .replace(/&#x([\da-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
     .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(Number(dec)))

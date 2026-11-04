@@ -94,3 +94,64 @@ test('a request at the app limits (500 songs, 200 rejected) fits under the body 
   const s = await start({ recommend: async () => ({ items: [{ title: 'A' }], intent: 'any', fallback: false }) });
   try { assert.equal((await post(s.port, big)).status, 200); } finally { s.close(); }
 });
+
+test('song-sections endpoint validates the song and maps the answers', async () => {
+  const get = (port, query) => fetch(`http://127.0.0.1:${port}/api/song-sections?${new URLSearchParams(query)}`);
+  const sections = [{ t: 17.6, label: '노래 시작 · 1절', kind: 'start' }];
+  let asked;
+  let answer = { duration: 243, sections };
+  const s = await start({ recommend: null, findSections: async args => { asked = args; if (answer instanceof Error) throw answer; return answer; } });
+  const off = await start({ recommend: null });
+  try {
+    assert.equal((await get(s.port, { artist: '성시경' })).status, 400);
+    assert.equal((await get(s.port, { title: 'x'.repeat(121) })).status, 400);
+    assert.equal((await get(s.port, { title: 'x', artist: 'y'.repeat(121) })).status, 400);
+    const ok = await get(s.port, { title: '  너의 모든 순간 ', artist: ' 성시경 ' });
+    assert.equal(ok.status, 200);
+    assert.deepEqual(await ok.json(), { duration: 243, sections });
+    assert.deepEqual(asked, { title: '너의 모든 순간', artist: '성시경' });
+    answer = null;
+    const none = await get(s.port, { title: 'x' });
+    assert.deepEqual([none.status, await none.json()], [404, { error: 'no-timing' }]);
+    answer = new Error('overloaded');
+    const busy = await get(s.port, { title: 'x' });
+    assert.deepEqual([busy.status, await busy.json()], [503, { error: 'busy' }]);
+    const missing = await get(off.port, { title: 'x' });
+    assert.deepEqual([missing.status, await missing.json()], [503, { error: 'not-configured' }]);
+  } finally { s.close(); off.close(); }
+});
+
+test('song-videos endpoint validates the side and maps YouTube failures', async () => {
+  const { YoutubeError } = await import('../scripts/youtube.mjs');
+  const get = (port, query) => fetch(`http://127.0.0.1:${port}/api/song-videos?${new URLSearchParams(query)}`);
+  let asked;
+  let answer = { candidates: [{ videoId: 'AAAAAAAAAAA' }] };
+  const s = await start({ recommend: null, findVideos: async args => { asked = args; if (answer instanceof Error) throw answer; return answer; } });
+  const off = await start({ recommend: null });
+  try {
+    assert.equal((await get(s.port, { side: 'x', title: 'a' })).status, 400);
+    assert.equal((await get(s.port, { side: 'mv' })).status, 400);
+    const ok = await get(s.port, { side: 'karaoke', title: ' 너의 모든 순간 ', artist: '성시경' });
+    assert.deepEqual([ok.status, await ok.json()], [200, { candidates: [{ videoId: 'AAAAAAAAAAA' }] }]);
+    assert.deepEqual(asked, { side: 'karaoke', title: '너의 모든 순간', artist: '성시경' });
+    for (const [error, status, body] of [[new YoutubeError('quota'), 429, 'quota'], [new YoutubeError('busy'), 503, 'busy'], [new Error('x'), 502, 'upstream']]) {
+      answer = error;
+      const response = await get(s.port, { side: 'mv', title: 'a' });
+      assert.deepEqual([response.status, await response.json()], [status, { error: body }]);
+    }
+    const missing = await get(off.port, { side: 'mv', title: 'a' });
+    assert.deepEqual([missing.status, await missing.json()], [503, { error: 'not-configured' }]);
+  } finally { s.close(); off.close(); }
+});
+
+test('pages allow only the YouTube player script and its nocookie frame, and keep the default referrer', async () => {
+  const s = await start({ recommend: null });
+  try {
+    const response = await fetch(`http://127.0.0.1:${s.port}/`);
+    const csp = response.headers.get('content-security-policy');
+    assert.ok(csp.includes("script-src 'self' https://www.youtube.com;"), csp);
+    assert.ok(csp.includes('frame-src https://www.youtube-nocookie.com;'), csp);
+    assert.ok(csp.includes("style-src 'self';") && csp.includes("connect-src 'self';") && csp.includes("frame-ancestors 'none'"), csp);
+    assert.equal(response.headers.get('referrer-policy'), null);
+  } finally { s.close(); }
+});
