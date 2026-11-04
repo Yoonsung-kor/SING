@@ -16,6 +16,7 @@ function withPick(voiceType, title, artist, result, keyOffset = 0) {
 test('the intro says the song screen sends title and artist to video search and lyric timing', () => {
   const html = voiceIntroView({ state: defaultState() });
   assert.ok(html.includes('가사 시간 정보 서비스'));
+  assert.ok(html.includes('가사는 화면에만 보여주고 저장하지 않아요.') && !html.includes('가사 글자는 남기지 않아요'));
   assert.ok(html.includes('YouTube'));
   assert.ok(!html.includes('LRCLIB'));
 });

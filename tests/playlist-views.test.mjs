@@ -86,7 +86,8 @@ test('consent v2 also covers MusicBrainz search and my comfortable high', () => 
 
 test('consent v4 says the song screen sends title and artist to YouTube search and lyric timing', () => {
   const html = aiConsentView({ state: defaultState(), selectedPlaylistId: 'p' });
-  for (const text of ['곡 상세 화면에서 보내는 정보', 'YouTube 검색', '가사 시간 정보 서비스', '구간 시간만 남겨요']) assert.ok(html.includes(text), text);
+  for (const text of ['곡 상세 화면에서 보내는 정보', 'YouTube 검색', '가사 시간 정보 서비스', '가사는 이 화면에서만 보여주고 저장하지 않아요.']) assert.ok(html.includes(text), text);
+  assert.ok(!html.includes('받자마자 버리고'));
   assert.ok(!html.includes('LRCLIB'));
 });
 
