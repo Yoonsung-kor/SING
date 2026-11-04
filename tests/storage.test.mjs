@@ -177,6 +177,17 @@ test('openStore reports unavailable IndexedDB', async () => {
   await assert.rejects(openStore(), /IndexedDB.*unavailable/i);
 });
 
+test('a backup whose song media is broken is rejected', () => {
+  const song = { id: '00000000-0000-4000-8000-000000000001', title: 'x', artist: '', originalKey: '', lowestMidi: null, highestMidi: null, keyOffset: 0, status: 'want', lyricsUrl: '', note: '', rangeSourceUrl: '', origin: 'user', falsettoHighestMidi: null, rangeQuote: '', vocal: null, octaveShift: 0, tjNumber: '', createdAt: '2026-11-04T00:00:00.000Z', updatedAt: '2026-11-04T00:00:00.000Z' };
+  const withMedia = media => JSON.stringify({ ...backup, state: { ...backup.state, songs: [{ ...song, media }] } });
+  const empty = { mv: null, karaoke: null, sections: null, starts: {}, pins: [] };
+  assert.equal(parseBackup(withMedia(empty)).state.songs[0].media.pins.length, 0);
+  assert.equal(parseBackup(JSON.stringify({ ...backup, state: { ...backup.state, songs: [song] } })).state.songs[0].media, undefined);
+  for (const media of [{ ...empty, mv: { videoId: '<script>xxx', source: 'auto', foundAt: '2026-11-04T00:00:00.000Z', candidates: [] } }, { ...empty, pins: Array.from({ length: 51 }, (_, i) => ({ id: 'p' + i, videoId: 'AAAAAAAAAAA', t: 1, text: 'x' })) }, { ...empty, sections: { duration: 9, items: [{ t: 1, label: 'a', kind: 'x' }], checkedAt: '2026-11-04T00:00:00.000Z' } }]) {
+    assert.throws(() => parseBackup(withMedia(media)));
+  }
+});
+
 test('consent version 3 is kept and an unknown version is rejected', () => {
   const v3 = structuredClone(backup);
   v3.state.settings = { ...v3.state.settings, aiConsentAt: '2026-11-03T01:00:00.000Z', aiConsentVersion: 3 };

@@ -120,3 +120,14 @@ test('a TJ number is up to six digits and old songs gain an empty one', () => {
   const full = createSong({ title: 'A', tjNumber: '46009', highestMidi: 74 }, now);
   assert.equal(JSON.stringify(normalizeSong(full)), JSON.stringify(full));
 });
+
+test('renaming a song drops videos found for the old name; other edits keep media as it is', () => {
+  const media = { mv: { videoId: 'AAAAAAAAAAA', source: 'auto', foundAt: '2026-11-01T00:00:00.000Z', candidates: [{ videoId: 'AAAAAAAAAAA' }] }, karaoke: null, sections: null, starts: {}, pins: [] };
+  const song = { ...createSong({ title: '너의 모든 순간', artist: '성시경' }, now), media };
+  assert.equal(updateSong(song, { title: '너의모든순간' }, now).media.mv, null);
+  assert.equal(updateSong(song, { artist: '아이유' }, now).media.mv, null);
+  assert.deepEqual(updateSong(song, { note: '후렴 숨' }, now).media, media);
+  assert.equal(updateSong(createSong({ title: 'a' }, now), { title: 'b' }, now).media, undefined);
+  assert.doesNotThrow(() => validateSong(createSong({ title: '예전 곡' }, now)));
+  assert.throws(() => validateSong({ ...song, media: { ...media, pins: [{ id: 'p', videoId: 'x', t: 1, text: 'x' }] } }), /곡 영상 정보/);
+});
