@@ -6,7 +6,7 @@ import { renderView, pageNotice } from './views.js';
 import { songDetailParts } from './song-views.js';
 import { defaultSongUi, currentVideoId } from './song-media-views.js';
 import { createSongPlayer } from './song-player.js';
-import { readMedia, validateMedia, expireMedia, mediaNeeds, withSections, withNoTiming, withPasted, withCandidates, upgradeOriginal, canSearchOriginal, dropCandidate, nextCandidate, setStart, canSetStart, startOf, toVideoTime, pinVideoTime, addPin, removePin, currentSectionIndex, parseYoutubeLink, sameSongQuery } from './song-media.js';
+import { readMedia, validateMedia, expireMedia, mediaNeeds, withSections, withNoTiming, withPasted, withCandidates, upgradeOriginal, canSearchOriginal, dropCandidate, nextCandidate, setStart, canSetStart, startOf, toVideoTime, pinVideoTime, addPin, removePin, currentSectionIndex, lyricIndex, parseYoutubeLink, sameSongQuery } from './song-media.js';
 import { createSong, updateSong } from './songs.js';
 import { createPlaylist, renamePlaylist, removeSong, applyMembership, removeSongEverywhere, addSong, setRecommendations, takeRecommendation, rejectRecommendation, isValidRecItem, PLAYLIST_LIMITS } from './playlists.js';
 import { buildRecommendationRequest, suggestKey, sameSong } from './recommend.js';
@@ -67,6 +67,7 @@ let mediaTicker = null;
 const songLyrics = new Map();
 let lyricsStyle = 'karaoke';
 let lyricsScrollAt = 0;
+const lookupsInFlight = new Set();
 const songPlayer = createSongPlayer({ onState: handlePlayerState, onError: handlePlayerError, onLoadFail: () => toast('영상 플레이어를 불러오지 못했어요. 잠시 후 다시 열어 주세요.') });
 const LOOKUP_CONCURRENCY = 3;
 const SEARCH_SLOW_MS = 3000;
@@ -87,10 +88,13 @@ function render(focus = false) {
     const parts = songDetailParts(v);
     if (parts) {
       const lyricsScroll = document.querySelector('#lyrics-full')?.scrollTop ?? 0;
+      const typing = document.activeElement?.matches?.('#media-link, #media-pin-form input') ? { id: document.activeElement.id ? '#media-link' : '#media-pin-form input', value: document.activeElement.value, start: document.activeElement.selectionStart, end: document.activeElement.selectionEnd } : null;
       document.querySelector('#song-detail-top').innerHTML = parts.top;
       document.querySelector('#song-detail-rest').innerHTML = parts.rest;
       document.querySelector('#page-notice').innerHTML = pageNotice(v);
       document.querySelector('#lyrics-full')?.scrollTo({ top: lyricsScroll, behavior: 'instant' });
+      const input = typing && document.querySelector(typing.id);
+      if (input) { input.value = typing.value; input.focus(); input.setSelectionRange?.(typing.start, typing.end); }
       tickMedia();
       return;
     }
@@ -142,6 +146,7 @@ async function saveMedia(songId, change) {
   const song = state.songs.find(s => s.id === songId);
   if (!song) return false;
   const media = change(readMedia(song));
+  try { validateMedia(media); } catch { toast('영상 정보를 저장하지 못했어요. 다시 시도해 주세요.'); render(); return false; }
   const saved = await persist({ ...state, songs: state.songs.map(s => s.id === songId ? { ...s, media } : s) });
   render();
   return saved;
@@ -186,7 +191,14 @@ function loadOriginal(songId) {
 
 async function loadVideos(songId, side) {
   const song = state.songs.find(s => s.id === songId);
-  if (!song || !hasCurrentConsent(state.settings)) return;
+  const key = `${songId}:${side}`;
+  if (!song || !hasCurrentConsent(state.settings) || lookupsInFlight.has(key)) return;
+  lookupsInFlight.add(key);
+  try { await searchVideos(song, side); } finally { lookupsInFlight.delete(key); }
+}
+
+async function searchVideos(song, side) {
+  const songId = song.id;
   const query = { title: song.title, artist: song.artist };
   const mark = status => { if (onSongScreen(songId)) songUi = { ...songUi, videos: { ...songUi.videos, [side]: status } }; };
   mark('loading');
@@ -211,6 +223,8 @@ async function loadVideos(songId, side) {
   }
   mark(found ? 'idle' : status === 429 ? 'quota' : status === 503 && body?.error === 'not-configured' ? 'not-configured' : 'failed');
   if (!found) return render();
+  // Something the user chose meanwhile (a pasted link) is never overwritten by a late answer.
+  if (!mediaNeeds(readMedia(state.songs.find(s => s.id === songId)))[side]) return render();
   await saveMedia(songId, media => side === 'mv' ? upgradeOriginal(media, candidates, new Date()) : withCandidates(media, side, candidates, new Date()));
   if (onSongScreen(songId) && songUi.side === side) showCurrentVideo();
 }
@@ -218,7 +232,12 @@ async function loadVideos(songId, side) {
 /** Sections (stored on the song when missing) and lyric lines (kept in memory only) from one lookup. */
 async function loadSections() {
   const song = selectedSong();
-  if (!song) return;
+  if (!song || lookupsInFlight.has(`${song.id}:sections`)) return;
+  lookupsInFlight.add(`${song.id}:sections`);
+  try { await lookupSections(song); } finally { lookupsInFlight.delete(`${song.id}:sections`); }
+}
+
+async function lookupSections(song) {
   const query = { title: song.title, artist: song.artist };
   const needsSections = readMedia(song).sections === null;
   songUi = { ...songUi, sections: needsSections ? 'loading' : songUi.sections, lyrics: 'loading' };
@@ -274,8 +293,7 @@ function tickMedia() {
 function showLyric(songId, media, songTime) {
   const lines = songLyrics.get(songId);
   if (!lines?.length) return;
-  let index = -1;
-  lines.forEach((line, i) => { if (line.t <= songTime + 0.2) index = i; });
+  const index = lyricIndex(lines, songTime);
   const cur = document.querySelector('#lyric-cur');
   // Before the first line the hint stays; a fresh redraw (no marker) is filled again on the next tick.
   if (cur && cur.dataset.line !== String(index) && !(index === -1 && cur.dataset.line === undefined)) {
@@ -344,6 +362,11 @@ function pasteLink(form) {
     if (input) { input.value = raw; input.focus(); }
     return;
   }
+  if (videoId === currentVideoId(song, songUi.side)) {
+    songUi = { ...songUi, panel: null, pasteError: '' };
+    render();
+    return toast('지금 보고 있는 영상이에요.');
+  }
   pendingPaste = { songId: song.id, side: songUi.side, videoId, previous: currentVideoId(song, songUi.side) };
   songUi = { ...songUi, pasteError: '', playerError: null };
   render();
@@ -397,6 +420,7 @@ async function handleMedia(action, id) {
     if (!canSetStart({ videoId, shownId: songPlayer.currentVideoId(), time: t, playerState: songPlayer.playbackState() })) return toast('영상을 먼저 틀어 주세요.');
     return saveMedia(song.id, current => setStart(current, videoId, t));
   }
+  if (['media-section', 'media-seek', 'media-pin-go', 'media-lyric'].includes(action) && videoId && songPlayer.currentTime() === null) return toast('영상이 준비되면 다시 눌러 주세요.');
   if (action === 'media-section') {
     const item = media.sections?.items?.[Number(id)];
     if (item && videoId) songPlayer.seekTo(toVideoTime(media, videoId, item.t));
@@ -861,15 +885,17 @@ async function deleteSong(id) {
   const song = state.songs.find(s => s.id === id);
   if (!song || !confirm(`‘${song.title}’을(를) 삭제할까요? 담긴 플레이리스트에서도 빠져요.`)) return;
   busy = 'saving'; render();
+  const previous = state;
   const next = { ...state, songs: state.songs.filter(s => s.id !== id), playlists: removeSongEverywhere(state.playlists, id) };
+  state = next;
   try {
     if (!demo) await store.saveState(next);
-    state = next;
     storageError = '';
     busy = false;
     navigate(state.playlists.some(p => p.id === selectedPlaylistId) ? 'playlist' : 'songs');
     toast('곡을 삭제했어요.');
   } catch {
+    state = previous;
     busy = false;
     render();
     toast('삭제를 저장하지 못해 곡을 그대로 두었어요. 잠시 후 다시 시도해 주세요.');
@@ -1073,6 +1099,7 @@ async function importBackup(file) {
   if (file.size > 25 * 1024 * 1024) throw new Error('백업은 25 MB까지 가져올 수 있어요.');
   if (!confirm('현재 기록과 녹음을 이 백업의 내용으로 바꿀까요? 현재 자료는 먼저 백업해 주세요.')) return;
   state = await store.importData(await file.text());
+  songLyrics.clear();
   session = null;
   storageError = '';
   navigate('history');
