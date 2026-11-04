@@ -88,6 +88,7 @@ test('consent v4 says the song screen sends title and artist to YouTube search a
   const html = aiConsentView({ state: defaultState(), selectedPlaylistId: 'p' });
   for (const text of ['곡 상세 화면에서 보내는 정보', 'YouTube 검색', '가사 시간 정보 서비스', '가사는 이 화면에서만 보여주고 저장하지 않아요.']) assert.ok(html.includes(text), text);
   assert.ok(!html.includes('받자마자 버리고'));
+  assert.ok(html.includes('원곡(음원 영상, 없으면 뮤직비디오)과 금영 노래방 영상을 찾으려고요.') && !html.includes('원곡 MV'));
   assert.ok(!html.includes('LRCLIB'));
 });
 

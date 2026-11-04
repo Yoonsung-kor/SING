@@ -82,15 +82,25 @@ export function expireMedia(media, now) {
   let changed = false;
   for (const side of SIDES) {
     const entry = media[side];
-    // An original found before audio tracks were searched has no kind: it is searched again.
-    const stale = entry?.source === 'auto' && (olderThan(entry.foundAt, AUTO_DAYS, now) || (side === 'mv' && !entry.kind));
+    const stale = entry?.source === 'auto' && olderThan(entry.foundAt, AUTO_DAYS, now);
     if ((entry?.none && olderThan(entry.foundAt, NONE_DAYS, now)) || stale) { next[side] = null; changed = true; }
   }
   if (media.sections?.none && olderThan(media.sections.checkedAt, NONE_DAYS, now)) { next.sections = null; changed = true; }
   return changed ? next : media;
 }
 
-export const mediaNeeds = media => ({ mv: media.mv === null, karaoke: media.karaoke === null, sections: media.sections === null });
+// An original found before audio tracks were searched has no kind: it keeps playing until one more search answers.
+const needsUpgrade = entry => entry?.source === 'auto' && !entry.none && !entry.kind;
+export const mediaNeeds = media => ({ mv: media.mv === null || needsUpgrade(media.mv), karaoke: media.karaoke === null, sections: media.sections === null });
+
+/** A search answer for the original side; an old MV is replaced only by something found, never by "none". */
+export function upgradeOriginal(media, candidates, now) {
+  if (!candidates.length && needsUpgrade(media.mv)) return { ...media, mv: { ...media.mv, kind: 'mv' } };
+  return withCandidates(media, 'mv', candidates, now);
+}
+
+// The original side matches its audio track by the song's length, so it waits until the sections lookup has answered.
+export const canSearchOriginal = media => media.sections !== null;
 
 const kindOf = (side, chosen) => side === 'karaoke' ? { kind: chosen.kind ?? 'unknown' } : chosen.kind ? { kind: chosen.kind } : {};
 

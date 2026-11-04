@@ -2,7 +2,7 @@
 // The key stays on the server: it is in the request URL only, never in an answer, an error or a log line.
 import { createQueue, STALE } from './throttle.mjs';
 import { unescapeHtml } from './tj.mjs';
-import { coreTitle, titleMatches } from './title-match.mjs';
+import { coreTitle, matchKey, titleMatches } from './title-match.mjs';
 
 export const KY_CHANNEL_ID = 'UCDqaUIUSJP5EVMEI178Zfag';
 const ENDPOINT = 'https://www.googleapis.com/youtube/v3/search';
@@ -44,7 +44,7 @@ export function pickMv(items, songTitle) {
 }
 
 // The official audio track ("Artist - Topic" channel) follows the release's timing, so lyric timing fits it as is.
-const AUDIO_NOT = /inst|instrumental|\bmr\b|piano|acoustic|live|remix|ver\.|karaoke|반주|라이브/i;
+const AUDIO_NOT = /\b(inst|instrumental|mr|piano|acoustic|live|remix|karaoke|version|ver|japanese|english|chinese|sped|slowed|demo)\b|tv size|반주|라이브|버전/i;
 const SAME_LENGTH_S = 2;
 
 /** "PT4M3S" → 243; null for anything else. */
@@ -66,15 +66,19 @@ export const videosUrl = (ids, apiKey) => `https://www.googleapis.com/youtube/v3
 const topicItems = items => (Array.isArray(items) ? items : []).filter(item => VIDEO_ID.test(item?.id?.videoId ?? '') && String(item?.snippet?.channelTitle ?? '').endsWith(' - Topic') && !AUDIO_NOT.test(titleOf(item)));
 
 /**
- * Audio tracks of this song: Topic channels only, other versions left out. Their titles are often English,
- * so with the song's length known the length decides; without it the title has to match.
+ * Audio tracks of this song: Topic channels only, other versions left out. Their titles are often English, so the
+ * song's length decides; a title that names the song wins, and two different titles of the same length are too
+ * ambiguous to guess (the MV stands in). Without a length only a track titled exactly like the song counts.
  */
 export function pickAudio(items, durations, { title, duration }) {
-  const known = Number.isFinite(duration);
-  return topicItems(items)
-    .filter(item => known ? Math.abs((durations.get(item.id.videoId) ?? -1) - duration) <= SAME_LENGTH_S : titleMatches(titleOf(item), title))
-    .map(item => ({ videoId: item.id.videoId, kind: 'audio' }))
-    .slice(0, MAX_CANDIDATES);
+  const toCandidates = list => list.map(item => ({ videoId: item.id.videoId, kind: 'audio' })).slice(0, MAX_CANDIDATES);
+  const topics = topicItems(items);
+  const plainKey = item => matchKey(coreTitle(titleOf(item)));
+  if (!Number.isFinite(duration)) return toCandidates(topics.filter(item => plainKey(item) === matchKey(coreTitle(title))));
+  const fits = topics.filter(item => Math.abs((durations.get(item.id.videoId) ?? -1) - duration) <= SAME_LENGTH_S);
+  const named = fits.filter(item => titleMatches(titleOf(item), title));
+  if (named.length) return toCandidates(named);
+  return new Set(fits.map(plainKey)).size > 1 ? [] : toCandidates(fits);
 }
 
 export function createYoutubeClient({ apiKey, fetchImpl = fetch, queue = createQueue({ minIntervalMs: 250 }) }) {

@@ -100,3 +100,18 @@ test('the original side asks for the audio track first and falls back to an MV s
   assert.deepEqual(fallback, { candidates: [{ videoId: ids.E, kind: 'mv' }] });
   assert.deepEqual(asked, ['audio-search', 'mv-search']);
 });
+
+test('audio picks never guess between different songs of the same length', () => {
+  const OTHER = 'OTHEROTHER1', RIGHT = 'RIGHTRIGHT1', JAP = 'JAPANJAPAN1', ALIVE = 'ALIVEALIVE1';
+  // Two different English titles fit the length and neither names the song: ambiguous, so the MV stands in.
+  const twoSongs = [topic(OTHER, 'Another Song'), topic(RIGHT, 'Every Moment Of You (Original)')];
+  assert.deepEqual(pickAudio(twoSongs, new Map([[OTHER, 242], [RIGHT, 243]]), { title: TJ_TITLE, duration: 243 }), []);
+  // A title that names the song wins over others of the same length.
+  const named = [topic(OTHER, 'Another Song'), topic(KOR, '너의 모든 순간')];
+  assert.deepEqual(pickAudio(named, new Map([[OTHER, 243], [KOR, 243]]), { title: TJ_TITLE, duration: 243 }), [{ videoId: KOR, kind: 'audio' }]);
+  // Other versions are left out; words like Alive are not.
+  const versions = [topic(JAP, 'Every Moment Of You (Japanese Version)'), topic(ALIVE, 'Love Me Like I am Alive')];
+  assert.deepEqual(pickAudio(versions, new Map([[JAP, 243], [ALIVE, 243]]), { title: 'Love Me Like I am Alive', duration: 243 }), [{ videoId: ALIVE, kind: 'audio' }]);
+  // Without a length the title must be the song's title, not just contain it.
+  assert.deepEqual(pickAudio([topic(OTHER, '그대에게'), topic(RIGHT, '그대')], new Map(), { title: '그대' }), [{ videoId: RIGHT, kind: 'audio' }]);
+});

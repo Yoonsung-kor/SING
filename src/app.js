@@ -6,7 +6,7 @@ import { renderView, pageNotice } from './views.js';
 import { songDetailParts } from './song-views.js';
 import { defaultSongUi, currentVideoId } from './song-media-views.js';
 import { createSongPlayer } from './song-player.js';
-import { readMedia, validateMedia, expireMedia, mediaNeeds, withSections, withNoTiming, withPasted, withCandidates, dropCandidate, nextCandidate, setStart, canSetStart, startOf, toVideoTime, pinVideoTime, addPin, removePin, currentSectionIndex, parseYoutubeLink, sameSongQuery } from './song-media.js';
+import { readMedia, validateMedia, expireMedia, mediaNeeds, withSections, withNoTiming, withPasted, withCandidates, upgradeOriginal, canSearchOriginal, dropCandidate, nextCandidate, setStart, canSetStart, startOf, toVideoTime, pinVideoTime, addPin, removePin, currentSectionIndex, parseYoutubeLink, sameSongQuery } from './song-media.js';
 import { createSong, updateSong } from './songs.js';
 import { createPlaylist, renamePlaylist, removeSong, applyMembership, removeSongEverywhere, addSong, setRecommendations, takeRecommendation, rejectRecommendation, isValidRecItem, PLAYLIST_LIMITS } from './playlists.js';
 import { buildRecommendationRequest, suggestKey, sameSong } from './recommend.js';
@@ -86,9 +86,12 @@ function render(focus = false) {
   if (!focus && page === 'song-detail' && playerFor === selectedSongId && document.querySelector('#song-player-slot')) {
     const parts = songDetailParts(v);
     if (parts) {
+      const lyricsScroll = document.querySelector('#lyrics-full')?.scrollTop ?? 0;
       document.querySelector('#song-detail-top').innerHTML = parts.top;
       document.querySelector('#song-detail-rest').innerHTML = parts.rest;
       document.querySelector('#page-notice').innerHTML = pageNotice(v);
+      document.querySelector('#lyrics-full')?.scrollTo({ top: lyricsScroll, behavior: 'instant' });
+      tickMedia();
       return;
     }
     stopSongPlayer();
@@ -160,19 +163,25 @@ async function openSongDetail() {
   showCurrentVideo();
   mediaTicker = setInterval(tickMedia, 300);
   if (!hasCurrentConsent(state.settings)) return;
-  // Sections and lyric lines come first: the original side matches its audio track by the song's length.
+  // The karaoke video needs no length, so it is searched at once; the original waits for the sections and lyrics,
+  // because its audio track is matched by the song's length.
+  if (mediaNeeds(readMedia(song)).karaoke) loadVideos(song.id, 'karaoke');
+  const waitingOriginal = mediaNeeds(readMedia(song)).mv && !currentVideoId(song, 'mv');
+  if (waitingOriginal) songUi = { ...songUi, videos: { ...songUi.videos, mv: 'loading' } };
   const stored = readMedia(selectedSong()).sections;
   if (stored === null || (!stored.none && !songLyrics.has(song.id))) await loadSections();
-  if (onSongScreen(song.id)) loadMissingVideos(song.id);
+  else if (waitingOriginal) render();
+  if (onSongScreen(song.id)) loadOriginal(song.id);
 }
 
-/** The side on screen first, then the other; each side is searched only when nothing (not even "none") is stored. */
-async function loadMissingVideos(songId) {
-  for (const side of songUi.side === 'mv' ? ['mv', 'karaoke'] : ['karaoke', 'mv']) {
-    const song = state.songs.find(s => s.id === songId);
-    if (!song || !onSongScreen(songId)) return;
-    if (mediaNeeds(readMedia(song))[side]) await loadVideos(songId, side);
-  }
+/** Searches the original side once the sections lookup has answered; after a temporary failure it waits for a retry. */
+function loadOriginal(songId) {
+  const song = state.songs.find(s => s.id === songId);
+  if (!song || !hasCurrentConsent(state.settings)) return;
+  const media = readMedia(song);
+  if (!mediaNeeds(media).mv) return;
+  if (canSearchOriginal(media)) return loadVideos(songId, 'mv');
+  if (onSongScreen(songId) && !currentVideoId(song, 'mv')) { songUi = { ...songUi, videos: { ...songUi.videos, mv: 'failed' } }; render(); }
 }
 
 async function loadVideos(songId, side) {
@@ -196,11 +205,13 @@ async function loadVideos(songId, side) {
   const candidates = status === 200 && Array.isArray(body?.candidates) ? body.candidates : null;
   let found = false;
   if (candidates) {
-    try { validateMedia(withCandidates(readMedia(song), side, candidates, new Date())); found = true; } catch { found = false; }
+    // The original side upgrades an old MV only with something found; it never turns a playing video into "none".
+    const apply = (media, now) => side === 'mv' ? upgradeOriginal(media, candidates, now) : withCandidates(media, side, candidates, now);
+    try { validateMedia(apply(readMedia(song), new Date())); found = true; } catch { found = false; }
   }
   mark(found ? 'idle' : status === 429 ? 'quota' : status === 503 && body?.error === 'not-configured' ? 'not-configured' : 'failed');
   if (!found) return render();
-  await saveMedia(songId, media => withCandidates(media, side, candidates, new Date()));
+  await saveMedia(songId, media => side === 'mv' ? upgradeOriginal(media, candidates, new Date()) : withCandidates(media, side, candidates, new Date()));
   if (onSongScreen(songId) && songUi.side === side) showCurrentVideo();
 }
 
@@ -380,7 +391,7 @@ async function handleMedia(action, id) {
     songUi = { ...songUi, panel: null, pasteError: '', pinError: '' };
     return render();
   }
-  if (action === 'media-sections-retry') return loadSections();
+  if (action === 'media-sections-retry') { await loadSections(); return onSongScreen(song.id) ? loadOriginal(song.id) : undefined; }
   if (action === 'media-align') {
     const t = songPlayer.currentTime();
     if (!canSetStart({ videoId, shownId: songPlayer.currentVideoId(), time: t, playerState: songPlayer.playbackState() })) return toast('영상을 먼저 틀어 주세요.');

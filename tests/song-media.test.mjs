@@ -177,7 +177,7 @@ test('links out to YouTube and the time label', () => {
   assert.equal(formatTime(-3), '0:00');
 });
 
-import { canSetStart } from '../src/song-media.js';
+import { canSetStart, upgradeOriginal, canSearchOriginal } from '../src/song-media.js';
 
 test('the start can be set only while the shown video is playing or paused, never when only cued', () => {
   const ok = { videoId: MV, shownId: MV, time: 40, playerState: 1 };
@@ -203,9 +203,16 @@ test('the original side keeps whether it is the audio track or an MV', () => {
   assert.equal(withPasted(emptyMedia(), 'mv', P, now).mv.kind, undefined);
 });
 
-test('an original found before audio tracks existed is searched again; pasted ones stay', () => {
+test('an original found before audio tracks existed keeps playing and is marked for one more search', () => {
   const yesterday = at('11-03');
-  assert.equal(expireMedia({ ...emptyMedia(), mv: auto(A, yesterday) }, now).mv, null);
+  const old = { ...emptyMedia(), mv: auto(A, yesterday) };
+  assert.equal(expireMedia(old, now), old);
+  assert.equal(mediaNeeds(old).mv, true);
+  assert.equal(mediaNeeds({ ...emptyMedia(), mv: auto(A, yesterday, { kind: 'mv' }) }).mv, false);
+  // A new search that finds nothing keeps the old MV and stops asking again.
+  assert.deepEqual(upgradeOriginal(old, [], now).mv, { ...auto(A, yesterday), kind: 'mv' });
+  assert.deepEqual(upgradeOriginal(old, [{ videoId: B, kind: 'audio' }], now).mv, { videoId: B, kind: 'audio', source: 'auto', foundAt: now.toISOString(), candidates: [{ videoId: B, kind: 'audio' }] });
+  assert.deepEqual(upgradeOriginal(emptyMedia(), [], now).mv, { none: true, foundAt: now.toISOString() });
   assert.deepEqual(expireMedia({ ...emptyMedia(), mv: auto(A, yesterday, { kind: 'mv' }) }, now).mv, auto(A, yesterday, { kind: 'mv' }));
   const pasted = { videoId: P, source: 'pasted', foundAt: yesterday, candidates: [{ videoId: P }] };
   assert.deepEqual(expireMedia({ ...emptyMedia(), mv: pasted }, now).mv, pasted);
@@ -217,4 +224,10 @@ test('lyric lines that arrive with sections are never stored', () => {
   assert.deepEqual(Object.keys(media.sections), ['duration', 'items', 'checkedAt']);
   assert.ok(!JSON.stringify(media).includes('word-'));
   assert.throws(() => validateMedia({ ...media, sections: { ...media.sections, lines: [{ t: 1, text: 'x' }] } }), /곡 영상 정보/);
+});
+
+test('the original side is searched only once the song\'s sections are known (found or none)', () => {
+  assert.equal(canSearchOriginal(emptyMedia()), false);
+  assert.equal(canSearchOriginal({ ...emptyMedia(), sections: { none: true, checkedAt: at('11-03') } }), true);
+  assert.equal(canSearchOriginal({ ...emptyMedia(), sections: { duration: 243, items: [], checkedAt: at('11-03') } }), true);
 });
