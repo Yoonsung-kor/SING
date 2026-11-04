@@ -34,21 +34,27 @@ export function createSongPlayer({ onState = () => {}, onError = () => {}, onLoa
     player.cueVideoById(videoId);
   }
 
-  function create(slot, videoId) {
+  // The video an event is about: what the player reports, else the one it was last asked to load. Never simply the
+  // one on screen now: an error for a video already left behind must not be charged to its replacement.
+  function eventVideo() {
+    try { return player.getVideoData?.().video_id || cued; } catch { return cued; }
+  }
+
+  function create(slot) {
     const mine = ++generation;
     const host = document.createElement('div');
     slot.replaceChildren(host);
     player = { pending: true };
     loadApi().then(YT => {
       if (mine !== generation) return;
+      // Created empty and cued once on ready, so every video loads exactly once and reports "cued" (5) or its error.
       player = new YT.Player(host, {
-        host: PLAYER_HOST, videoId,
+        host: PLAYER_HOST,
         playerVars: { playsinline: 1, rel: 0, origin: location.origin },
         events: {
-          // Cueing again on ready makes the first video report "cued" (5) or its error like every later one.
-          onReady: () => { if (mine !== generation) return; ready = true; cued = null; if (shown) cue(shown); },
-          onStateChange: event => { if (mine === generation) onState(event.data, shown); },
-          onError: event => { if (mine !== generation) return; cued = null; onError(event.data, shown); },
+          onReady: () => { if (mine !== generation) return; ready = true; if (shown) cue(shown); },
+          onStateChange: event => { if (mine === generation) onState(event.data, eventVideo()); },
+          onError: event => { if (mine !== generation) return; const videoId = eventVideo(); cued = null; onError(event.data, videoId); },
         },
       });
     }).catch(() => { if (mine === generation) { player = null; onLoadFail(); } });
@@ -60,7 +66,7 @@ export function createSongPlayer({ onState = () => {}, onError = () => {}, onLoa
       if (!slot) return;
       slot.hidden = !shown;
       if (!shown) { if (ready) player.pauseVideo(); return; }
-      if (!player) create(slot, shown);
+      if (!player) create(slot);
       else cue(shown);
     },
     seekTo(seconds) {
