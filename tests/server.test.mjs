@@ -94,3 +94,29 @@ test('a request at the app limits (500 songs, 200 rejected) fits under the body 
   const s = await start({ recommend: async () => ({ items: [{ title: 'A' }], intent: 'any', fallback: false }) });
   try { assert.equal((await post(s.port, big)).status, 200); } finally { s.close(); }
 });
+
+test('song-sections endpoint validates the song and maps the answers', async () => {
+  const get = (port, query) => fetch(`http://127.0.0.1:${port}/api/song-sections?${new URLSearchParams(query)}`);
+  const sections = [{ t: 17.6, label: '노래 시작 · 1절', kind: 'start' }];
+  let asked;
+  let answer = { duration: 243, sections };
+  const s = await start({ recommend: null, findSections: async args => { asked = args; if (answer instanceof Error) throw answer; return answer; } });
+  const off = await start({ recommend: null });
+  try {
+    assert.equal((await get(s.port, { artist: '성시경' })).status, 400);
+    assert.equal((await get(s.port, { title: 'x'.repeat(121) })).status, 400);
+    assert.equal((await get(s.port, { title: 'x', artist: 'y'.repeat(121) })).status, 400);
+    const ok = await get(s.port, { title: '  너의 모든 순간 ', artist: ' 성시경 ' });
+    assert.equal(ok.status, 200);
+    assert.deepEqual(await ok.json(), { duration: 243, sections });
+    assert.deepEqual(asked, { title: '너의 모든 순간', artist: '성시경' });
+    answer = null;
+    const none = await get(s.port, { title: 'x' });
+    assert.deepEqual([none.status, await none.json()], [404, { error: 'no-timing' }]);
+    answer = new Error('overloaded');
+    const busy = await get(s.port, { title: 'x' });
+    assert.deepEqual([busy.status, await busy.json()], [503, { error: 'busy' }]);
+    const missing = await get(off.port, { title: 'x' });
+    assert.deepEqual([missing.status, await missing.json()], [503, { error: 'not-configured' }]);
+  } finally { s.close(); off.close(); }
+});

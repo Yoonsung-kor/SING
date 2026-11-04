@@ -70,7 +70,25 @@ async function handleSearch(req, res, searchSongs) {
   catch { return sendJson(res, 502, { error: 'upstream' }); }
 }
 
-export function createHandler({ root, recommend, lookupRange = null, searchSongs = null }) {
+// The song screen's lookups take one song: a title (1-120 characters) and an optional artist (up to 120).
+function readSongQuery(params) {
+  const title = (params.get('title') ?? '').trim();
+  const artist = (params.get('artist') ?? '').trim();
+  return title && title.length <= 120 && artist.length <= 120 ? { title, artist } : null;
+}
+
+async function handleSections(req, res, findSections) {
+  const song = readSongQuery(new URL(req.url, 'http://localhost').searchParams);
+  if (!song) return sendJson(res, 400, { error: 'bad-request' });
+  if (!findSections) return sendJson(res, 503, { error: 'not-configured' });
+  let result;
+  try { result = await findSections(song); }
+  catch { return sendJson(res, 503, { error: 'busy' }); }
+  if (!result) return sendJson(res, 404, { error: 'no-timing' });
+  return sendJson(res, 200, { duration: result.duration, sections: result.sections });
+}
+
+export function createHandler({ root, recommend, lookupRange = null, searchSongs = null, findSections = null }) {
   // An empty list is a real answer ("no song fits"); only a missing result counts as an upstream failure.
   const recommendRun = recommend && (async body => {
     const result = await recommend(body);
@@ -83,6 +101,7 @@ export function createHandler({ root, recommend, lookupRange = null, searchSongs
       if (req.method === 'POST' && pathname === '/api/recommend') return await handleJson(req, res, { maxBody: RECOMMEND_MAX_BODY, validate: validateRecommendationRequest, run: recommendRun });
       if (req.method === 'POST' && pathname === '/api/song-range') return await handleJson(req, res, { maxBody: RANGE_MAX_BODY, validate: validateRangeRequest, run: rangeRun });
       if (req.method === 'GET' && pathname === '/api/song-search') return await handleSearch(req, res, searchSongs);
+      if (req.method === 'GET' && pathname === '/api/song-sections') return await handleSections(req, res, findSections);
       if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405).end(); return; }
       const relative = pathname === '/' ? 'index.html' : pathname.slice(1);
       if (!/^(index\.html|src\/[\w.-]+|assets\/[\w.-]+|tests\/browser[\w.-]*)$/.test(relative)) { res.writeHead(404).end('Not found'); return; }
