@@ -1,0 +1,50 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { KY_CHANNEL_ID, YoutubeError, searchUrl, classifyKy, pickKaraoke, pickMv, createYoutubeClient } from '../scripts/youtube.mjs';
+import { STALE } from '../scripts/throttle.mjs';
+
+const TJ_TITLE = '너의모든순간(별에서온그대OST)';
+const item = (videoId, title) => ({ id: { kind: 'youtube#video', videoId }, snippet: { title, channelId: 'x' } });
+const ids = { A: 'AAAAAAAAAAA', B: 'BBBBBBBBBBB', C: 'CCCCCCCCCCC', D: 'DDDDDDDDDDD', E: 'EEEEEEEEEEE' };
+const run = task => task({ isStale: () => false });
+const reply = (status, body) => ({ ok: status >= 200 && status < 300, status, json: async () => body, text: async () => JSON.stringify(body) });
+
+test('search urls: MV across YouTube, karaoke inside the KY channel, both embeddable only', () => {
+  const mv = new URL(searchUrl({ side: 'mv', title: TJ_TITLE, artist: '성시경', apiKey: 'k' }));
+  assert.equal(mv.origin + mv.pathname, 'https://www.googleapis.com/youtube/v3/search');
+  assert.equal(mv.searchParams.get('q'), '성시경 너의모든순간 MV');
+  assert.equal(mv.searchParams.get('channelId'), null);
+  const ky = new URL(searchUrl({ side: 'karaoke', title: TJ_TITLE, artist: '성시경', apiKey: 'k' }));
+  assert.equal(ky.searchParams.get('channelId'), KY_CHANNEL_ID);
+  assert.equal(ky.searchParams.get('q'), '너의모든순간 성시경');
+  for (const url of [mv, ky]) {
+    assert.deepEqual(['part', 'type', 'maxResults', 'regionCode', 'videoEmbeddable', 'key'].map(k => url.searchParams.get(k)), ['snippet', 'video', '10', 'KR', 'true', 'k']);
+  }
+});
+
+test('KY titles: no bracket is the basic version, [멜로디제거] the melody-removed one, other brackets are left out', () => {
+  assert.equal(classifyKy('[멜로디제거] 너의 모든 순간(드라마 &#39;별에서 온 그대&#39;) - 성시경 (KY.48367) / KY Karaoke'), 'mr');
+  assert.equal(classifyKy('Stay(드라마 &quot;너 말고 다른 연애&quot;) - LUCY (KY.51934) / KY KARAOKE'), 'basic');
+  assert.equal(classifyKy('[여자키] 너의 모든 순간 - 성시경 (KY.48367) / KY Karaoke'), null);
+});
+
+test('karaoke picks: this song only, basic before melody-removed, at most three', () => {
+  const items = [item(ids.A, '[멜로디제거] 너의 모든 순간(드라마 &#39;별에서 온 그대&#39;) - 성시경 (KY.48367) / KY Karaoke'), item(ids.B, '[여자키] 너의 모든 순간 - 성시경 (KY.48367) / KY Karaoke'), item(ids.C, '너의 모든 순간(드라마 &#39;별에서 온 그대&#39;) - 성시경 (KY.48367) / KY Karaoke'), item(ids.D, '여기 내 맘속에 - 성시경 (KY.85847) / KY Karaoke'), item('bad', '너의 모든 순간')];
+  assert.deepEqual(pickKaraoke(items, TJ_TITLE), [{ videoId: ids.C, kind: 'basic' }, { videoId: ids.A, kind: 'mr' }]);
+});
+
+test('MV picks: an MV mark, no karaoke, lyric, cover or teaser marks, the song name may sit in brackets', () => {
+  const items = [item(ids.A, '[TJ노래방] 너의모든순간(별에서온그대OST) - 성시경 / TJ Karaoke'), item(ids.B, '성시경 - 너의 모든 순간 [가사/Lyrics]'), item(ids.C, '[Teaser] 너의 모든 순간 MV'), item(ids.D, '성시경 너의 모든 순간 라이브'), item(ids.E, '[MV] 성시경 _ Every Moment Of You(너의 모든 순간) (Original) (My Love From the Star(별에서 온 그대) OST)')];
+  assert.deepEqual(pickMv(items, TJ_TITLE), [{ videoId: ids.E }]);
+  assert.deepEqual(pickMv([item(ids.A, 'IU &amp; 성시경 &#39;너의 모든 순간&#39; M/V')], TJ_TITLE), [{ videoId: ids.A }]);
+});
+
+test('the client maps quota, stale and other failures, and never puts the key in an error', async () => {
+  const find = (fetchImpl, queue = run) => createYoutubeClient({ apiKey: 'SECRETKEY', fetchImpl, queue });
+  const quota = { error: { code: 403, errors: [{ reason: 'quotaExceeded' }] } };
+  for (const [fetchImpl, code, queue] of [[async () => reply(403, quota), 'quota'], [async () => reply(500, {}), 'upstream'], [async () => { throw new Error('https://x?key=SECRETKEY'); }, 'upstream'], [async () => reply(200, { items: [] }), 'busy', async () => STALE]]) {
+    await assert.rejects(find(fetchImpl, queue)({ side: 'mv', title: 'x', artist: '' }), error => error instanceof YoutubeError && error.code === code && !String(error.message).includes('SECRETKEY') && !String(error.stack).includes('SECRETKEY'));
+  }
+  const ok = await find(async () => reply(200, { items: [item(ids.E, '[MV] 성시경 _ Every Moment Of You(너의 모든 순간)')] }))({ side: 'mv', title: TJ_TITLE, artist: '성시경' });
+  assert.deepEqual(ok, { candidates: [{ videoId: ids.E }] });
+});

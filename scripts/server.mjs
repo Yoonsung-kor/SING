@@ -1,6 +1,7 @@
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { AiError } from './ai.mjs';
+import { YoutubeError } from './youtube.mjs';
 import { validateRecommendationRequest, validateRangeRequest } from '../src/recommend.js';
 
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.json': 'application/json; charset=utf-8', '.mp3': 'audio/mpeg', '.txt': 'text/plain; charset=utf-8' };
@@ -88,7 +89,21 @@ async function handleSections(req, res, findSections) {
   return sendJson(res, 200, { duration: result.duration, sections: result.sections });
 }
 
-export function createHandler({ root, recommend, lookupRange = null, searchSongs = null, findSections = null }) {
+async function handleVideos(req, res, findVideos) {
+  const params = new URL(req.url, 'http://localhost').searchParams;
+  const song = readSongQuery(params);
+  const side = params.get('side');
+  if (!song || !['mv', 'karaoke'].includes(side)) return sendJson(res, 400, { error: 'bad-request' });
+  if (!findVideos) return sendJson(res, 503, { error: 'not-configured' });
+  try { return sendJson(res, 200, { candidates: (await findVideos({ side, ...song })).candidates }); }
+  catch (error) {
+    if (error instanceof YoutubeError && error.code === 'quota') return sendJson(res, 429, { error: 'quota' });
+    if (error instanceof YoutubeError && error.code === 'busy') return sendJson(res, 503, { error: 'busy' });
+    return sendJson(res, 502, { error: 'upstream' });
+  }
+}
+
+export function createHandler({ root, recommend, lookupRange = null, searchSongs = null, findSections = null, findVideos = null }) {
   // An empty list is a real answer ("no song fits"); only a missing result counts as an upstream failure.
   const recommendRun = recommend && (async body => {
     const result = await recommend(body);
@@ -102,6 +117,7 @@ export function createHandler({ root, recommend, lookupRange = null, searchSongs
       if (req.method === 'POST' && pathname === '/api/song-range') return await handleJson(req, res, { maxBody: RANGE_MAX_BODY, validate: validateRangeRequest, run: rangeRun });
       if (req.method === 'GET' && pathname === '/api/song-search') return await handleSearch(req, res, searchSongs);
       if (req.method === 'GET' && pathname === '/api/song-sections') return await handleSections(req, res, findSections);
+      if (req.method === 'GET' && pathname === '/api/song-videos') return await handleVideos(req, res, findVideos);
       if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405).end(); return; }
       const relative = pathname === '/' ? 'index.html' : pathname.slice(1);
       if (!/^(index\.html|src\/[\w.-]+|assets\/[\w.-]+|tests\/browser[\w.-]*)$/.test(relative)) { res.writeHead(404).end('Not found'); return; }
