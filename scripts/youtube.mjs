@@ -10,7 +10,7 @@ const TIMEOUT_MS = 8000;
 const MAX_CANDIDATES = 3;
 const VIDEO_ID = /^[A-Za-z0-9_-]{11}$/;
 const MV_MARK = /(^|[^a-z])m\/?v([^a-z]|$)|music video|뮤직비디오/i;
-const NOT_MV = /노래방|karaoke|cover|커버|가사|lyrics|teaser|티저/i;
+const NOT_MV = /노래방|커버|가사|티저|\b(karaoke|cover|lyrics?|teaser)\b/i;
 
 export class YoutubeError extends Error {
   constructor(code) { super(`youtube ${code}`); this.name = 'YoutubeError'; this.code = code; }

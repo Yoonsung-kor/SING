@@ -47,7 +47,7 @@ function videoStatus(song, media, ui, videoId) {
 function changePanel(song, media, ui) {
   if (ui.panel !== 'change') return '';
   const next = hasOtherCandidates(media[ui.side]) ? '<button class="button secondary small" data-action="media-next">다른 후보</button>' : '';
-  return `<div class="media-change">${next}${out(youtubeSearchUrl(videoSearchQuery(song, ui.side)), '유튜브에서 찾아보기 ↗')}<form id="media-paste-form" class="media-paste"><label for="media-link">유튜브 링크</label><input id="media-link" name="link" type="url" inputmode="url" placeholder="https://youtu.be/…" autocomplete="off"><button class="button small" type="submit">넣기</button></form>${ui.pasteError ? `<p class="media-error" role="alert">${e(ui.pasteError)}</p>` : ''}<button class="text-button" data-action="media-panel-close">닫기</button></div>`;
+  return `<div class="media-change">${next}${out(youtubeSearchUrl(videoSearchQuery(song, ui.side)), '유튜브에서 찾아보기 ↗')}<form id="media-paste-form" class="media-paste"><label for="media-link">유튜브 링크</label><input id="media-link" name="link" type="text" inputmode="url" placeholder="https://youtu.be/…" autocomplete="off"><button class="button small" type="submit">넣기</button></form>${ui.pasteError ? `<p class="media-error" role="alert">${e(ui.pasteError)}</p>` : ''}<button class="text-button" data-action="media-panel-close">닫기</button></div>`;
 }
 
 const toX = (t, duration) => Math.round(Math.min(1000, Math.max(0, t / duration * 1000)) * 10) / 10;
@@ -58,8 +58,9 @@ function sectionsBlock(media, ui, videoId) {
     const { duration, items } = sections;
     // The audio track follows the release's timing, so it needs no big prompt; a stand-in video does.
     const audio = media[ui.side]?.kind === 'audio';
-    const align = !videoId ? '' : audio
-      ? '<p class="media-aligned">음원이라 구간이 바로 맞아요 · <button class="text-button" data-action="media-align">다시 맞추기</button></p>'
+    const realign = '<button class="text-button" data-action="media-align">다시 맞추기</button>';
+    const align = !videoId ? '' : audio && !isAligned(media, videoId)
+      ? `<p class="media-aligned">음원이라 구간이 바로 맞아요 · 어긋나 보이면 ${realign}</p>`
       : isAligned(media, videoId)
       ? '<p class="media-aligned">시작을 맞췄어요 · <button class="text-button" data-action="media-align">다시 맞추기</button></p>'
       : '<div class="media-align"><p>첫 소절이 시작되는 순간 눌러 주세요</p><button class="button small" data-action="media-align">지금이 노래 시작</button></div>';
@@ -72,6 +73,8 @@ function sectionsBlock(media, ui, videoId) {
     return `${align}<svg class="media-timeline" viewBox="0 0 1000 24" preserveAspectRatio="none" data-action="media-seek" role="img" aria-label="곡 전체 흐름">${segs}${pins}<line id="media-head" class="head" x1="0" x2="0" y1="0" y2="24"/></svg><div class="media-times"><span>0:00</span><span>${formatTime(duration)}</span></div><div class="media-sections">${chips}</div>`;
   }
   if (sections?.none) return '<p class="media-status">이 곡은 구간을 찾지 못했어요. 신경 쓰이는 곳은 메모로 표시해 보세요.</p>';
+  // A pasted video plays without consent; say what consent would add (the no-video prompt already asks).
+  if (!ui.consent && videoId) return '<p class="media-status">구간과 가사를 보려면 동의가 필요해요 · <button class="text-button" data-action="media-consent">동의하고 찾기</button></p>';
   if (ui.sections === 'loading') return '<p class="media-status">구간을 찾고 있어요…</p>';
   if (ui.sections === 'busy') return '<p class="media-status">구간 정보를 불러오지 못했어요 · <button class="text-button" data-action="media-sections-retry">다시 시도</button></p>';
   return '';

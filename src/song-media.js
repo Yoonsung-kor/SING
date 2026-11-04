@@ -236,3 +236,10 @@ export function formatTime(seconds) {
 
 // "지금이 노래 시작" needs a video that has actually been started (playing 1 or paused 2): a cued video reports time 0.
 export const canSetStart = ({ videoId, shownId, time, playerState }) => Boolean(videoId) && shownId === videoId && time !== null && [1, 2].includes(playerState);
+
+/** The lyric line being sung: the last one that has begun, shown 0.2 s early; -1 before the first. */
+export function lyricIndex(lines, songTime) {
+  let current = -1;
+  lines.forEach((line, i) => { if (line.t <= songTime + 0.2) current = i; });
+  return current;
+}

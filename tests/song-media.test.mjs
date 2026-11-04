@@ -231,3 +231,14 @@ test('the original side is searched only once the song\'s sections are known (fo
   assert.equal(canSearchOriginal({ ...emptyMedia(), sections: { none: true, checkedAt: at('11-03') } }), true);
   assert.equal(canSearchOriginal({ ...emptyMedia(), sections: { duration: 243, items: [], checkedAt: at('11-03') } }), true);
 });
+
+import { lyricIndex } from '../src/song-media.js';
+
+test('the current lyric line is the last one that has begun, 0.2 s early', () => {
+  const lines = [{ t: 10, text: 'word-a' }, { t: 20, text: '' }, { t: 30, text: 'word-b' }];
+  assert.equal(lyricIndex(lines, 5), -1);
+  assert.equal(lyricIndex(lines, 9.85), 0);
+  assert.equal(lyricIndex(lines, 25), 1);
+  assert.equal(lyricIndex(lines, 100), 2);
+  assert.equal(lyricIndex([], 10), -1);
+});

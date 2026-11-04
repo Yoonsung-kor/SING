@@ -115,3 +115,10 @@ test('audio picks never guess between different songs of the same length', () =>
   // Without a length the title must be the song's title, not just contain it.
   assert.deepEqual(pickAudio([topic(OTHER, '그대에게'), topic(RIGHT, '그대')], new Map(), { title: '그대' }), [{ videoId: RIGHT, kind: 'audio' }]);
 });
+
+test('MV marks for covers and lyrics are whole words: UNDERCOVER and Discover stay', () => {
+  assert.deepEqual(pickMv([item(ids.A, 'A.C.E(에이스) - UNDERCOVER M/V')], 'UNDERCOVER'), [{ videoId: ids.A }]);
+  assert.deepEqual(pickMv([item(ids.B, 'Discover Love [MV]')], 'Discover Love'), [{ videoId: ids.B }]);
+  assert.deepEqual(pickMv([item(ids.C, 'UNDERCOVER (cover by fan) MV')], 'UNDERCOVER'), []);
+  assert.deepEqual(pickMv([item(ids.D, 'UNDERCOVER MV with Lyrics')], 'UNDERCOVER'), []);
+});

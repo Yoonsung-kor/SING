@@ -148,3 +148,23 @@ test('the original side: audio needs no big alignment prompt, an MV stand-in say
   assert.match(songMediaSides(ui()), /data-id="mv" aria-pressed="true">원곡</);
   assert.ok(!songMediaSides(ui()).includes('원곡 MV'));
 });
+
+test('audio line copy: before and after lining up again', () => {
+  const plain = songMediaBelow(songWith({ mv: audioEntry, sections: twoSections }), ui());
+  assert.ok(plain.includes('음원이라 구간이 바로 맞아요 · 어긋나 보이면 <button class="text-button" data-action="media-align">다시 맞추기</button>'));
+  const aligned = songMediaBelow(songWith({ mv: audioEntry, sections: twoSections, starts: { izssDYTMXis: 1.2 } }), ui());
+  assert.ok(aligned.includes('시작을 맞췄어요 · ') && !aligned.includes('바로 맞아요'));
+});
+
+test('the paste field lets links without https through to our own check', () => {
+  const html = songMediaBelow(songWith({ mv: audioEntry }), ui({ panel: 'change' }));
+  assert.ok(html.includes('id="media-link" name="link" type="text" inputmode="url"') && !html.includes('type="url"'));
+});
+
+test('without consent a playing video still says sections and lyrics need consent, once', () => {
+  const withVideo = songMediaBelow(songWith({ mv: audioEntry }), ui({ consent: false }));
+  assert.ok(withVideo.includes('구간과 가사를 보려면 동의가 필요해요'));
+  assert.equal(count(withVideo, 'data-action="media-consent"'), 1);
+  const noVideo = songMediaBelow(songWith({}), ui({ consent: false }));
+  assert.equal(count(noVideo, 'data-action="media-consent"'), 1);
+});
