@@ -76,7 +76,7 @@ export function voicePicksHtml(o) {
 /** The bottom buttons for either screen. */
 export function pickActionsHtml(o) {
   if (o.kind !== 'songs') return voiceActionsHtml(o);
-  if (o.waiting) return '<p class="subtle" role="status">찾는 중인 곡을 기다리고 있어요…</p><button class="button secondary" data-action="pick-save-now">기다리지 않고 담기</button>';
+  if (o.waiting) return '<p class="subtle" role="status">아직 최고음을 찾고 있는 곡이 있어요. 다 찾으면 바로 담을게요.</p><button class="button secondary" data-action="pick-save-now">기다리지 않고 담기</button>';
   return `<button class="button" data-action="pick-save"${o.picks.length ? '' : ' disabled'}>${o.picks.length}곡 담기</button>`;
 }
 
@@ -88,7 +88,7 @@ export function songPickView(v) {
 
 export function voiceActionsHtml(o) {
   const ready = Boolean(o.voiceType) && o.picks.some(p => p.status === 'found');
-  const waiting = o.waiting ? '<p class="subtle" role="status">찾는 중인 곡을 기다리고 있어요…</p>' : '';
+  const waiting = o.waiting ? '<p class="subtle" role="status">아직 최고음을 찾고 있는 곡이 있어요. 다 찾으면 결과를 보여 드릴게요.</p>' : '';
   const hint = !o.voiceType ? '<p class="subtle">주로 부르는 키를 먼저 골라 주세요.</p>' : '';
   return `${waiting}${hint}<button class="button" data-action="voice-result"${ready && !o.waiting ? '' : ' disabled'}>결과 보기</button>`;
 }
