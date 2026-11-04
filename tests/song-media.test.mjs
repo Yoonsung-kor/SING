@@ -97,3 +97,80 @@ test('broken media is rejected', () => {
   ];
   for (const media of bad) assert.throws(() => validateMedia(media), /곡 영상 정보가 올바르지 않아요/, JSON.stringify(media)?.slice(0, 80));
 });
+
+import {
+  startOf, isAligned, setStart, clearStart, toVideoTime, pinVideoTime, pinSongTime, addPin, removePin, currentSectionIndex,
+  parseYoutubeLink, youtubeWatchUrl, youtubeSearchUrl, videoSearchQuery, tjVideoSearchUrl, formatTime,
+} from '../src/song-media.js';
+import { computeSections } from '../src/sections.js';
+
+const MV = 'Dbxzh078jr4', KA = 'GWLLal-xbkc';
+const withNine = () => ({ ...emptyMedia(), mv: auto(MV, at('11-01')), karaoke: auto(KA, at('11-01'), { kind: 'mr' }), sections: { duration: 243, items: [{ t: 17.6, label: '노래 시작 · 1절', kind: 'start' }, { t: 81.1, label: '후렴 1', kind: 'chorus' }], checkedAt: at('11-01') } });
+
+test('the start offset maps song time to video time and never below zero', () => {
+  const media = setStart(withNine(), MV, 40);
+  assert.equal(media.starts[MV], 22.4);
+  assert.equal(startOf(media, MV), 22.4);
+  assert.equal(isAligned(media, MV), true);
+  assert.equal(isAligned(media, KA), false);
+  assert.equal(startOf(media, KA), 0);
+  assert.equal(toVideoTime(media, MV, 81.1), 103.5);
+  assert.equal(toVideoTime({ ...media, starts: { [MV]: -30 } }, MV, 10), 0);
+  assert.equal(clearStart(media, MV).starts[MV], undefined);
+  assert.equal(setStart({ ...emptyMedia(), mv: auto(MV, at('11-01')) }, MV, 40).starts[MV], undefined);
+});
+
+test('a pin made before lining up stays where the user marked it', () => {
+  let media = addPin(withNine(), { videoId: MV, t: 50, text: ' 숨 ' }, 'p1');
+  assert.deepEqual(media.pins, [{ id: 'p1', videoId: MV, t: 50, text: '숨' }]);
+  media = setStart(media, MV, 40);
+  const [pin] = media.pins;
+  assert.equal(pinVideoTime(media, pin, MV), 50);
+  media = { ...media, starts: { ...media.starts, [KA]: 5 } };
+  assert.equal(pinVideoTime(media, pin, KA), 32.6);
+  assert.equal(pinSongTime(media, pin), 27.6);
+  assert.equal(removePin(media, 'p1').pins.length, 0);
+  assert.equal(addPin(withNine(), { videoId: MV, t: 9999, text: 'x' }, 'p').pins[0].t, 3600);
+});
+
+test('pins need text, at most 60 characters and 50 per song', () => {
+  assert.throws(() => addPin(withNine(), { videoId: MV, t: 1, text: '  ' }, 'p'), /메모 내용을 적어 주세요/);
+  assert.throws(() => addPin(withNine(), { videoId: MV, t: 1, text: 'x'.repeat(61) }, 'p'), /60자/);
+  const full = { ...withNine(), pins: Array.from({ length: 50 }, (_, i) => ({ id: `p${i}`, videoId: MV, t: i, text: 'x' })) };
+  assert.throws(() => addPin(full, { videoId: MV, t: 1, text: 'x' }, 'new'), /50개/);
+});
+
+test('setting a start forgets offsets of videos the song no longer uses', () => {
+  const media = setStart({ ...withNine(), starts: { [KA]: 5, ZZZZZZZZZZZ: 9 }, pins: [{ id: 'p', videoId: 'YYYYYYYYYYY', t: 1, text: 'x' }] }, MV, 40);
+  assert.deepEqual(Object.keys(media.starts).sort(), [KA, MV].sort());
+  const kept = setStart({ ...withNine(), starts: { YYYYYYYYYYY: 2 }, pins: [{ id: 'p', videoId: 'YYYYYYYYYYY', t: 1, text: 'x' }] }, MV, 40);
+  assert.equal(kept.starts.YYYYYYYYYYY, 2);
+});
+
+test('the current section is the last one that has begun', () => {
+  const shape = [['a', 17.6], ['b', 30.9], ['c', 36.3], ['d', 44.9], ['e', 51.8], ['f', 59.4], ['g', 66.9], ['h', 73.7], ['i', 81.1], ['j', 86.5], ['k', 94.2], ['l', 101.0], ['m', 108.2], ['n', 128.2], ['o', 135.4], ['f', 144.8], ['p', 152.2], ['q', 159.1], ['i', 166.2], ['j', 172.1], ['r', 179.7], ['l', 186.4], ['m', 193.7], ['s', 210.8]];
+  const items = computeSections(shape.map(([key, t]) => ({ t, key })), 243);
+  assert.equal(currentSectionIndex(items, 58.9), 0);
+  assert.equal(currentSectionIndex(items, 59.2), 1);
+  assert.equal(currentSectionIndex(items, 5), -1);
+});
+
+test('YouTube links: four shapes in, everything else out', () => {
+  for (const link of ['https://www.youtube.com/watch?v=Dbxzh078jr4', 'https://m.youtube.com/watch?v=Dbxzh078jr4&t=30s', 'https://youtu.be/Dbxzh078jr4?si=abc', 'https://www.youtube.com/shorts/Dbxzh078jr4', '  youtube.com/watch?v=Dbxzh078jr4 ']) {
+    assert.equal(parseYoutubeLink(link), 'Dbxzh078jr4', link);
+  }
+  for (const link of ['https://www.youtube.com/watch?v=short', 'https://evil.com/watch?v=Dbxzh078jr4', 'https://www.youtube.com.evil.com/watch?v=Dbxzh078jr4', 'javascript:alert(1)', '', null]) {
+    assert.equal(parseYoutubeLink(link), null, String(link));
+  }
+});
+
+test('links out to YouTube and the time label', () => {
+  assert.equal(youtubeWatchUrl(MV), 'https://www.youtube.com/watch?v=Dbxzh078jr4');
+  assert.equal(new URL(tjVideoSearchUrl('너의 모든 순간', '성시경')).searchParams.get('search_query'), 'TJ노래방 너의 모든 순간 성시경');
+  assert.equal(new URL(youtubeSearchUrl('a&b <c>')).searchParams.get('search_query'), 'a&b <c>');
+  assert.equal(videoSearchQuery({ title: '너의 모든 순간', artist: '성시경' }, 'mv'), '성시경 너의 모든 순간 MV');
+  assert.equal(videoSearchQuery({ title: '너의 모든 순간', artist: '' }, 'karaoke'), '금영노래방 너의 모든 순간');
+  assert.equal(formatTime(81.1), '1:21');
+  assert.equal(formatTime(0), '0:00');
+  assert.equal(formatTime(-3), '0:00');
+});

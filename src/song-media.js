@@ -134,3 +134,82 @@ export function clearAutoMedia(media) {
 }
 
 export const sameSongQuery = (song, { title, artist }) => Boolean(song) && song.title === title && song.artist === artist;
+
+const round1 = value => Math.round(value * 10) / 10;
+const clampTime = value => Math.min(MAX_TIME, Math.max(0, value));
+
+// Sections are on the song's own clock; each video starts the song at its own offset (video time − song time).
+export const startOf = (media, videoId) => media.starts[videoId] ?? 0;
+export const isAligned = (media, videoId) => Object.hasOwn(media.starts, videoId);
+
+function usedVideoIds(media, videoId) {
+  const used = new Set([videoId]);
+  for (const side of SIDES) {
+    const entry = media[side];
+    if (entry && !entry.none) { used.add(entry.videoId); entry.candidates.forEach(candidate => used.add(candidate.videoId)); }
+  }
+  media.pins.forEach(pin => used.add(pin.videoId));
+  return used;
+}
+
+/** "Now is where the singing starts": the offset of this video against the first section. Offsets of unused videos go. */
+export function setStart(media, videoId, videoTime) {
+  const first = media.sections?.items?.[0];
+  if (!first) return media;
+  const used = usedVideoIds(media, videoId);
+  const starts = Object.fromEntries(Object.entries(media.starts).filter(([id]) => used.has(id)));
+  starts[videoId] = round1(Math.min(MAX_TIME, Math.max(-MAX_TIME, videoTime - first.t)));
+  return { ...media, starts };
+}
+
+export function clearStart(media, videoId) {
+  const { [videoId]: _removed, ...starts } = media.starts;
+  return { ...media, starts };
+}
+
+export const toVideoTime = (media, videoId, songTime) => Math.max(0, round1(songTime + startOf(media, videoId)));
+// A pin keeps the video and the moment the user marked; other videos show it through both offsets.
+export const pinVideoTime = (media, pin, videoId) => Math.max(0, round1(pin.t - startOf(media, pin.videoId) + startOf(media, videoId)));
+export const pinSongTime = (media, pin) => round1(pin.t - startOf(media, pin.videoId));
+
+export function addPin(media, { videoId, t, text }, id) {
+  const clean = String(text ?? '').trim();
+  if (!clean) throw new Error('메모 내용을 적어 주세요.');
+  if (clean.length > PIN_TEXT_MAX) throw new Error('메모는 60자까지 쓸 수 있어요.');
+  if (media.pins.length >= MAX_PINS) throw new Error('메모는 한 곡에 50개까지 남길 수 있어요.');
+  return { ...media, pins: [...media.pins, { id, videoId, t: round1(clampTime(t)), text: clean }] };
+}
+
+export const removePin = (media, id) => ({ ...media, pins: media.pins.filter(pin => pin.id !== id) });
+
+export function currentSectionIndex(items, songTime) {
+  let current = -1;
+  items.forEach((item, i) => { if (item.t <= songTime + 0.3) current = i; });
+  return current;
+}
+
+const WATCH_HOSTS = ['youtube.com', 'www.youtube.com', 'm.youtube.com'];
+/** The 11-character video id from a watch, youtu.be or shorts link; anything else is null. */
+export function parseYoutubeLink(text) {
+  const raw = String(text ?? '').trim();
+  if (!raw) return null;
+  let url;
+  try { url = new URL(/^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`); } catch { return null; }
+  if (!['https:', 'http:'].includes(url.protocol)) return null;
+  let id = null;
+  if (WATCH_HOSTS.includes(url.hostname) && url.pathname === '/watch') id = url.searchParams.get('v');
+  else if (WATCH_HOSTS.includes(url.hostname) && url.pathname.startsWith('/shorts/')) id = url.pathname.slice(8).split('/')[0];
+  else if (url.hostname === 'youtu.be') id = url.pathname.slice(1).split('/')[0];
+  return id && VIDEO_ID.test(id) ? id : null;
+}
+
+export const youtubeWatchUrl = videoId => `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
+export const youtubeSearchUrl = query => `https://www.youtube.com/results?${new URLSearchParams({ search_query: query })}`;
+const joinWords = words => words.map(word => String(word ?? '').trim()).filter(Boolean).join(' ');
+export const videoSearchQuery = (song, side) => side === 'mv' ? joinWords([song.artist, song.title, 'MV']) : joinWords(['금영노래방', song.title, song.artist]);
+export const tjVideoSearchUrl = (title, artist) => youtubeSearchUrl(joinWords(['TJ노래방', title, artist]));
+
+export function formatTime(seconds) {
+  const whole = Math.floor(Math.max(0, Number(seconds) || 0));
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`;
+}
