@@ -52,7 +52,7 @@ test('the client returns null without timing and throws when the service fails',
   const run = task => task({ isStale: () => false });
   assert.equal(await createLrclibClient({ fetchImpl: async () => json(200, [hit({ syncedLyrics: null })]), queue: run })({ title: '너의 모든 순간', artist: '' }), null);
   assert.equal(await createLrclibClient({ fetchImpl: async () => json(200, []), queue: run })({ title: '너의 모든 순간', artist: '' }), null);
-  await assert.rejects(createLrclibClient({ fetchImpl: async () => json(503, { name: 'ServerOverloaded' }), queue: run })({ title: 'x', artist: '' }));
+  await assert.rejects(createLrclibClient({ fetchImpl: async () => json(503, { name: 'ServerOverloaded' }), queue: run, retryDelayMs: 0 })({ title: 'x', artist: '' }));
   const { STALE } = await import('../scripts/throttle.mjs');
   await assert.rejects(createLrclibClient({ fetchImpl: async () => json(200, [hit()]), queue: async () => STALE })({ title: 'x', artist: '' }));
 });
