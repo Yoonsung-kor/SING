@@ -26,12 +26,12 @@ flowchart TD
     Server --> TJ[TJ미디어 노래방 검색 · 검색할 때만 조회]
     Server --> MB[MusicBrainz · TJ가 못 찾을 때]
     Server --> YT[YouTube Data API · MV와 금영 노래방 영상 후보]
-    Server --> LRC[LRCLIB 가사 시간 · 구간만 계산, 글자는 버림]
+    Server --> LRC[LRCLIB 가사 시간 · 구간 계산 · 가사 줄은 화면으로 전달만]
     UI <--> Store[storage.js · IndexedDB]
     Store <--> Backup[사용자 백업 파일]
 ```
 
-서버는 HTML·JavaScript·CSS·동봉 자산을 제공한다. 음높이 계산과 저장은 브라우저 안에서 수행하며, 음성 업로드 API와 회원 서버는 없다. 곡 추천(`POST /api/recommend`)과 최고음 찾기(`POST /api/song-range`)는 서버를 거쳐 OpenAI를 호출하고, 곡 검색(`GET /api/song-search`)은 서버가 TJ미디어 노래방 검색에 먼저 묻고(사용자가 검색할 때만, 결과는 쌓지 않음), 찾지 못하면 MusicBrainz에 묻는다. 노래 화면은 곡 상세 화면을 처음 열 때 영상 후보(`GET /api/song-videos`, YouTube Data API)와 구간(`GET /api/song-sections`, LRCLIB 가사 시간)을 서버에 묻는다. 서버는 가사 글자를 응답에 넣지 않고 구간 시간과 이름만 돌려준다. 키는 서버의 `.env`에만 있고, 모두 사용자 동의(버전 4) 후에만 요청한다. AI가 준 최고음은 서버가 출처 페이지를 열어 인용 문장과 음 표기를 대조한 뒤에만 앱으로 보낸다. 이때 사설·루프백 주소로는 접속하지 않는다.
+서버는 HTML·JavaScript·CSS·동봉 자산을 제공한다. 음높이 계산과 저장은 브라우저 안에서 수행하며, 음성 업로드 API와 회원 서버는 없다. 곡 추천(`POST /api/recommend`)과 최고음 찾기(`POST /api/song-range`)는 서버를 거쳐 OpenAI를 호출하고, 곡 검색(`GET /api/song-search`)은 서버가 TJ미디어 노래방 검색에 먼저 묻고(사용자가 검색할 때만, 결과는 쌓지 않음), 찾지 못하면 MusicBrainz에 묻는다. 노래 화면은 곡 상세 화면을 처음 열 때 영상 후보(`GET /api/song-videos`, YouTube Data API)와 구간(`GET /api/song-sections`, LRCLIB 가사 시간)을 서버에 묻는다. 서버는 구간 시간과 이름, 그리고 가사 줄을 돌려준다. 화면은 구간만 곡에 저장하고 가사 줄은 메모리에만 두어 화면에 보여준다(기기 저장소·백업·서버 디스크·로그에 남기지 않는다). 원곡은 YouTube 공식 음원 트랙("가수 - Topic")을 곡 길이로 맞춰 먼저 쓰고, 없으면 MV를 쓴다. 키는 서버의 `.env`에만 있고, 모두 사용자 동의(버전 4) 후에만 요청한다. AI가 준 최고음은 서버가 출처 페이지를 열어 인용 문장과 음 표기를 대조한 뒤에만 앱으로 보낸다. 이때 사설·루프백 주소로는 접속하지 않는다.
 
 | 구성 | 책임 | 주요 파일 |
 | --- | --- | --- |
