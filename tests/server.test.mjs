@@ -143,3 +143,15 @@ test('song-videos endpoint validates the side and maps YouTube failures', async 
     assert.deepEqual([missing.status, await missing.json()], [503, { error: 'not-configured' }]);
   } finally { s.close(); off.close(); }
 });
+
+test('pages allow only the YouTube player script and its nocookie frame, and keep the default referrer', async () => {
+  const s = await start({ recommend: null });
+  try {
+    const response = await fetch(`http://127.0.0.1:${s.port}/`);
+    const csp = response.headers.get('content-security-policy');
+    assert.ok(csp.includes("script-src 'self' https://www.youtube.com;"), csp);
+    assert.ok(csp.includes('frame-src https://www.youtube-nocookie.com;'), csp);
+    assert.ok(csp.includes("style-src 'self';") && csp.includes("connect-src 'self';") && csp.includes("frame-ancestors 'none'"), csp);
+    assert.equal(response.headers.get('referrer-policy'), null);
+  } finally { s.close(); }
+});

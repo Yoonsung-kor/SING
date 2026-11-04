@@ -8,7 +8,9 @@ const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; ch
 const staticHeaders = {
   'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
   'Permissions-Policy': 'camera=(), microphone=(self)',
-  'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+  // The song screen's player: the IFrame API script from www.youtube.com and the player frame from youtube-nocookie.com.
+  // No Referrer-Policy header: YouTube refuses embedded playback without the page address (error 153).
+  'Content-Security-Policy': "default-src 'self'; script-src 'self' https://www.youtube.com; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
 };
 
 function sendJson(res, status, body) {

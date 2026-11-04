@@ -63,6 +63,21 @@ test('an exact title beats an instrumental or other suffixed record of the same 
   assert.equal(pickHit([hit({ id: 7, trackName: '너의 모든 순간(Inst)' })], '너의 모든 순간').id, 7);
 });
 
+test('an overloaded answer (5xx) is asked once more before giving up', async () => {
+  const run = task => task({ isStale: () => false });
+  let calls = 0;
+  const flaky = async () => (++calls === 1 ? json(503, { name: 'ServerOverloaded' }) : json(200, [hit()]));
+  const result = await createLrclibClient({ fetchImpl: flaky, queue: run, retryDelayMs: 0 })({ title: '너의 모든 순간', artist: '성시경' });
+  assert.equal(calls, 2);
+  assert.equal(result.sections.length, 9);
+  calls = 0;
+  await assert.rejects(createLrclibClient({ fetchImpl: async () => { calls++; return json(503, {}); }, queue: run, retryDelayMs: 0 })({ title: '너의 모든 순간', artist: '' }));
+  assert.equal(calls, 2);
+  calls = 0;
+  await assert.rejects(createLrclibClient({ fetchImpl: async () => { calls++; return json(404, {}); }, queue: run, retryDelayMs: 0 })({ title: '너의 모든 순간', artist: '' }));
+  assert.equal(calls, 1);
+});
+
 test('a title without spaces is retried with its first syllables, two, then three, then one', async () => {
   const asked = [];
   const fetchImpl = async url => { const q = new URL(url).searchParams.get('q'); asked.push(q); return json(200, q === '너의 성시경' ? [hit()] : []); };

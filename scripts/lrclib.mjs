@@ -57,8 +57,12 @@ export function searchQueries(title, artist) {
 
 /** One song's sections, or null when no synced timing matches. Throws when LRCLIB cannot answer. */
 export function createLrclibClient({ fetchImpl = fetch, queue = createQueue(), retryDelayMs = 1000 } = {}) {
+  const wait = () => new Promise(resolve => setTimeout(resolve, retryDelayMs));
   async function ask(q) {
-    const response = await fetchImpl(`${ENDPOINT}?${new URLSearchParams({ q })}`, { headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const request = () => fetchImpl(`${ENDPOINT}?${new URLSearchParams({ q })}`, { headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    let response = await request();
+    // LRCLIB often answers 503 ServerOverloaded for a moment; one more try, a pause later, is all it gets.
+    if (response.status >= 500) { await wait(); await wait(); response = await request(); }
     if (!response.ok) throw new Error(`LRCLIB ${response.status}`);
     const text = await response.text();
     if (text.length > MAX_CHARS) throw new Error('LRCLIB answer too large');
@@ -68,7 +72,7 @@ export function createLrclibClient({ fetchImpl = fetch, queue = createQueue(), r
     const result = await queue(async () => {
       let hit = null;
       for (const [i, q] of searchQueries(title, artist).entries()) {
-        if (i) await new Promise(resolve => setTimeout(resolve, retryDelayMs));
+        if (i) await wait();
         hit = pickHit(await ask(q), title);
         if (hit) break;
       }
