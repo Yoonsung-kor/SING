@@ -31,14 +31,17 @@ function checkSide(entry, side) {
   if (!isObject(entry)) fail();
   if (entry.none === true) { if (!keysAre(entry, ['none', 'foundAt']) || !isTime(entry.foundAt)) fail(); return; }
   const karaoke = side === 'karaoke';
-  if (!keysAre(entry, ['videoId', 'source', 'foundAt', 'candidates'], karaoke ? ['kind'] : [])) fail();
+  // The original side says whether it plays the audio track or an MV; older and pasted entries have no kind.
+  const kinds = karaoke ? ['basic', 'mr'] : ['audio', 'mv'];
+  if (!keysAre(entry, ['videoId', 'source', 'foundAt', 'candidates'], ['kind'])) fail();
   if (!isVideoId(entry.videoId) || !['auto', 'pasted'].includes(entry.source) || !isTime(entry.foundAt)) fail();
   if (karaoke && !['basic', 'mr', 'unknown'].includes(entry.kind)) fail();
+  if (!karaoke && entry.kind !== undefined && !kinds.includes(entry.kind)) fail();
   const { candidates } = entry;
   if (!Array.isArray(candidates) || candidates.length < 1 || candidates.length > MAX_CANDIDATES) fail();
   for (const candidate of candidates) {
-    if (!isObject(candidate) || !keysAre(candidate, ['videoId'], karaoke ? ['kind'] : []) || !isVideoId(candidate.videoId)) fail();
-    if (candidate.kind !== undefined && !['basic', 'mr'].includes(candidate.kind)) fail();
+    if (!isObject(candidate) || !keysAre(candidate, ['videoId'], ['kind']) || !isVideoId(candidate.videoId)) fail();
+    if (candidate.kind !== undefined && !kinds.includes(candidate.kind)) fail();
   }
   if (!candidates.some(candidate => candidate.videoId === entry.videoId)) fail();
 }
@@ -79,16 +82,30 @@ export function expireMedia(media, now) {
   let changed = false;
   for (const side of SIDES) {
     const entry = media[side];
-    if ((entry?.none && olderThan(entry.foundAt, NONE_DAYS, now)) || (entry?.source === 'auto' && olderThan(entry.foundAt, AUTO_DAYS, now))) { next[side] = null; changed = true; }
+    const stale = entry?.source === 'auto' && olderThan(entry.foundAt, AUTO_DAYS, now);
+    if ((entry?.none && olderThan(entry.foundAt, NONE_DAYS, now)) || stale) { next[side] = null; changed = true; }
   }
   if (media.sections?.none && olderThan(media.sections.checkedAt, NONE_DAYS, now)) { next.sections = null; changed = true; }
   return changed ? next : media;
 }
 
-export const mediaNeeds = media => ({ mv: media.mv === null, karaoke: media.karaoke === null, sections: media.sections === null });
+// An original found before audio tracks were searched has no kind: it keeps playing until one more search answers.
+const needsUpgrade = entry => entry?.source === 'auto' && !entry.none && !entry.kind;
+export const mediaNeeds = media => ({ mv: media.mv === null || needsUpgrade(media.mv), karaoke: media.karaoke === null, sections: media.sections === null });
+
+/** A search answer for the original side; an old MV is replaced only by something found, never by "none". */
+export function upgradeOriginal(media, candidates, now) {
+  if (!candidates.length && needsUpgrade(media.mv)) return { ...media, mv: { ...media.mv, kind: 'mv' } };
+  return withCandidates(media, 'mv', candidates, now);
+}
+
+// The original side matches its audio track by the song's length, so it waits until the sections lookup has answered.
+export const canSearchOriginal = media => media.sections !== null;
+
+const kindOf = (side, chosen) => side === 'karaoke' ? { kind: chosen.kind ?? 'unknown' } : chosen.kind ? { kind: chosen.kind } : {};
 
 function autoEntry(side, chosen, candidates, foundAt) {
-  return { videoId: chosen.videoId, ...(side === 'karaoke' ? { kind: chosen.kind ?? 'unknown' } : {}), source: 'auto', foundAt, candidates };
+  return { videoId: chosen.videoId, ...kindOf(side, chosen), source: 'auto', foundAt, candidates };
 }
 
 export function withCandidates(media, side, candidates, now) {
@@ -117,7 +134,8 @@ export function nextCandidate(media, side) {
   if (!hasOtherCandidates(entry)) return media;
   const index = entry.candidates.findIndex(candidate => candidate.videoId === entry.videoId);
   const chosen = entry.candidates[(index + 1) % entry.candidates.length];
-  return { ...media, [side]: { ...entry, videoId: chosen.videoId, ...(side === 'karaoke' ? { kind: chosen.kind ?? 'unknown' } : {}) } };
+  const { kind: _old, ...rest } = entry;
+  return { ...media, [side]: { ...rest, videoId: chosen.videoId, ...kindOf(side, chosen) } };
 }
 
 export function withPasted(media, side, videoId, now) {
@@ -206,8 +224,10 @@ export function parseYoutubeLink(text) {
 export const youtubeWatchUrl = videoId => `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
 export const youtubeSearchUrl = query => `https://www.youtube.com/results?${new URLSearchParams({ search_query: query })}`;
 const joinWords = words => words.map(word => String(word ?? '').trim()).filter(Boolean).join(' ');
-export const videoSearchQuery = (song, side) => side === 'mv' ? joinWords([song.artist, song.title, 'MV']) : joinWords(['금영노래방', song.title, song.artist]);
-export const tjVideoSearchUrl = (title, artist) => youtubeSearchUrl(joinWords(['TJ노래방', title, artist]));
+export const videoSearchQuery = (song, side) => side === 'mv' ? joinWords([song.artist, song.title]) : joinWords(['금영노래방', song.title, song.artist]);
+// TJ videos cannot play inside the app, so the link searches inside TJ's own YouTube channel.
+export const TJ_CHANNEL_ID = 'UCZUhx8ClCv6paFW7qi3qljg';
+export const tjVideoSearchUrl = (title, artist) => `https://www.youtube.com/channel/${TJ_CHANNEL_ID}/search?${new URLSearchParams({ query: joinWords([title, artist]) })}`;
 
 export function formatTime(seconds) {
   const whole = Math.floor(Math.max(0, Number(seconds) || 0));
@@ -216,3 +236,13 @@ export function formatTime(seconds) {
 
 // "지금이 노래 시작" needs a video that has actually been started (playing 1 or paused 2): a cued video reports time 0.
 export const canSetStart = ({ videoId, shownId, time, playerState }) => Boolean(videoId) && shownId === videoId && time !== null && [1, 2].includes(playerState);
+
+/** The lyric line being sung: the last one that has begun, shown 0.2 s early; -1 before the first. */
+export function lyricIndex(lines, songTime) {
+  let current = -1;
+  lines.forEach((line, i) => { if (line.t <= songTime + 0.2) current = i; });
+  return current;
+}
+
+/** An original picked by title alone (the song's length unknown): no kind, so it is searched again once the length is known. */
+export const withProvisionalOriginal = (media, candidates, now) => withCandidates(media, 'mv', candidates.map(({ videoId }) => ({ videoId })), now);

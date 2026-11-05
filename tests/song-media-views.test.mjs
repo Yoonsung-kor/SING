@@ -69,7 +69,7 @@ test('the change panel always offers a YouTube search for this song and side', (
   const panel = songMediaBelow(songWith({ mv: mvEntry() }), ui({ panel: 'change' }));
   const link = /<div class="media-change">[\s\S]*?href="([^"]+)"[^>]*>유튜브에서 찾아보기 ↗/.exec(panel);
   assert.ok(link, 'search link inside the change panel');
-  assert.equal(new URL(link[1].replace(/&amp;/g, '&')).searchParams.get('search_query'), '성시경 너의 모든 순간 MV');
+  assert.equal(new URL(link[1].replace(/&amp;/g, '&')).searchParams.get('search_query'), '성시경 너의 모든 순간');
   const karaoke = songMediaBelow(songWith({}), ui({ side: 'karaoke', panel: 'change' }));
   assert.ok(/<div class="media-change">[\s\S]*search_query=%EA%B8%88%EC%98%81/.test(karaoke));
 });
@@ -87,14 +87,14 @@ test('pins are listed by time in the current video and their text is escaped', (
 test('the TJ card searches YouTube for the TJ video with the number, and nothing uses inline styles', () => {
   const evil = songWith({ mv: mvEntry(), sections: { duration: 243, items, checkedAt: when }, pins: [{ id: 'p', videoId: MV, t: 1, text: 'x' }] }, { title: '"><script>x</script>' });
   const html = songMediaBelow(evil, ui({ panel: 'pin' }));
-  assert.ok(html.includes('TJ 노래방 영상 보기 ↗') && html.includes('유튜브에서 열려요 · TJ 38028') && html.includes('search_query=TJ'));
+  assert.ok(html.includes('TJ 노래방 영상 보기 ↗') && html.includes('유튜브에서 열려요 · TJ 38028') && html.includes('/channel/UCZUhx8ClCv6paFW7qi3qljg/search?query='));
   assert.ok(!html.includes('<script'));
   for (const view of [html, songMediaBelow(songWith({}), ui({ consent: false })), songMediaSides(ui())]) assert.ok(!view.includes('style="'));
 });
 
 test('side buttons, current video, and a player slot outside the redrawn parts', () => {
   assert.match(songMediaSides(ui({ side: 'karaoke' })), /data-id="karaoke" aria-pressed="true">노래방/);
-  assert.match(songMediaSides(ui()), /data-id="mv" aria-pressed="true">원곡 MV/);
+  assert.match(songMediaSides(ui()), /data-id="mv" aria-pressed="true">원곡</);
   const song = songWith({ mv: mvEntry(), karaoke: { none: true, foundAt: when } });
   assert.equal(currentVideoId(song, 'mv'), MV);
   assert.equal(currentVideoId(song, 'karaoke'), null);
@@ -102,7 +102,69 @@ test('side buttons, current video, and a player slot outside the redrawn parts',
   assert.equal(count(songDetailView(v), 'id="song-player-slot"'), 1);
   const parts = songDetailParts(v);
   assert.ok(!parts.top.includes('song-player-slot') && !parts.rest.includes('song-player-slot'));
-  assert.ok(parts.top.includes('원곡 MV') && parts.rest.includes('내가 적어둔 곡 정보'));
+  assert.ok(parts.top.includes('>원곡<') && parts.rest.includes('내가 적어둔 곡 정보'));
   assert.equal(songDetailParts({ ...v, selectedSongId: 'nope' }), null);
   assert.ok(songDetailView({ state: { ...defaultState(), songs: [song] }, selectedSongId: song.id }).includes('song-detail-rest'));
+});
+
+// --- Lyrics view and the audio-first original side ---
+const lyricLines = [{ t: 17.6, text: 'word-a' }, { t: 30.9, text: '<b>x</b>' }, { t: 59.4, text: '' }, { t: 81.1, text: 'word-c' }];
+const twoSections = { duration: 243, items: [{ t: 17.6, label: '노래 시작 · 1절', kind: 'start' }, { t: 81.1, label: '후렴 1', kind: 'chorus' }], checkedAt: when };
+const audioEntry = { videoId: 'izssDYTMXis', kind: 'audio', source: 'auto', foundAt: when, candidates: [{ videoId: 'izssDYTMXis', kind: 'audio' }] };
+
+test('lyrics: two styles, the karaoke subtitle first, the full list centred with section titles', () => {
+  const song = songWith({ mv: audioEntry, sections: twoSections });
+  const html = songMediaBelow(song, ui(), lyricLines);
+  assert.equal(count(html, 'data-action="media-lyrics-style"'), 2);
+  assert.match(html, /data-id="karaoke" aria-pressed="true">노래방 자막형/);
+  assert.match(html, /data-id="full" aria-pressed="false">전체 가사형/);
+  assert.equal(count(html, 'class="lyric-line'), 3);
+  const full = /<div class="lyrics-full"[^>]*>([\s\S]*?)<\/div>/.exec(html);
+  assert.ok(full && full[0].includes('hidden'), 'full list hidden in karaoke style');
+  assert.equal(count(full[1], '<h3'), 2);
+  assert.ok(/<div class="lyrics-karaoke"(?![^>]*hidden)/.test(html));
+  assert.ok(html.includes('재생하면 가사가 흘러가요.'));
+  assert.ok(html.includes('&lt;b&gt;x') && !html.includes('<b>x'));
+  assert.ok(html.indexOf('lyrics-karaoke') < html.indexOf('media-timeline'));
+  const fullStyle = songMediaBelow(song, ui({ lyricsStyle: 'full' }), lyricLines);
+  assert.ok(/<div class="lyrics-karaoke"[^>]*hidden/.test(fullStyle) && !/<div class="lyrics-full"[^>]*hidden/.test(fullStyle));
+  assert.ok(!html.includes('style="') && !fullStyle.includes('style="'));
+});
+
+test('lyrics status without lines: loading, none, busy', () => {
+  const song = songWith({ mv: audioEntry });
+  assert.ok(songMediaBelow(song, ui({ lyrics: 'loading' })).includes('가사를 불러오고 있어요…'));
+  assert.ok(songMediaBelow(song, ui({ lyrics: 'none' })).includes('이 곡은 가사 시간 정보를 찾지 못했어요.'));
+  const busy = songMediaBelow(song, ui({ lyrics: 'busy' }));
+  assert.ok(busy.includes('가사를 불러오지 못했어요') && busy.includes('data-action="media-sections-retry"'));
+});
+
+test('the original side: audio needs no big alignment prompt, an MV stand-in says so', () => {
+  const audio = songMediaBelow(songWith({ mv: audioEntry, sections: twoSections }), ui());
+  assert.ok(audio.includes('음원이라 구간이 바로 맞아요 · ') && audio.includes('data-action="media-align"'));
+  assert.ok(!audio.includes('첫 소절이 시작되는 순간'));
+  const mv = songMediaBelow(songWith({ mv: mvEntry({ kind: 'mv' }), sections: twoSections }), ui());
+  assert.ok(mv.includes('음원 영상이 없어서 뮤직비디오예요.') && mv.includes('첫 소절이 시작되는 순간 눌러 주세요'));
+  assert.match(songMediaSides(ui()), /data-id="mv" aria-pressed="true">원곡</);
+  assert.ok(!songMediaSides(ui()).includes('원곡 MV'));
+});
+
+test('audio line copy: before and after lining up again', () => {
+  const plain = songMediaBelow(songWith({ mv: audioEntry, sections: twoSections }), ui());
+  assert.ok(plain.includes('음원이라 구간이 바로 맞아요 · 어긋나 보이면 <button class="text-button" data-action="media-align">다시 맞추기</button>'));
+  const aligned = songMediaBelow(songWith({ mv: audioEntry, sections: twoSections, starts: { izssDYTMXis: 1.2 } }), ui());
+  assert.ok(aligned.includes('시작을 맞췄어요 · ') && !aligned.includes('바로 맞아요'));
+});
+
+test('the paste field lets links without https through to our own check', () => {
+  const html = songMediaBelow(songWith({ mv: audioEntry }), ui({ panel: 'change' }));
+  assert.ok(html.includes('id="media-link" name="link" type="text" inputmode="url"') && !html.includes('type="url"'));
+});
+
+test('without consent a playing video still says sections and lyrics need consent, once', () => {
+  const withVideo = songMediaBelow(songWith({ mv: audioEntry }), ui({ consent: false }));
+  assert.ok(withVideo.includes('구간과 가사를 보려면 동의가 필요해요'));
+  assert.equal(count(withVideo, 'data-action="media-consent"'), 1);
+  const noVideo = songMediaBelow(songWith({}), ui({ consent: false }));
+  assert.equal(count(noVideo, 'data-action="media-consent"'), 1);
 });

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { voiceIntroView, voicePickView, voiceResultView, voiceManualView, voiceCard, searchResultsHtml, songPickView } from '../src/onboarding-views.js';
+import { voiceIntroView, voicePickView, voiceResultView, voiceManualView, voiceCard, searchResultsHtml, songPickView, voiceActionsHtml } from '../src/onboarding-views.js';
 import { startOnboarding, addPick, applyLookup, setPickKey, emptySearch, markSlow, startPicker } from '../src/onboarding.js';
 import { defaultState } from '../src/storage.js';
 
@@ -16,6 +16,7 @@ function withPick(voiceType, title, artist, result, keyOffset = 0) {
 test('the intro says the song screen sends title and artist to video search and lyric timing', () => {
   const html = voiceIntroView({ state: defaultState() });
   assert.ok(html.includes('가사 시간 정보 서비스'));
+  assert.ok(html.includes('가사는 화면에만 보여주고 저장하지 않아요.') && !html.includes('가사 글자는 남기지 않아요'));
   assert.ok(html.includes('YouTube'));
   assert.ok(!html.includes('LRCLIB'));
 });
@@ -122,7 +123,8 @@ test('the add-by-search screen has no voice type, offers manual entry, and can s
   assert.match(html, /data-action="pick-save"[^>]*>1곡 담기/);
   assert.match(html, /내 노래방 키/);
   const waiting = songPickView({ state: consented, onboarding: { ...added.onboarding, waiting: true } });
-  assert.match(waiting, /찾는 중인 곡을 기다리고 있어요…[\s\S]*data-action="pick-save-now"[^>]*>기다리지 않고 담기/);
+  assert.match(waiting, /아직 최고음을 찾고 있는 곡이 있어요\. 다 찾으면 바로 담을게요\.[\s\S]*data-action="pick-save-now"[^>]*>기다리지 않고 담기/);
+  assert.match(voiceActionsHtml({ voiceType: 'male', picks: [], waiting: true }), /아직 최고음을 찾고 있는 곡이 있어요\. 다 찾으면 결과를 보여 드릴게요\./);
 });
 
 test('final #3: the add-by-search screen takes a typed title as a pick instead of leaving the screen', () => {

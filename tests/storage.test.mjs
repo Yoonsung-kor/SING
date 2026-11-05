@@ -183,7 +183,7 @@ test('a backup whose song media is broken is rejected', () => {
   const empty = { mv: null, karaoke: null, sections: null, starts: {}, pins: [] };
   assert.equal(parseBackup(withMedia(empty)).state.songs[0].media.pins.length, 0);
   assert.equal(parseBackup(JSON.stringify({ ...backup, state: { ...backup.state, songs: [song] } })).state.songs[0].media, undefined);
-  for (const media of [{ ...empty, mv: { videoId: '<script>xxx', source: 'auto', foundAt: '2026-11-04T00:00:00.000Z', candidates: [] } }, { ...empty, pins: Array.from({ length: 51 }, (_, i) => ({ id: 'p' + i, videoId: 'AAAAAAAAAAA', t: 1, text: 'x' })) }, { ...empty, sections: { duration: 9, items: [{ t: 1, label: 'a', kind: 'x' }], checkedAt: '2026-11-04T00:00:00.000Z' } }]) {
+  for (const media of [{ ...empty, mv: { videoId: '<script>xxx', source: 'auto', foundAt: '2026-11-04T00:00:00.000Z', candidates: [{ videoId: '<script>xxx' }] } }, { ...empty, pins: Array.from({ length: 51 }, (_, i) => ({ id: 'p' + i, videoId: 'AAAAAAAAAAA', t: 1, text: 'x' })) }, { ...empty, sections: { duration: 9, items: [{ t: 1, label: 'a', kind: 'x' }], checkedAt: '2026-11-04T00:00:00.000Z' } }]) {
     assert.throws(() => parseBackup(withMedia(media)));
   }
 });

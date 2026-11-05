@@ -88,16 +88,20 @@ async function handleSections(req, res, findSections) {
   try { result = await findSections(song); }
   catch { return sendJson(res, 503, { error: 'busy' }); }
   if (!result) return sendJson(res, 404, { error: 'no-timing' });
-  return sendJson(res, 200, { duration: result.duration, sections: result.sections });
+  // Lyric lines are passed through to the screen only; the server keeps nothing.
+  return sendJson(res, 200, { duration: result.duration, sections: result.sections, lines: Array.isArray(result.lines) ? result.lines : [] });
 }
 
 async function handleVideos(req, res, findVideos) {
   const params = new URL(req.url, 'http://localhost').searchParams;
   const song = readSongQuery(params);
   const side = params.get('side');
-  if (!song || !['mv', 'karaoke'].includes(side)) return sendJson(res, 400, { error: 'bad-request' });
+  // The song's length (from its sections) lets the original side match an audio track by length.
+  const rawDuration = params.get('duration');
+  const duration = rawDuration === null ? undefined : Number(rawDuration);
+  if (!song || !['mv', 'karaoke'].includes(side) || (duration !== undefined && !(Number.isFinite(duration) && duration >= 1 && duration <= 3600))) return sendJson(res, 400, { error: 'bad-request' });
   if (!findVideos) return sendJson(res, 503, { error: 'not-configured' });
-  try { return sendJson(res, 200, { candidates: (await findVideos({ side, ...song })).candidates }); }
+  try { return sendJson(res, 200, { candidates: (await findVideos({ side, ...song, duration })).candidates }); }
   catch (error) {
     if (error instanceof YoutubeError && error.code === 'quota') return sendJson(res, 429, { error: 'quota' });
     if (error instanceof YoutubeError && error.code === 'busy') return sendJson(res, 503, { error: 'busy' });

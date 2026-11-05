@@ -12,7 +12,7 @@ const DUET_NOTE = '듀엣·혼성 곡이라 내 파트와 다를 수 있어요';
 
 export function voiceIntroView(v) {
   const consent = hasCurrentConsent(v.state.settings);
-  return `<div class="narrow voice-intro"><button class="back-button" data-action="voice-later">‹ 나중에 할게요</button><div class="lesson-header"><p class="eyebrow">뭐 부르지?</p><h1>자신 있게 부르는 곡이 있으세요?</h1><p>몇 곡만 알려주시면 편하게 내는 최고음을 어림해서,<br>실력에 맞는 곡을 추천해 드려요.</p></div><section class="surface"><h2>이렇게 찾아요</h2><ul class="instructions"><li>곡 검색: 입력한 검색어가 TJ미디어 노래방 검색으로 가요(안 되면 MusicBrainz 공개 음악 데이터베이스).</li><li>최고음 찾기: 곡 제목과 가수만 AI(OpenAI)로 가요. 출처 페이지에서 확인된 값만 써요.</li><li>추천을 받을 때는 플레이리스트 이름과 담긴 곡, 내 편한 최고음도 OpenAI로 가요.</li><li>곡 상세 화면: 곡 제목과 가수가 YouTube 검색과 가사 시간 정보 서비스로 가요. 가사 글자는 남기지 않아요.</li></ul><p><strong>녹음, 허밍 기록, 연습 기록은 보내지 않아요.</strong></p>${consent ? '' : '<p class="subtle">동의는 ‘나의 기록 → 기록과 개인정보 관리’에서 언제든 철회할 수 있어요.</p>'}</section><div class="action-row">${consent ? '<button class="button" data-action="voice-begin">곡 고르기</button>' : '<button class="button" data-action="voice-consent-accept">동의하고 곡 고르기</button>'}<button class="button secondary" data-action="voice-manual">최고음을 직접 입력할게요</button></div><div class="action-row center"><button class="text-button" data-action="voice-later">나중에 할게요</button></div></div>`;
+  return `<div class="narrow voice-intro"><button class="back-button" data-action="voice-later">‹ 나중에 할게요</button><div class="lesson-header"><p class="eyebrow">뭐 부르지?</p><h1>자신 있게 부르는 곡이 있으세요?</h1><p>몇 곡만 알려주시면 편하게 내는 최고음을 어림해서,<br>실력에 맞는 곡을 추천해 드려요.</p></div><section class="surface"><h2>이렇게 찾아요</h2><ul class="instructions"><li>곡 검색: 입력한 검색어가 TJ미디어 노래방 검색으로 가요(안 되면 MusicBrainz 공개 음악 데이터베이스).</li><li>최고음 찾기: 곡 제목과 가수만 AI(OpenAI)로 가요. 출처 페이지에서 확인된 값만 써요.</li><li>추천을 받을 때는 플레이리스트 이름과 담긴 곡, 내 편한 최고음도 OpenAI로 가요.</li><li>곡 상세 화면: 곡 제목과 가수가 YouTube 검색과 가사 시간 정보 서비스로 가요. 가사는 화면에만 보여주고 저장하지 않아요.</li></ul><p><strong>녹음, 허밍 기록, 연습 기록은 보내지 않아요.</strong></p>${consent ? '' : '<p class="subtle">동의는 ‘나의 기록 → 기록과 개인정보 관리’에서 언제든 철회할 수 있어요.</p>'}</section><div class="action-row">${consent ? '<button class="button" data-action="voice-begin">곡 고르기</button>' : '<button class="button" data-action="voice-consent-accept">동의하고 곡 고르기</button>'}<button class="button secondary" data-action="voice-manual">최고음을 직접 입력할게요</button></div><div class="action-row center"><button class="text-button" data-action="voice-later">나중에 할게요</button></div></div>`;
 }
 
 function voiceTypePicker(o) {
@@ -76,7 +76,7 @@ export function voicePicksHtml(o) {
 /** The bottom buttons for either screen. */
 export function pickActionsHtml(o) {
   if (o.kind !== 'songs') return voiceActionsHtml(o);
-  if (o.waiting) return '<p class="subtle" role="status">찾는 중인 곡을 기다리고 있어요…</p><button class="button secondary" data-action="pick-save-now">기다리지 않고 담기</button>';
+  if (o.waiting) return '<p class="subtle" role="status">아직 최고음을 찾고 있는 곡이 있어요. 다 찾으면 바로 담을게요.</p><button class="button secondary" data-action="pick-save-now">기다리지 않고 담기</button>';
   return `<button class="button" data-action="pick-save"${o.picks.length ? '' : ' disabled'}>${o.picks.length}곡 담기</button>`;
 }
 
@@ -88,7 +88,7 @@ export function songPickView(v) {
 
 export function voiceActionsHtml(o) {
   const ready = Boolean(o.voiceType) && o.picks.some(p => p.status === 'found');
-  const waiting = o.waiting ? '<p class="subtle" role="status">찾는 중인 곡을 기다리고 있어요…</p>' : '';
+  const waiting = o.waiting ? '<p class="subtle" role="status">아직 최고음을 찾고 있는 곡이 있어요. 다 찾으면 결과를 보여 드릴게요.</p>' : '';
   const hint = !o.voiceType ? '<p class="subtle">주로 부르는 키를 먼저 골라 주세요.</p>' : '';
   return `${waiting}${hint}<button class="button" data-action="voice-result"${ready && !o.waiting ? '' : ' disabled'}>결과 보기</button>`;
 }

@@ -41,11 +41,15 @@ test('the client asks with the core title, names itself, and returns only sectio
   assert.equal(asked.url.origin + asked.url.pathname, 'https://lrclib.net/api/search');
   assert.equal(asked.url.searchParams.get('q'), '너의모든순간 성시경');
   assert.equal(asked.options.headers['User-Agent'], 'SING/0.1 (class project; https://github.com/Yoonsung-kor/SING)');
-  assert.deepEqual(Object.keys(result), ['duration', 'sections']);
+  assert.deepEqual(Object.keys(result), ['duration', 'sections', 'lines']);
+  assert.equal(result.lines.length, 25);
+  assert.deepEqual(result.lines[0], { t: 17.6, text: 'word-a' });
+  assert.deepEqual(result.lines.at(-1), { t: 219.2, text: '' });
   assert.equal(result.duration, 243);
   assert.equal(result.sections.length, 9);
   assert.deepEqual(result.sections[0], { t: 17.6, label: '노래 시작 · 1절', kind: 'start' });
-  assert.ok(!JSON.stringify(result).includes('word-'));
+  // Lyric text travels only in lines (shown, never stored); sections carry times and names only.
+  assert.ok(!JSON.stringify(result.sections).includes('word-'));
 });
 
 test('the client returns null without timing and throws when the service fails', async () => {

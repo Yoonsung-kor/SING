@@ -6,7 +6,7 @@ import { renderView, pageNotice } from './views.js';
 import { songDetailParts } from './song-views.js';
 import { defaultSongUi, currentVideoId } from './song-media-views.js';
 import { createSongPlayer } from './song-player.js';
-import { readMedia, validateMedia, expireMedia, mediaNeeds, withSections, withNoTiming, withPasted, withCandidates, dropCandidate, nextCandidate, setStart, canSetStart, startOf, toVideoTime, pinVideoTime, addPin, removePin, currentSectionIndex, parseYoutubeLink, sameSongQuery } from './song-media.js';
+import { readMedia, validateMedia, expireMedia, mediaNeeds, withSections, withNoTiming, withPasted, withCandidates, withProvisionalOriginal, upgradeOriginal, canSearchOriginal, dropCandidate, nextCandidate, setStart, canSetStart, startOf, toVideoTime, pinVideoTime, addPin, removePin, currentSectionIndex, lyricIndex, parseYoutubeLink, sameSongQuery } from './song-media.js';
 import { createSong, updateSong } from './songs.js';
 import { createPlaylist, renamePlaylist, removeSong, applyMembership, removeSongEverywhere, addSong, setRecommendations, takeRecommendation, rejectRecommendation, isValidRecItem, PLAYLIST_LIMITS } from './playlists.js';
 import { buildRecommendationRequest, suggestKey, sameSong } from './recommend.js';
@@ -63,6 +63,11 @@ let playerFor = null;
 let pendingPaste = null;
 let pinDraft = null;
 let mediaTicker = null;
+// Lyrics live in memory only (per song, gone when the app reloads); they are never saved or backed up.
+const songLyrics = new Map();
+let lyricsStyle = 'karaoke';
+let lyricsScrollAt = 0;
+const lookupsInFlight = new Set();
 const songPlayer = createSongPlayer({ onState: handlePlayerState, onError: handlePlayerError, onLoadFail: () => toast('영상 플레이어를 불러오지 못했어요. 잠시 후 다시 열어 주세요.') });
 const LOOKUP_CONCURRENCY = 3;
 const SEARCH_SLOW_MS = 3000;
@@ -77,14 +82,20 @@ function toast(message) {
 }
 
 function render(focus = false) {
-  const v = { page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, recLoading, recError, onboarding, loading: !initialized && !demo, songUi: { ...songUi, consent: hasCurrentConsent(state.settings) } };
+  const v = { page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, recLoading, recError, onboarding, loading: !initialized && !demo, songUi: { ...songUi, consent: hasCurrentConsent(state.settings) }, lyricsLines: songLyrics.get(selectedSongId) ?? null };
   // While a song's player is mounted, only the parts around it are redrawn: moving an iframe would reload the video.
   if (!focus && page === 'song-detail' && playerFor === selectedSongId && document.querySelector('#song-player-slot')) {
     const parts = songDetailParts(v);
     if (parts) {
+      const lyricsScroll = document.querySelector('#lyrics-full')?.scrollTop ?? 0;
+      const typing = document.activeElement?.matches?.('#media-link, #media-pin-form input') ? { id: document.activeElement.id ? '#media-link' : '#media-pin-form input', value: document.activeElement.value, start: document.activeElement.selectionStart, end: document.activeElement.selectionEnd } : null;
       document.querySelector('#song-detail-top').innerHTML = parts.top;
       document.querySelector('#song-detail-rest').innerHTML = parts.rest;
       document.querySelector('#page-notice').innerHTML = pageNotice(v);
+      document.querySelector('#lyrics-full')?.scrollTo({ top: lyricsScroll, behavior: 'instant' });
+      const input = typing && document.querySelector(typing.id);
+      if (input) { input.value = typing.value; input.focus(); input.setSelectionRange?.(typing.start, typing.end); }
+      tickMedia();
       return;
     }
     stopSongPlayer();
@@ -115,7 +126,7 @@ function navigate(target) {
   stopSongPlayer();
   error = '';
   page = target;
-  if (target === 'song-detail') songUi = defaultSongUi();
+  if (target === 'song-detail') songUi = { ...defaultSongUi(), lyricsStyle };
   render(true);
   if (target === 'song-detail') openSongDetail();
 }
@@ -135,6 +146,7 @@ async function saveMedia(songId, change) {
   const song = state.songs.find(s => s.id === songId);
   if (!song) return false;
   const media = change(readMedia(song));
+  try { validateMedia(media); } catch { toast('영상 정보를 저장하지 못했어요. 다시 시도해 주세요.'); render(); return false; }
   const saved = await persist({ ...state, songs: state.songs.map(s => s.id === songId ? { ...s, media } : s) });
   render();
   return saved;
@@ -156,22 +168,38 @@ async function openSongDetail() {
   showCurrentVideo();
   mediaTicker = setInterval(tickMedia, 300);
   if (!hasCurrentConsent(state.settings)) return;
-  if (mediaNeeds(readMedia(selectedSong())).sections) loadSections();
-  loadMissingVideos(song.id);
+  // The karaoke video needs no length, so it is searched at once; the original waits for the sections and lyrics,
+  // because its audio track is matched by the song's length.
+  if (mediaNeeds(readMedia(song)).karaoke) loadVideos(song.id, 'karaoke');
+  const waitingOriginal = mediaNeeds(readMedia(song)).mv && !currentVideoId(song, 'mv');
+  if (waitingOriginal) songUi = { ...songUi, videos: { ...songUi.videos, mv: 'loading' } };
+  const stored = readMedia(selectedSong()).sections;
+  if (stored === null || (!stored.none && !songLyrics.has(song.id))) await loadSections();
+  else if (waitingOriginal) render();
+  if (onSongScreen(song.id)) loadOriginal(song.id);
 }
 
-/** The side on screen first, then the other; each side is searched only when nothing (not even "none") is stored. */
-async function loadMissingVideos(songId) {
-  for (const side of songUi.side === 'mv' ? ['mv', 'karaoke'] : ['karaoke', 'mv']) {
-    const song = state.songs.find(s => s.id === songId);
-    if (!song || !onSongScreen(songId)) return;
-    if (mediaNeeds(readMedia(song))[side]) await loadVideos(songId, side);
-  }
-}
-
-async function loadVideos(songId, side) {
+/** Searches the original side once the sections lookup has answered; after a temporary failure it waits for a retry. */
+function loadOriginal(songId) {
   const song = state.songs.find(s => s.id === songId);
   if (!song || !hasCurrentConsent(state.settings)) return;
+  const media = readMedia(song);
+  if (!mediaNeeds(media).mv) return;
+  if (canSearchOriginal(media)) return loadVideos(songId, 'mv');
+  // While lyric timing is busy the original is found by title alone and kept as provisional (searched again with the length later).
+  if (!currentVideoId(song, 'mv')) return loadVideos(songId, 'mv', { provisional: true });
+}
+
+async function loadVideos(songId, side, { provisional = false } = {}) {
+  const song = state.songs.find(s => s.id === songId);
+  const key = `${songId}:${side}`;
+  if (!song || !hasCurrentConsent(state.settings) || lookupsInFlight.has(key)) return;
+  lookupsInFlight.add(key);
+  try { await searchVideos(song, side, provisional); } finally { lookupsInFlight.delete(key); }
+}
+
+async function searchVideos(song, side, provisional) {
+  const songId = song.id;
   const query = { title: song.title, artist: song.artist };
   const mark = status => { if (onSongScreen(songId)) songUi = { ...songUi, videos: { ...songUi.videos, [side]: status } }; };
   mark('loading');
@@ -179,7 +207,9 @@ async function loadVideos(songId, side) {
   let status = 0;
   let body = null;
   try {
-    const response = await fetch(`/api/song-videos?${new URLSearchParams({ side, ...query })}`);
+    // The song's length lets the server tell this song's audio track from other versions.
+    const duration = side === 'mv' ? readMedia(song).sections?.duration : undefined;
+    const response = await fetch(`/api/song-videos?${new URLSearchParams({ side, ...query, ...(Number.isFinite(duration) ? { duration: String(duration) } : {}) })}`);
     status = response.status;
     body = await response.json().catch(() => null);
   } catch { status = 0; }
@@ -187,20 +217,32 @@ async function loadVideos(songId, side) {
   if (!sameSongQuery(state.songs.find(s => s.id === songId), query)) return;
   const candidates = status === 200 && Array.isArray(body?.candidates) ? body.candidates : null;
   let found = false;
+  // The original side upgrades an old MV only with something found; it never turns a playing video into "none".
+  // A pick made without the song's length is provisional (searched again once the length is known).
+  const apply = (media, now) => provisional ? withProvisionalOriginal(media, candidates, now) : side === 'mv' ? upgradeOriginal(media, candidates, now) : withCandidates(media, side, candidates, now);
   if (candidates) {
-    try { validateMedia(withCandidates(readMedia(song), side, candidates, new Date())); found = true; } catch { found = false; }
+    try { validateMedia(apply(readMedia(song), new Date())); found = true; } catch { found = false; }
   }
   mark(found ? 'idle' : status === 429 ? 'quota' : status === 503 && body?.error === 'not-configured' ? 'not-configured' : 'failed');
   if (!found) return render();
-  await saveMedia(songId, media => withCandidates(media, side, candidates, new Date()));
+  // Something the user chose meanwhile (a pasted link) is never overwritten by a late answer.
+  if (!mediaNeeds(readMedia(state.songs.find(s => s.id === songId)))[side]) return render();
+  await saveMedia(songId, media => apply(media, new Date()));
   if (onSongScreen(songId) && songUi.side === side) showCurrentVideo();
 }
 
+/** Sections (stored on the song when missing) and lyric lines (kept in memory only) from one lookup. */
 async function loadSections() {
   const song = selectedSong();
-  if (!song) return;
+  if (!song || lookupsInFlight.has(`${song.id}:sections`)) return;
+  lookupsInFlight.add(`${song.id}:sections`);
+  try { await lookupSections(song); } finally { lookupsInFlight.delete(`${song.id}:sections`); }
+}
+
+async function lookupSections(song) {
   const query = { title: song.title, artist: song.artist };
-  songUi = { ...songUi, sections: 'loading' };
+  const needsSections = readMedia(song).sections === null;
+  songUi = { ...songUi, sections: needsSections ? 'loading' : songUi.sections, lyrics: 'loading' };
   render();
   let status = 0;
   let body = null;
@@ -215,9 +257,16 @@ async function loadSections() {
   if (status === 200) {
     try { validateMedia(withSections(readMedia(song), body, new Date())); found = true; } catch { found = false; }
   }
-  if (onSongScreen(song.id)) songUi = { ...songUi, sections: found || status === 404 ? 'idle' : 'busy' };
-  if (found) return saveMedia(song.id, media => withSections(media, body, new Date()));
-  if (status === 404) return saveMedia(song.id, media => withNoTiming(media, new Date()));
+  if (found) {
+    const lines = (Array.isArray(body.lines) ? body.lines : []).filter(line => Number.isFinite(line?.t) && typeof line.text === 'string');
+    if (lines.length) songLyrics.set(song.id, lines);
+  }
+  if (onSongScreen(song.id)) {
+    const failed = !found && status !== 404;
+    songUi = { ...songUi, sections: needsSections && failed ? 'busy' : 'idle', lyrics: found && songLyrics.has(song.id) ? 'idle' : failed ? 'busy' : 'none' };
+  }
+  if (found && needsSections) return saveMedia(song.id, media => withSections(media, body, new Date()));
+  if (status === 404 && needsSections) return saveMedia(song.id, media => withNoTiming(media, new Date()));
   render();
 }
 
@@ -239,6 +288,32 @@ function tickMedia() {
     document.querySelectorAll('.media-chip').forEach(chip => chip.classList.toggle('now', Number(chip.dataset.id) === index));
   }
   document.querySelectorAll('.media-pin-list li[data-t]').forEach(li => li.classList.toggle('now', Math.abs(Number(li.dataset.t) - t) < 4));
+  showLyric(song.id, media, songTime);
+}
+
+/** Puts the current lyric line in the subtitle and the full list; text and classes only, never a redraw. */
+function showLyric(songId, media, songTime) {
+  const lines = songLyrics.get(songId);
+  if (!lines?.length) return;
+  const index = lyricIndex(lines, songTime);
+  const cur = document.querySelector('#lyric-cur');
+  // Before the first line the hint stays; a fresh redraw (no marker) is filled again on the next tick.
+  if (cur && cur.dataset.line !== String(index) && !(index === -1 && cur.dataset.line === undefined)) {
+    const next = lines.findIndex((line, i) => i > index && line.text);
+    const items = media.sections?.items ?? [];
+    document.querySelector('#lyric-section').textContent = items[currentSectionIndex(items, songTime)]?.label ?? '';
+    cur.textContent = index >= 0 && lines[index].text ? lines[index].text : '♪';
+    document.querySelector('#lyric-next').textContent = next >= 0 ? lines[next].text : '';
+    cur.dataset.line = String(index);
+  }
+  const full = document.querySelector('#lyrics-full');
+  if (full && full.dataset.line !== String(index)) {
+    full.querySelectorAll('.lyric-line').forEach(button => { const n = Number(button.dataset.id); button.classList.toggle('now', n === index); button.classList.toggle('past', n < index); });
+    full.dataset.line = String(index);
+    const now = full.querySelector('.lyric-line.now');
+    // The list follows the song unless the user scrolled it in the last 3 seconds.
+    if (now && !full.hidden && Date.now() - lyricsScrollAt > 3000) full.scrollTop = now.offsetTop - full.clientHeight / 2 + now.clientHeight / 2;
+  }
 }
 
 function handlePlayerState(code, videoId) {
@@ -289,6 +364,11 @@ function pasteLink(form) {
     if (input) { input.value = raw; input.focus(); }
     return;
   }
+  if (videoId === currentVideoId(song, songUi.side)) {
+    songUi = { ...songUi, panel: null, pasteError: '' };
+    render();
+    return toast('지금 보고 있는 영상이에요.');
+  }
   pendingPaste = { songId: song.id, side: songUi.side, videoId, previous: currentVideoId(song, songUi.side) };
   songUi = { ...songUi, pasteError: '', playerError: null };
   render();
@@ -336,12 +416,13 @@ async function handleMedia(action, id) {
     songUi = { ...songUi, panel: null, pasteError: '', pinError: '' };
     return render();
   }
-  if (action === 'media-sections-retry') return loadSections();
+  if (action === 'media-sections-retry') { await loadSections(); return onSongScreen(song.id) ? loadOriginal(song.id) : undefined; }
   if (action === 'media-align') {
     const t = songPlayer.currentTime();
     if (!canSetStart({ videoId, shownId: songPlayer.currentVideoId(), time: t, playerState: songPlayer.playbackState() })) return toast('영상을 먼저 틀어 주세요.');
     return saveMedia(song.id, current => setStart(current, videoId, t));
   }
+  if (['media-section', 'media-seek', 'media-pin-go', 'media-lyric'].includes(action) && videoId && songPlayer.currentTime() === null) return toast('영상이 준비되면 다시 눌러 주세요.');
   if (action === 'media-section') {
     const item = media.sections?.items?.[Number(id)];
     if (item && videoId) songPlayer.seekTo(toVideoTime(media, videoId, item.t));
@@ -365,6 +446,18 @@ async function handleMedia(action, id) {
     return;
   }
   if (action === 'media-pin-delete') return saveMedia(song.id, current => removePin(current, id));
+  if (action === 'media-lyrics-style') {
+    if (!['karaoke', 'full'].includes(id)) return;
+    lyricsStyle = id;
+    songUi = { ...songUi, lyricsStyle: id };
+    render();
+    return tickMedia();
+  }
+  if (action === 'media-lyric') {
+    const line = songLyrics.get(song.id)?.[Number(id)];
+    if (line && videoId) songPlayer.seekTo(toVideoTime(media, videoId, Math.max(0, line.t - 0.3)));
+    return;
+  }
   if (action === 'media-next') {
     songUi = { ...songUi, panel: null, playerError: null };
     await saveMedia(song.id, current => nextCandidate(current, songUi.side));
@@ -785,7 +878,8 @@ async function saveSong(form) {
   const playlists = applyMembership(state.playlists, song.id, songDraft.playlistIds || [], new Date());
   const saved = await persist({ ...state, songs: exists ? state.songs.map(s => s.id === song.id ? song : s) : [...state.songs, song], playlists });
   busy = false;
-  if (saved) { selectedSongId = song.id; navigate('song-detail'); toast('곡을 저장했어요.'); }
+  // Lyrics fetched for the old title may belong to another song; they are fetched again on the next visit.
+  if (saved) { songLyrics.delete(song.id); selectedSongId = song.id; navigate('song-detail'); toast('곡을 저장했어요.'); }
   else render();
 }
 
@@ -793,15 +887,17 @@ async function deleteSong(id) {
   const song = state.songs.find(s => s.id === id);
   if (!song || !confirm(`‘${song.title}’을(를) 삭제할까요? 담긴 플레이리스트에서도 빠져요.`)) return;
   busy = 'saving'; render();
+  const previous = state;
   const next = { ...state, songs: state.songs.filter(s => s.id !== id), playlists: removeSongEverywhere(state.playlists, id) };
+  state = next;
   try {
     if (!demo) await store.saveState(next);
-    state = next;
     storageError = '';
     busy = false;
     navigate(state.playlists.some(p => p.id === selectedPlaylistId) ? 'playlist' : 'songs');
     toast('곡을 삭제했어요.');
   } catch {
+    state = previous;
     busy = false;
     render();
     toast('삭제를 저장하지 못해 곡을 그대로 두었어요. 잠시 후 다시 시도해 주세요.');
@@ -1005,6 +1101,7 @@ async function importBackup(file) {
   if (file.size > 25 * 1024 * 1024) throw new Error('백업은 25 MB까지 가져올 수 있어요.');
   if (!confirm('현재 기록과 녹음을 이 백업의 내용으로 바꿀까요? 현재 자료는 먼저 백업해 주세요.')) return;
   state = await store.importData(await file.text());
+  songLyrics.clear();
   session = null;
   storageError = '';
   navigate('history');
@@ -1227,6 +1324,9 @@ root.addEventListener('change', async event => {
     toast('백업을 가져오지 못했어요. 파일 형식을 확인해 주세요. 기존 기록은 유지했어요.');
   }
 });
+
+// Scrolling the full lyrics by hand pauses its follow-along for a moment.
+for (const type of ['wheel', 'touchmove']) root.addEventListener(type, event => { if (event.target.closest?.('#lyrics-full')) lyricsScrollAt = Date.now(); }, { passive: true });
 
 root.addEventListener('input', event => {
   if (event.target.id === 'voice-search') scheduleSearch(event.target.value);

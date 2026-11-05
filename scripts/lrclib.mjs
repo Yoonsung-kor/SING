@@ -1,5 +1,5 @@
-// Song sections from LRCLIB's synced lyrics, read on demand for one song. Lyric text stays inside this module:
-// each line becomes a comparison key, the keys become sections, and only { duration, sections } leaves.
+// Song sections and lyric lines from LRCLIB's synced lyrics, read on demand for one song. Sections are computed
+// from comparison keys; the lines are passed through for the song screen to show. Nothing here is written anywhere.
 import { computeSections } from '../src/sections.js';
 import { createQueue, STALE } from './throttle.mjs';
 import { coreTitle, matchKey, titleMatches } from './title-match.mjs';
@@ -13,17 +13,23 @@ const SAME_LENGTH_S = 2;
 
 export const lineKey = matchKey;
 
-/** [mm:ss.xx] lines as { t, key }, sorted by time; a line with several stamps counts once per stamp. */
-export function parseSyncedLyrics(text) {
+const MAX_LINES = 300;
+const MAX_LINE_CHARS = 200;
+
+/** [mm:ss.xx] lines as { t, text }, sorted by time; a line with several stamps counts once per stamp. */
+function parseTimedLines(text) {
   const lines = [];
   for (const raw of String(text ?? '').split(/\r?\n/)) {
     const stamps = [...raw.matchAll(/\[(\d+):(\d{1,2}(?:\.\d+)?)\]/g)];
     if (!stamps.length) continue;
-    const key = lineKey(raw.replace(/\[[^\]]*\]/g, ''));
-    for (const [, minutes, seconds] of stamps) lines.push({ t: Number(minutes) * 60 + Number(seconds), key });
+    const words = raw.replace(/\[[^\]]*\]/g, '').trim();
+    for (const [, minutes, seconds] of stamps) lines.push({ t: Number(minutes) * 60 + Number(seconds), text: words });
   }
   return lines.sort((a, b) => a.t - b.t);
 }
+
+/** [mm:ss.xx] lines as { t, key }, sorted by time; a line with several stamps counts once per stamp. */
+export const parseSyncedLyrics = text => parseTimedLines(text).map(line => ({ t: line.t, key: lineKey(line.text) }));
 
 /**
  * Among synced hits for this title, records named exactly like the song come first ("(Inst)" or "(Original)" records
@@ -77,10 +83,11 @@ export function createLrclibClient({ fetchImpl = fetch, queue = createQueue(), r
         if (hit) break;
       }
       if (!hit) return null;
-      const lines = parseSyncedLyrics(hit.syncedLyrics);
-      const duration = Number.isFinite(hit.duration) && hit.duration > 0 ? hit.duration : (lines.at(-1)?.t ?? 0) + 5;
-      const sections = computeSections(lines, duration).slice(0, MAX_SECTIONS);
-      return sections.length ? { duration, sections } : null;
+      const timed = parseTimedLines(hit.syncedLyrics);
+      const duration = Number.isFinite(hit.duration) && hit.duration > 0 ? hit.duration : (timed.at(-1)?.t ?? 0) + 5;
+      const sections = computeSections(timed.map(line => ({ t: line.t, key: lineKey(line.text) })), duration).slice(0, MAX_SECTIONS);
+      const lines = timed.slice(0, MAX_LINES).map(line => ({ t: line.t, text: line.text.slice(0, MAX_LINE_CHARS) }));
+      return sections.length ? { duration, sections, lines } : null;
     });
     if (result === STALE) throw new Error('LRCLIB request went stale');
     return result;

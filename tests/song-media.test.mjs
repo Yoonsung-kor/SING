@@ -20,15 +20,15 @@ test('a song without media reads as empty media, and empty media is valid', () =
 
 test('auto videos expire after 30 days, none after 7, pasted videos and found sections never', () => {
   const m = media => expireMedia({ ...emptyMedia(), ...media }, now);
-  assert.equal(m({ mv: auto(A, at('10-05')) }).mv, null);
-  assert.deepEqual(m({ mv: auto(A, at('10-06')) }).mv, auto(A, at('10-06')));
+  assert.equal(m({ mv: auto(A, at('10-05'), { kind: 'mv' }) }).mv, null);
+  assert.deepEqual(m({ mv: auto(A, at('10-06'), { kind: 'mv' }) }).mv, auto(A, at('10-06'), { kind: 'mv' }));
   assert.equal(m({ karaoke: { none: true, foundAt: at('10-28') } }).karaoke, null);
   assert.deepEqual(m({ karaoke: { none: true, foundAt: at('10-29') } }).karaoke, { none: true, foundAt: at('10-29') });
   const pasted = { videoId: P, source: 'pasted', foundAt: at('01-01'), candidates: [{ videoId: P }] };
   assert.deepEqual(m({ mv: pasted }).mv, pasted);
   assert.equal(m({ sections: { none: true, checkedAt: at('10-28') } }).sections, null);
   assert.deepEqual(m({ sections: nine }).sections, nine);
-  const fresh = { ...emptyMedia(), mv: auto(A, at('10-30')), sections: nine };
+  const fresh = { ...emptyMedia(), mv: auto(A, at('10-30'), { kind: 'audio' }), sections: nine };
   assert.equal(expireMedia(fresh, now), fresh);
   assert.deepEqual(mediaNeeds(fresh), { mv: false, karaoke: true, sections: false });
 });
@@ -166,16 +166,18 @@ test('YouTube links: four shapes in, everything else out', () => {
 
 test('links out to YouTube and the time label', () => {
   assert.equal(youtubeWatchUrl(MV), 'https://www.youtube.com/watch?v=Dbxzh078jr4');
-  assert.equal(new URL(tjVideoSearchUrl('너의 모든 순간', '성시경')).searchParams.get('search_query'), 'TJ노래방 너의 모든 순간 성시경');
+  const tj = new URL(tjVideoSearchUrl('너의 모든 순간', '성시경'));
+  assert.equal(tj.origin + tj.pathname, 'https://www.youtube.com/channel/UCZUhx8ClCv6paFW7qi3qljg/search');
+  assert.equal(tj.searchParams.get('query'), '너의 모든 순간 성시경');
   assert.equal(new URL(youtubeSearchUrl('a&b <c>')).searchParams.get('search_query'), 'a&b <c>');
-  assert.equal(videoSearchQuery({ title: '너의 모든 순간', artist: '성시경' }, 'mv'), '성시경 너의 모든 순간 MV');
+  assert.equal(videoSearchQuery({ title: '너의 모든 순간', artist: '성시경' }, 'mv'), '성시경 너의 모든 순간');
   assert.equal(videoSearchQuery({ title: '너의 모든 순간', artist: '' }, 'karaoke'), '금영노래방 너의 모든 순간');
   assert.equal(formatTime(81.1), '1:21');
   assert.equal(formatTime(0), '0:00');
   assert.equal(formatTime(-3), '0:00');
 });
 
-import { canSetStart } from '../src/song-media.js';
+import { canSetStart, upgradeOriginal, canSearchOriginal } from '../src/song-media.js';
 
 test('the start can be set only while the shown video is playing or paused, never when only cued', () => {
   const ok = { videoId: MV, shownId: MV, time: 40, playerState: 1 };
@@ -187,4 +189,66 @@ test('the start can be set only while the shown video is playing or paused, neve
   assert.equal(canSetStart({ ...ok, time: null }), false);
   assert.equal(canSetStart({ ...ok, shownId: KA }), false);
   assert.equal(canSetStart({ ...ok, videoId: null }), false);
+});
+
+test('the original side keeps whether it is the audio track or an MV', () => {
+  const two = [{ videoId: A, kind: 'audio' }, { videoId: B, kind: 'mv' }];
+  const media = withCandidates(emptyMedia(), 'mv', two, now);
+  assert.deepEqual(media.mv, { videoId: A, kind: 'audio', source: 'auto', foundAt: now.toISOString(), candidates: two });
+  validateMedia(media);
+  assert.equal(dropCandidate(media, 'mv', A, now).mv.kind, 'mv');
+  assert.equal(nextCandidate(media, 'mv').mv.kind, 'mv');
+  assert.throws(() => validateMedia({ ...media, mv: { ...media.mv, kind: 'x' } }), /곡 영상 정보/);
+  assert.throws(() => validateMedia({ ...media, mv: { ...media.mv, candidates: [{ videoId: A, kind: 'basic' }] } }), /곡 영상 정보/);
+  assert.equal(withPasted(emptyMedia(), 'mv', P, now).mv.kind, undefined);
+});
+
+test('an original found before audio tracks existed keeps playing and is marked for one more search', () => {
+  const yesterday = at('11-03');
+  const old = { ...emptyMedia(), mv: auto(A, yesterday) };
+  assert.equal(expireMedia(old, now), old);
+  assert.equal(mediaNeeds(old).mv, true);
+  assert.equal(mediaNeeds({ ...emptyMedia(), mv: auto(A, yesterday, { kind: 'mv' }) }).mv, false);
+  // A new search that finds nothing keeps the old MV and stops asking again.
+  assert.deepEqual(upgradeOriginal(old, [], now).mv, { ...auto(A, yesterday), kind: 'mv' });
+  assert.deepEqual(upgradeOriginal(old, [{ videoId: B, kind: 'audio' }], now).mv, { videoId: B, kind: 'audio', source: 'auto', foundAt: now.toISOString(), candidates: [{ videoId: B, kind: 'audio' }] });
+  assert.deepEqual(upgradeOriginal(emptyMedia(), [], now).mv, { none: true, foundAt: now.toISOString() });
+  assert.deepEqual(expireMedia({ ...emptyMedia(), mv: auto(A, yesterday, { kind: 'mv' }) }, now).mv, auto(A, yesterday, { kind: 'mv' }));
+  const pasted = { videoId: P, source: 'pasted', foundAt: yesterday, candidates: [{ videoId: P }] };
+  assert.deepEqual(expireMedia({ ...emptyMedia(), mv: pasted }, now).mv, pasted);
+});
+
+test('lyric lines that arrive with sections are never stored', () => {
+  const items = [{ t: 17.6, label: '노래 시작 · 1절', kind: 'start' }];
+  const media = withSections(emptyMedia(), { duration: 243, sections: items, lines: [{ t: 17.6, text: 'word-a' }] }, now);
+  assert.deepEqual(Object.keys(media.sections), ['duration', 'items', 'checkedAt']);
+  assert.ok(!JSON.stringify(media).includes('word-'));
+  assert.throws(() => validateMedia({ ...media, sections: { ...media.sections, lines: [{ t: 1, text: 'x' }] } }), /곡 영상 정보/);
+});
+
+test('the original side is searched only once the song\'s sections are known (found or none)', () => {
+  assert.equal(canSearchOriginal(emptyMedia()), false);
+  assert.equal(canSearchOriginal({ ...emptyMedia(), sections: { none: true, checkedAt: at('11-03') } }), true);
+  assert.equal(canSearchOriginal({ ...emptyMedia(), sections: { duration: 243, items: [], checkedAt: at('11-03') } }), true);
+});
+
+import { lyricIndex } from '../src/song-media.js';
+
+test('the current lyric line is the last one that has begun, 0.2 s early', () => {
+  const lines = [{ t: 10, text: 'word-a' }, { t: 20, text: '' }, { t: 30, text: 'word-b' }];
+  assert.equal(lyricIndex(lines, 5), -1);
+  assert.equal(lyricIndex(lines, 9.85), 0);
+  assert.equal(lyricIndex(lines, 25), 1);
+  assert.equal(lyricIndex(lines, 100), 2);
+  assert.equal(lyricIndex([], 10), -1);
+});
+
+import { withProvisionalOriginal } from '../src/song-media.js';
+
+test('an original picked without the song length is provisional and searched again later', () => {
+  const media = withProvisionalOriginal(emptyMedia(), [{ videoId: A, kind: 'mv' }, { videoId: B, kind: 'audio' }], now);
+  assert.deepEqual(media.mv, { videoId: A, source: 'auto', foundAt: now.toISOString(), candidates: [{ videoId: A }, { videoId: B }] });
+  validateMedia(media);
+  assert.equal(mediaNeeds(media).mv, true);
+  assert.deepEqual(withProvisionalOriginal(emptyMedia(), [], now).mv, { none: true, foundAt: now.toISOString() });
 });
