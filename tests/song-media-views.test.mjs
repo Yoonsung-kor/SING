@@ -168,3 +168,38 @@ test('without consent a playing video still says sections and lyrics need consen
   const noVideo = songMediaBelow(songWith({}), ui({ consent: false }));
   assert.equal(count(noVideo, 'data-action="media-consent"'), 1);
 });
+
+// --- Sing-along feedback ---
+const reportOf = html => html.match(/<section class="surface practice-feedback sing-report">[\s\S]*?<\/section>/)?.[0] ?? '';
+const singLines = [{ t: 17.6, text: 'word-a' }, { t: 30.9, text: '<i>word-b</i>' }, { t: 81.1, text: 'word-c' }];
+
+test('sing-along: offered only with a video, sections and lyrics; the panel asks for earphones', () => {
+  const ready = songWith({ mv: audioEntry, sections: twoSections });
+  assert.ok(songMediaBelow(ready, ui(), singLines).includes('data-action="media-sing-open"'));
+  assert.ok(!songMediaBelow(ready, ui(), null).includes('media-sing-open'));
+  assert.ok(!songMediaBelow(songWith({ sections: twoSections }), ui(), singLines).includes('media-sing-open'));
+  const panel = songMediaBelow(ready, ui({ panel: 'sing' }), singLines);
+  assert.ok(panel.includes('이어폰을 끼고 불러 주세요. 스피커 소리가 마이크로 들어가면 측정이 틀려져요.'));
+  assert.match(panel, /data-action="media-sing-start"[^>]*>부르기 시작/);
+  const singing = songMediaBelow(ready, ui({ panel: 'sing', singing: true }), singLines);
+  assert.match(singing, /data-action="media-sing-stop"[^>]*>멈추고 피드백 받기/);
+  assert.ok(!singing.includes('media-sing-start'));
+});
+
+test('sing-along report: section, the line (escaped) or its time, a jump button, and the plain states', () => {
+  const ready = songWith({ mv: audioEntry, sections: twoSections });
+  const feedback = { good: [{ lineId: 0, text: '안정적이에요' }], improve: [{ lineId: 1, text: '<b>숨</b>이 끊겼어요' }], practice: [{ text: '허밍해요', link: 'practice' }] };
+  const report = { status: 'done', feedback, starts: { 0: 17.6, 1: 30.9 } };
+  const page = songMediaBelow(ready, ui({ singReport: report }), singLines);
+  const html = reportOf(page);
+  for (const text of ['잘한 점', '아쉬운 점', '추천 연습', '노래 시작 · 1절', 'word-a', '&lt;i&gt;word-b', '&lt;b&gt;숨', '안정적이에요']) assert.ok(html.includes(text), text);
+  assert.ok(!html.includes('<i>word-b') && !html.includes('<b>숨'));
+  assert.match(html, /data-action="media-lyric" data-id="1"/);
+  assert.ok(html.includes('여기로 가기'));
+  const noLyrics = reportOf(songMediaBelow(ready, ui({ singReport: report }), null));
+  assert.ok(noLyrics.includes('0:30') && !noLyrics.includes('word-b'));
+  assert.ok(songMediaBelow(ready, ui({ singReport: { status: 'busy' } }), singLines).includes('피드백을 만들고 있어요…'));
+  assert.ok(songMediaBelow(ready, ui({ singReport: { status: 'short' } }), singLines).includes('조금 더 불러 주세요. 가사 4줄 이상 부르면 피드백을 드릴게요.'));
+  assert.ok(songMediaBelow(ready, ui({ singReport: { status: 'failed' } }), singLines).includes('지금은 피드백을 만들지 못했어요. 잠시 후 다시 시도해 주세요.'));
+  assert.ok(!page.includes('style="'));
+});

@@ -1,4 +1,5 @@
-import { hummingPayload } from './practice-feedback.js';
+import { hummingPayload, lineMetrics, sungLines, chorusDiffs, songPayload } from './practice-feedback.js';
+import { createSingAlong } from './sing-along.js';
 import { createLesson, recordAttempt, nextTarget, finishLesson, summarizeLesson, recommendedNote, localDay, addActivity, needsDailyCheck } from './lesson.js';
 import { defaultState, openStore } from './storage.js';
 import { AudioEngine, microphoneError } from './audio.js';
@@ -68,6 +69,8 @@ let pinDraft = null;
 let mediaTicker = null;
 // Lyrics live in memory only (per song, gone when the app reloads); they are never saved or backed up.
 const songLyrics = new Map();
+// The sing-along measurement in progress (microphone open), or null.
+let singAlong = null;
 let lyricsStyle = 'karaoke';
 let lyricsScrollAt = 0;
 const lookupsInFlight = new Set();
@@ -136,10 +139,44 @@ function navigate(target) {
 }
 
 function stopSongPlayer() {
+  dropSinging();
   clearInterval(mediaTicker);
   mediaTicker = null;
   if (playerFor !== null) songPlayer.destroy();
   playerFor = pendingPaste = pinDraft = null;
+}
+
+/** Lets go of the microphone without asking for feedback (leaving the screen, switching the video). */
+function dropSinging() {
+  if (!singAlong) return;
+  singAlong.stop();
+  singAlong = null;
+  songUi = { ...songUi, singing: false };
+}
+
+/** Sing-along stopped: per-line numbers (no lyric text, no recording) go to the AI; the card stays on this screen only. */
+async function finishSinging() {
+  const song = selectedSong();
+  if (!singAlong || !song) return;
+  const frames = singAlong.stop();
+  singAlong = null;
+  const media = readMedia(song);
+  const items = media.sections?.items ?? [];
+  const comfortableHighMidi = state.settings.voice?.comfortableHighMidi ?? null;
+  const stats = lineMetrics(frames, songLyrics.get(song.id) ?? [], { comfortableHighMidi });
+  if (sungLines(stats) < 4) { songUi = { ...songUi, singing: false, singReport: { status: 'short' } }; return render(); }
+  const payload = songPayload(song, items, stats, chorusDiffs(stats, items), comfortableHighMidi);
+  songUi = { ...songUi, singing: false, panel: null, singReport: { status: 'busy' } };
+  render();
+  let feedback = null;
+  try {
+    const response = await fetch('/api/practice-feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    if (response.ok) feedback = (await response.json()).feedback ?? null;
+  } catch { feedback = null; }
+  if (!onSongScreen(song.id) || songUi.singReport?.status !== 'busy') return;
+  const starts = Object.fromEntries(stats.map(line => [line.id, line.start]));
+  songUi = { ...songUi, singReport: feedback ? { status: 'done', feedback, starts } : { status: 'failed' } };
+  render();
 }
 
 const selectedSong = () => state.songs.find(s => s.id === selectedSongId);
@@ -405,11 +442,38 @@ async function handleMedia(action, id) {
   if (action === 'media-side') {
     if (!['mv', 'karaoke'].includes(id) || id === songUi.side) return;
     pendingPaste = null;
+    dropSinging();
     songUi = { ...songUi, side: id, panel: null, pasteError: '', pinError: '', playerError: null };
     render();
     return showCurrentVideo();
   }
   if (action === 'media-consent') { consentReturn = 'song-detail'; return navigate('ai-consent'); }
+  if (action === 'media-sing-open') {
+    if (!hasCurrentConsent(state.settings)) { consentReturn = 'song-detail'; return navigate('ai-consent'); }
+    songUi = { ...songUi, panel: 'sing', pasteError: '', pinError: '', singReport: songUi.singReport?.status === 'done' ? songUi.singReport : null };
+    return render();
+  }
+  if (action === 'media-sing-stop') return finishSinging();
+  if (action === 'media-sing-start') {
+    if (!videoId || singAlong) return;
+    if (songPlayer.currentTime() === null) return toast('영상이 준비되면 다시 눌러 주세요.');
+    const offset = startOf(media, videoId);
+    const singer = createSingAlong();
+    singAlong = singer;
+    songUi = { ...songUi, singing: true, singReport: null };
+    render();
+    // Only while this video is playing; a paused or switched video measures nothing.
+    const songTime = () => {
+      const t = songPlayer.currentTime();
+      return t !== null && songPlayer.playbackState() === 1 && songPlayer.currentVideoId() === videoId ? t - offset : null;
+    };
+    let failure = null;
+    const started = await singer.start(songTime).catch(err => { failure = err; return false; });
+    if (singAlong !== singer) return;
+    if (!started) { dropSinging(); render(); return toast(microphoneError(failure)); }
+    if (songPlayer.playbackState() !== 1) songPlayer.seekTo(songPlayer.currentTime() ?? 0);
+    return;
+  }
   if (action === 'media-change') {
     songUi = { ...songUi, panel: 'change', pasteError: '' };
     render();
@@ -458,8 +522,9 @@ async function handleMedia(action, id) {
     return tickMedia();
   }
   if (action === 'media-lyric') {
-    const line = songLyrics.get(song.id)?.[Number(id)];
-    if (line && videoId) songPlayer.seekTo(toVideoTime(media, videoId, Math.max(0, line.t - 0.3)));
+    // A feedback card can point at a line by its start even if the lyrics are gone meanwhile.
+    const t = songLyrics.get(song.id)?.[Number(id)]?.t ?? songUi.singReport?.starts?.[id];
+    if (Number.isFinite(t) && videoId) songPlayer.seekTo(toVideoTime(media, videoId, Math.max(0, t - 0.3)));
     return;
   }
   if (action === 'media-next') {
