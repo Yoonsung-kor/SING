@@ -72,6 +72,24 @@ function validatePractice(value, path) {
   nullableString(value.recordingId, `${path}.recordingId`);
   timestamp(value.completedAt, `${path}.completedAt`);
 }
+// AI feedback kept with a lesson: short lists only (the server already cut them to two items of 80 characters).
+function validateFeedback(value, path) {
+  object(value, path);
+  if (Object.keys(value).some(key => !['good', 'improve', 'practice', 'createdAt'].includes(key))) invalid(path);
+  const text = (item, at) => { if (typeof item !== 'string' || !item.trim() || item.length > 80) invalid(at); };
+  for (const key of ['good', 'improve']) {
+    if (!Array.isArray(value[key]) || value[key].length > 2) invalid(`${path}.${key}`);
+    value[key].forEach((item, i) => text(item, `${path}.${key}[${i}]`));
+  }
+  if (!Array.isArray(value.practice) || value.practice.length > 2) invalid(`${path}.practice`);
+  value.practice.forEach((item, i) => {
+    object(item, `${path}.practice[${i}]`);
+    if (Object.keys(item).some(key => !['text', 'link'].includes(key)) || ![null, 'practice', 'learn'].includes(item.link)) invalid(`${path}.practice[${i}]`);
+    text(item.text, `${path}.practice[${i}].text`);
+  });
+  timestamp(value.createdAt, `${path}.createdAt`);
+}
+
 function validateSession(value, path) {
   object(value, path);
   string(value.id, `${path}.id`);
@@ -87,6 +105,7 @@ function validateSession(value, path) {
   nullableString(value.stopReason, `${path}.stopReason`);
   if (value.completedAt !== undefined && value.completedAt !== null) timestamp(value.completedAt, `${path}.completedAt`);
   if (value.practice !== undefined && value.practice !== null) validatePractice(value.practice, `${path}.practice`);
+  if (value.feedback !== undefined && value.feedback !== null) validateFeedback(value.feedback, `${path}.feedback`);
 }
 function validateActivity(value, path) {
   object(value, path);

@@ -199,3 +199,17 @@ test('consent versions up to 5 are kept and an unknown version is rejected', () 
   v3.state.settings.aiConsentVersion = 6;
   assert.throws(() => parseBackup(JSON.stringify(v3)));
 });
+
+test('a lesson can carry its AI feedback; old lessons without it still load; broken feedback is refused', () => {
+  const feedback = { good: ['편하게 확인했어요'], improve: ['조금 낮았어요'], practice: [{ text: '천천히 허밍해요', link: 'practice' }], createdAt: '2026-11-07T01:00:00.000Z' };
+  const withFeedback = feedbackValue => JSON.stringify({ ...backup, state: { ...backup.state, sessions: [{ ...session, feedback: feedbackValue }] } });
+  assert.deepEqual(parseBackup(withFeedback(feedback)).state.sessions[0].feedback, feedback);
+  assert.equal(parseBackup(JSON.stringify(backup)).state.sessions[0].feedback, undefined);
+  for (const bad of [
+    { ...feedback, good: ['x'.repeat(81)] },
+    { ...feedback, practice: [{ text: 'x', link: 'x' }] },
+    { ...feedback, improve: ['a', 'b', 'c'] },
+    { ...feedback, createdAt: 'yesterday' },
+    { ...feedback, extra: 1 },
+  ]) assert.throws(() => parseBackup(withFeedback(bad)), undefined, JSON.stringify(bad).slice(0, 60));
+});

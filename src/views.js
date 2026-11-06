@@ -96,12 +96,26 @@ function pendingView(v, practice) {
   return `<div class="measurement"><div><small>실제로 감지한 음</small><strong>${m.reliable ? e(note(m.midi)) : '아직 미확인'}</strong></div><div class="measurement-meta">${m.reliable ? '소리를 확인했어요' : '음높이를 충분히<br>확인하지 못했어요'}</div></div>${v.playUrl ? `<audio class="audio-player" controls preload="metadata" src="${e(v.playUrl)}" aria-label="방금 녹음한 소리"></audio>` : ''}<h2 class="feedback-question">소리를 낼 때 어땠나요?</h2><div class="comfort-options"><button class="comfort-option" data-action="${practice ? 'practice-' : ''}comfortable" ${v.busy ? 'disabled' : ''}><span>○</span> 편했어요</button><button class="comfort-option" data-action="${practice ? 'practice-' : ''}effort" ${v.busy ? 'disabled' : ''}><span>△</span> 힘들거나 소리가 갈라졌어요</button><button class="comfort-option" data-action="${practice ? 'practice-' : ''}unsure" ${v.busy ? 'disabled' : ''}><span>?</span> 잘 모르겠어요</button></div><p class="subtle">${m.reliable ? '음높이와 편안함은 별개예요. 지금의 느낌을 알려주세요.' : '미확인은 연습 실패가 아니에요. 느낀 점은 따로 남길 수 있어요.'}</p>`;
 }
 
+const FEEDBACK_LINKS = { practice: ['연습하러 가기', 'home'], learn: ['알아두기 보기', 'learn'] };
+/** AI feedback for a finished lesson: the saved card, a working or failed line, and the button to ask (again). */
+function feedbackSection(v, s) {
+  if (s.status !== 'finished' || !s.attempts.length) return '';
+  const f = s.feedback;
+  const list = (title, items) => items.length ? `<h3>${title}</h3><ul class="feedback-list">${items.join('')}</ul>` : '';
+  const card = f ? list('잘한 점', f.good.map(t => `<li>${e(t)}</li>`)) + list('아쉬운 점', f.improve.map(t => `<li>${e(t)}</li>`))
+    + list('추천 연습', f.practice.map(p => `<li>${e(p.text)}${p.link ? ` <button class="text-button" data-action="${FEEDBACK_LINKS[p.link][1]}">${FEEDBACK_LINKS[p.link][0]}</button>` : ''}</li>`)) : '';
+  const status = v.feedbackBusy ? '<p class="subtle" role="status">피드백을 만들고 있어요…</p>' : v.feedbackError ? '<div class="error-box" role="alert">지금은 피드백을 만들지 못했어요. 잠시 후 다시 시도해 주세요.</div>' : '';
+  const ask = v.feedbackBusy ? '' : button(f ? 'AI 피드백 다시 받기' : 'AI 피드백 받기', 'feedback-humming', { class: 'secondary small' });
+  return `<section class="surface practice-feedback"><h2>AI 피드백</h2>${card}${status}${ask}</section>`;
+}
+
 function result(v, history = false) {
   const s = v.session;
   const summary = summarizeLesson(s);
   const recommended = recommendedNote(s);
   return `<div class="narrow">${back(history ? '나의 기록' : '오늘의 연습', history ? 'history' : 'home')}${header('오늘 확인한 나의 음.', '허밍으로 직접 확인한 음과<br>내가 느낀 편안함을 함께 담았어요.', history ? null : 2)}<div class="surface"><p class="eyebrow">${e(dateStringText(s.day))} · 허밍</p><div class="result-summary">${summary.notes.length ? `오늘은 ${e(note(summary.highest))}까지<br>편하다고 알려주셨어요.` : '오늘은 느낌을 기록했어요.<br>음높이는 아직 미확인이에요.'}</div><div class="result-notes">${summary.notes.map(n => `<span class="note-chip">${e(note(n))}${summary.repeated.includes(n) ? ' ✓' : ''}</span>`).join('')}</div><p class="subtle">${summary.notes.length ? '✓ 두 번 이상 확인한 음' : '유효한 음높이와 편안함 응답이 함께 있을 때 표시해요.'}</p><hr class="separator"><p>${e(stopLabels[s.stopReason] || '이번에 확인한 소리를 기록했어요.')}</p><p class="subtle">오늘 이 과제로 확인한 음이에요. 전체 음역의 최저음·최고음이나 발성의 완성도를 뜻하지 않아요.</p></div>
   ${!history && recommended !== null ? `<section class="recommendation"><span class="badge">${icon('note')}나에게 맞춘 다음 연습</span><h2>${e(note(recommended))}에서 짧은 허밍</h2><p>두 번 이상 편하게 확인한 음에서 시작해요.<br>위로 더 올리지 않고, 같은 소리를 한 번 내볼 거예요.</p>${button('이 음에서 연습하기', 'practice', { icon: 'play' })}</section>` : !history && s.stopReason !== 'pain' ? '<div class="hint">같은 음을 편하게 낸 기록이 두 번 모이면, 그 높이에 맞춘 연습을 제안해요. 오늘은 안내를 읽거나 여기서 마쳐도 좋아요.</div>' : ''}
+  ${feedbackSection(v, s)}
   ${history && s.practice ? `<section class="surface"><h2>이어진 짧은 허밍</h2><p>기준음 ${e(note(s.practice.midi))} · ${e(comfortLabels[s.practice.comfort])}</p><p class="subtle">실제 감지음 ${s.practice.measurement?.reliable ? e(note(s.practice.measurement.midi)) : '미확인'}</p></section>` : ''}
   ${history ? `<section class="surface"><h2>시도별 기록</h2>${s.attempts.map((a, i) => `<div class="record-item"><div class="record-head"><div><h2>${i + 1}번째 · ${a.reliable ? e(note(a.midi)) : '미확인'}</h2><p>목표 ${a.targetMidi === null ? '자유롭게 시작' : e(note(a.targetMidi))} / ${e(comfortLabels[a.comfort])}</p></div>${a.recordingId ? button('듣기', 'play-saved', { class: 'secondary small', id: a.recordingId }) : ''}</div><div id="audio-${e(a.id)}"></div></div>`).join('')}${s.practice?.recordingId ? button('연습 녹음 듣기', 'play-saved', { class: 'secondary small', id: s.practice.recordingId }) : ''}<div id="saved-playback"></div></section>` : `<div class="action-row">${button('오늘은 여기까지 저장', 'save-session', { class: 'secondary', disabled: Boolean(v.busy) })}${s.stopReason !== 'pain' ? button('소리 없이 배우기', 'save-and-learn', { class: 'quiet', disabled: Boolean(v.busy) }) : ''}</div>`}</div>`;
 }

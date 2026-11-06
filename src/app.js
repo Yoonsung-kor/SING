@@ -1,3 +1,4 @@
+import { hummingPayload } from './practice-feedback.js';
 import { createLesson, recordAttempt, nextTarget, finishLesson, summarizeLesson, recommendedNote, localDay, addActivity, needsDailyCheck } from './lesson.js';
 import { defaultState, openStore } from './storage.js';
 import { AudioEngine, microphoneError } from './audio.js';
@@ -43,6 +44,8 @@ let playlistError = '';
 let recLoading = null;
 let recError = null;
 let consentReturn = 'playlist';
+let feedbackBusy = false;
+let feedbackError = false;
 let pendingPickList = null;
 // Pages that own the shared pick state: onboarding and '곡 찾아 담기'.
 const isPickerPage = target => target.startsWith('voice-') || target === 'song-pick';
@@ -82,7 +85,7 @@ function toast(message) {
 }
 
 function render(focus = false) {
-  const v = { page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, recLoading, recError, onboarding, loading: !initialized && !demo, songUi: { ...songUi, consent: hasCurrentConsent(state.settings) }, lyricsLines: songLyrics.get(selectedSongId) ?? null };
+  const v = { page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, recLoading, recError, onboarding, loading: !initialized && !demo, songUi: { ...songUi, consent: hasCurrentConsent(state.settings) }, lyricsLines: songLyrics.get(selectedSongId) ?? null, feedbackBusy, feedbackError };
   // While a song's player is mounted, only the parts around it are redrawn: moving an iframe would reload the video.
   if (!focus && page === 'song-detail' && playerFor === selectedSongId && document.querySelector('#song-player-slot')) {
     const parts = songDetailParts(v);
@@ -124,6 +127,7 @@ function navigate(target) {
   if (!isPickerPage(target)) leaveOnboarding();
   cancelCapture();
   stopSongPlayer();
+  feedbackError = false;
   error = '';
   page = target;
   if (target === 'song-detail') songUi = { ...defaultSongUi(), lyricsStyle };
@@ -794,6 +798,30 @@ async function respond(comfort, practice = false) {
   }
 }
 
+/** AI feedback on the lesson on screen: numbers only (no recordings); kept with the lesson. */
+async function requestHummingFeedback() {
+  if (!session || feedbackBusy) return;
+  if (!hasCurrentConsent(state.settings)) { consentReturn = page === 'detail' ? 'detail' : 'result'; return navigate('ai-consent'); }
+  const lesson = session;
+  const earlier = state.sessions.filter(s => s.id !== lesson.id && s.status === 'finished' && s.startedAt < lesson.startedAt).sort((a, b) => a.startedAt.localeCompare(b.startedAt)).at(-1);
+  const payload = hummingPayload(lesson, { previousHighMidi: earlier ? summarizeLesson(earlier).highest ?? null : null, comfortableHighMidi: state.settings.voice?.comfortableHighMidi ?? null });
+  feedbackBusy = true;
+  feedbackError = false;
+  render();
+  let feedback = null;
+  try {
+    const response = await fetch('/api/practice-feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    if (response.ok) feedback = (await response.json()).feedback ?? null;
+  } catch { feedback = null; }
+  feedbackBusy = false;
+  if (!feedback || session?.id !== lesson.id) { feedbackError = !feedback; return render(); }
+  session = { ...session, feedback: { ...feedback, createdAt: new Date().toISOString() } };
+  // A saved lesson is updated in place; a lesson still on the result screen keeps it in its draft until saved.
+  if (state.sessions.some(s => s.id === session.id)) await persist({ ...state, sessions: state.sessions.map(s => s.id === session.id ? session : s) });
+  else await saveDraft();
+  render();
+}
+
 async function saveSession(destination = 'done') {
   if (!session || busy) return;
   busy = 'saving'; render();
@@ -1215,12 +1243,14 @@ async function handle(action, id) {
   if (action === 'rec-nope') return rejectRecommendationAt(id);
   if (action === 'song-range') return lookupSongRange();
   if (action === 'consent-back') {
+    if (consentReturn === 'result' || consentReturn === 'detail') return navigate(consentReturn);
     if (consentReturn === 'song-pick') return openManualSongForm(pendingPickList);
     if (consentReturn === 'song-detail') return navigate('song-detail');
     return navigate(consentReturn === 'song-form' ? 'song-form' : state.playlists.some(p => p.id === selectedPlaylistId) ? 'playlist' : 'songs');
   }
   if (action === 'ai-consent-accept') {
     if (!(await persist({ ...state, settings: withConsent(state.settings, new Date()) }))) return;
+    if (consentReturn === 'result' || consentReturn === 'detail') { navigate(consentReturn); return requestHummingFeedback(); }
     if (consentReturn === 'song-form') { navigate('song-form'); return lookupSongRange(); }
     if (consentReturn === 'song-pick') return beginPicker(pendingPickList);
     if (consentReturn === 'song-detail') return navigate('song-detail');
@@ -1280,6 +1310,7 @@ async function handle(action, id) {
   if (action === 'learn-complete') return recordActivity('learn');
   if (action === 'rest-complete') return recordActivity('rest');
   if (action === 'detail') { session = state.sessions.find(s => s.id === id); if (session) navigate('detail'); return; }
+  if (action === 'feedback-humming') return requestHummingFeedback();
   if (action === 'delete-session') return deleteSession(id);
   if (action === 'play-saved') return playSaved(id);
   if (action === 'export') return exportBackup();
