@@ -93,3 +93,14 @@ test('practice feedback asks without web search, with a schema per kind and the 
   assert.match(seen[1].instructions, /쉬운 말/);
   assert.ok(seen[0].input.includes('"id":3'));
 });
+
+test('practice feedback rules: 아쉬운 점 may be empty, and only the problems the app named count', async () => {
+  const seen = [];
+  const fetchImpl = async (url, init) => { seen.push(JSON.parse(init.body)); return ok('{"good":[],"improve":[],"practice":[]}')(); };
+  await fetchPracticeFeedback({ kind: 'song', lines: [] }, { apiKey: 'k', model: 'm', fetchImpl });
+  await fetchPracticeFeedback({ kind: 'humming', attempts: [] }, { apiKey: 'k', model: 'm', fetchImpl });
+  for (const { instructions } of seen) assert.match(instructions, /improve\(아쉬운 점\) 0~2개/);
+  assert.match(seen[0].instructions, /issues/);
+  for (const name of ['gap', 'wobble', 'high', 'chorus']) assert.match(seen[0].instructions, new RegExp(name));
+  assert.match(seen[1].instructions, /50/);
+});

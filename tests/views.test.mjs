@@ -34,3 +34,9 @@ test('saved feedback shows as a card with links to practice or learning, text es
   assert.ok(html.includes('data-action="feedback-humming"'), 'can ask again');
   assert.ok(!html.includes('style="'));
 });
+
+test('when nothing stood out, the card says so instead of inventing a problem', () => {
+  const feedback = { good: ['편하게 올렸어요'], improve: [], practice: [{ text: '허밍해요', link: 'practice' }], createdAt: '2026-11-07T01:00:00.000Z' };
+  const html = resultPage({ session: { ...lesson, feedback } });
+  assert.match(html, /아쉬운 점<\/h3>[\s\S]*?이번엔 크게 아쉬운 점이 없었어요\./);
+});

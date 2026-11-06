@@ -96,13 +96,14 @@ function pendingView(v, practice) {
   return `<div class="measurement"><div><small>실제로 감지한 음</small><strong>${m.reliable ? e(note(m.midi)) : '아직 미확인'}</strong></div><div class="measurement-meta">${m.reliable ? '소리를 확인했어요' : '음높이를 충분히<br>확인하지 못했어요'}</div></div>${v.playUrl ? `<audio class="audio-player" controls preload="metadata" src="${e(v.playUrl)}" aria-label="방금 녹음한 소리"></audio>` : ''}<h2 class="feedback-question">소리를 낼 때 어땠나요?</h2><div class="comfort-options"><button class="comfort-option" data-action="${practice ? 'practice-' : ''}comfortable" ${v.busy ? 'disabled' : ''}><span>○</span> 편했어요</button><button class="comfort-option" data-action="${practice ? 'practice-' : ''}effort" ${v.busy ? 'disabled' : ''}><span>△</span> 힘들거나 소리가 갈라졌어요</button><button class="comfort-option" data-action="${practice ? 'practice-' : ''}unsure" ${v.busy ? 'disabled' : ''}><span>?</span> 잘 모르겠어요</button></div><p class="subtle">${m.reliable ? '음높이와 편안함은 별개예요. 지금의 느낌을 알려주세요.' : '미확인은 연습 실패가 아니에요. 느낀 점은 따로 남길 수 있어요.'}</p>`;
 }
 
+const NOTHING_TO_IMPROVE = '<h3>아쉬운 점</h3><p class="subtle">이번엔 크게 아쉬운 점이 없었어요.</p>';
 const FEEDBACK_LINKS = { practice: ['연습하러 가기', 'home'], learn: ['알아두기 보기', 'learn'] };
 /** AI feedback for a finished lesson: the saved card, a working or failed line, and the button to ask (again). */
 function feedbackSection(v, s) {
   if (s.status !== 'finished' || !s.attempts.length) return '';
   const f = s.feedback;
   const list = (title, items) => items.length ? `<h3>${title}</h3><ul class="feedback-list">${items.join('')}</ul>` : '';
-  const card = f ? list('잘한 점', f.good.map(t => `<li>${e(t)}</li>`)) + list('아쉬운 점', f.improve.map(t => `<li>${e(t)}</li>`))
+  const card = f ? list('잘한 점', f.good.map(t => `<li>${e(t)}</li>`)) + (f.improve.length ? list('아쉬운 점', f.improve.map(t => `<li>${e(t)}</li>`)) : NOTHING_TO_IMPROVE)
     + list('추천 연습', f.practice.map(p => `<li>${e(p.text)}${p.link ? ` <button class="text-button" data-action="${FEEDBACK_LINKS[p.link][1]}">${FEEDBACK_LINKS[p.link][0]}</button>` : ''}</li>`)) : '';
   const status = v.feedbackBusy ? '<p class="subtle" role="status">피드백을 만들고 있어요…</p>' : v.feedbackError ? '<div class="error-box" role="alert">지금은 피드백을 만들지 못했어요. 잠시 후 다시 시도해 주세요.</div>' : '';
   const ask = v.feedbackBusy ? '' : button(f ? 'AI 피드백 다시 받기' : 'AI 피드백 받기', 'feedback-humming', { class: 'secondary small' });

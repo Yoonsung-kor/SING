@@ -212,3 +212,9 @@ test('sing-along: while measuring, the stop button stays even if another panel w
     assert.ok(!html.includes('data-action="media-sing-open"'), String(panel));
   }
 });
+
+test('sing-along report: when no line had a problem, it says so', () => {
+  const ready = songWith({ mv: audioEntry, sections: twoSections });
+  const report = { status: 'done', feedback: { good: [{ lineId: 0, text: '안정적이에요' }], improve: [], practice: [] }, starts: { 0: 17.6 } };
+  assert.match(reportOf(songMediaBelow(ready, ui({ singReport: report }), singLines)), /아쉬운 점<\/h3>[\s\S]*?이번엔 크게 아쉬운 점이 없었어요\./);
+});

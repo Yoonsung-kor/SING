@@ -79,3 +79,15 @@ test('practice feedback keeps only lines it was given', async () => {
   assert.deepEqual(await practiceFeedback(payload), { good: [{ lineId: 1, text: '안정적이에요' }], improve: [], practice: [{ text: '허밍', link: 'practice' }] });
   assert.equal(createServices({}).practiceFeedback, null);
 });
+
+test('practice feedback: the AI is told each sung line\'s problems and may call only those lines 아쉬운 점', async () => {
+  const { createServices } = await import('../scripts/services.mjs');
+  let sent = null;
+  const text = JSON.stringify({ good: [{ lineId: 0, text: '안정적이에요' }], improve: [{ lineId: 0, text: '지어낸 흔들림' }, { lineId: 1, text: '끊겼어요' }], practice: [] });
+  const fetchImpl = async (url, init) => { sent = JSON.parse(JSON.parse(init.body).input); return { ok: true, status: 200, json: async () => ({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }] }) }; };
+  const { practiceFeedback } = createServices({ apiKey: 'k', model: 'm', fetchImpl });
+  const line = (id, extra = {}) => ({ id, section: '', voiced: 0.9, top: null, overComfort: 0, wobble: 0, gaps: 0, ...extra });
+  const payload = { kind: 'song', song: { title: 'x', artist: '' }, comfortableHigh: null, lines: [line(0), line(1, { gaps: 1 }), line(2, { voiced: 0.1 })], chorusDiffs: [] };
+  assert.deepEqual(await practiceFeedback(payload), { good: [{ lineId: 0, text: '안정적이에요' }], improve: [{ lineId: 1, text: '끊겼어요' }], practice: [] });
+  assert.deepEqual(sent.lines.map(l => [l.id, l.issues]), [[0, []], [1, ['gap']]]);
+});

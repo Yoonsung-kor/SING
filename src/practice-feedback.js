@@ -111,25 +111,49 @@ export function songPayload(song, sections, stats, diffs, comfortableHighMidi) {
   };
 }
 
+// What counts as a problem is decided here, not by the AI; the AI only puts these into words.
+const WOBBLE_ISSUE = 0.2;
+const HIGH_ISSUE = 0.1;
+const CHORUS_ISSUE = 0.5;
+
+/** The song request as the AI sees it: sung lines only, each with the problems the app found (gap, wobble, high, chorus). */
+export function withIssues(payload) {
+  const chorus = new Set(payload.chorusDiffs.filter(diff => Math.abs(diff.semitones) >= CHORUS_ISSUE).flatMap(diff => diff.ids));
+  const lines = payload.lines.filter(line => line.voiced >= SUNG).map(line => ({
+    ...line,
+    issues: [
+      ...(line.gaps >= 1 ? ['gap'] : []),
+      ...(line.wobble >= WOBBLE_ISSUE ? ['wobble'] : []),
+      ...(line.overComfort >= HIGH_ISSUE ? ['high'] : []),
+      ...(chorus.has(line.id) ? ['chorus'] : []),
+    ],
+  }));
+  return { ...payload, lines };
+}
+
+export const problemLines = payload => payload.lines.filter(line => line.issues.length).map(line => line.id);
+
 const cleanText = value => {
   const text = typeof value === 'string' ? value.trim() : '';
   return text && text.length <= TEXT_MAX ? text : null;
 };
 
-/** The AI's answer, kept only where it is short and (for a song) points at a line it was given. */
-export function cleanFeedback(raw, { kind, lineIds = [] }) {
+/** The AI's answer, kept only where it is short and (for a song) points at a line it was given; with problemIds,
+ * 아쉬운 점 must point at a line with a problem and 잘한 점 at one without. */
+export function cleanFeedback(raw, { kind, lineIds = [], problemIds = null }) {
   if (!raw || typeof raw !== 'object') return null;
   const known = new Set(lineIds);
-  const pointed = list => (Array.isArray(list) ? list : []).flatMap(item => {
+  const problems = problemIds && new Set(problemIds);
+  const pointed = (list, allowed = () => true) => (Array.isArray(list) ? list : []).flatMap(item => {
     if (kind !== 'song') { const text = cleanText(item); return text ? [text] : []; }
     const text = cleanText(item?.text);
-    return text && Number.isInteger(item.lineId) && known.has(item.lineId) ? [{ lineId: item.lineId, text }] : [];
+    return text && Number.isInteger(item.lineId) && known.has(item.lineId) && allowed(item.lineId) ? [{ lineId: item.lineId, text }] : [];
   }).slice(0, PER_LIST);
   const practice = (Array.isArray(raw.practice) ? raw.practice : []).flatMap(item => {
     const text = cleanText(item?.text);
     return text ? [{ text, link: LINKS.includes(item.link) ? item.link : null }] : [];
   }).slice(0, PER_LIST);
-  const feedback = { good: pointed(raw.good), improve: pointed(raw.improve), practice };
+  const feedback = { good: pointed(raw.good, id => !problems?.has(id)), improve: pointed(raw.improve, id => !problems || problems.has(id)), practice };
   return feedback.good.length || feedback.improve.length || feedback.practice.length ? feedback : null;
 }
 
