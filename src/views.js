@@ -104,8 +104,8 @@ function feedbackSection(v, s) {
   const f = s.feedback;
   const list = (title, items) => items.length ? `<h3>${title}</h3><ul class="feedback-list">${items.join('')}</ul>` : '';
   const card = f ? list('잘한 점', f.good.map(t => `<li>${e(t)}</li>`)) + (f.improve.length ? list('아쉬운 점', f.improve.map(t => `<li>${e(t)}</li>`)) : NOTHING_TO_IMPROVE)
-    + list('추천 연습', f.practice.map(p => `<li>${e(p.text)}${p.link ? ` <button class="text-button" data-action="${FEEDBACK_LINKS[p.link][1]}">${FEEDBACK_LINKS[p.link][0]}</button>` : ''}</li>`)) : '';
-  const status = v.feedbackBusy ? '<p class="subtle" role="status">피드백을 만들고 있어요…</p>' : v.feedbackError ? '<div class="error-box" role="alert">지금은 피드백을 만들지 못했어요. 잠시 후 다시 시도해 주세요.</div>' : '';
+    + list('추천 연습', f.practice.map(p => `<li>${e(p.text)}${FEEDBACK_LINKS[p.link] ? ` <button class="text-button" data-action="${FEEDBACK_LINKS[p.link][1]}">${FEEDBACK_LINKS[p.link][0]}</button>` : ''}</li>`)) : '';
+  const status = v.feedbackBusy ? '<p class="subtle" role="status">피드백을 만들고 있어요…</p>' : v.feedbackError === 'off' ? '<div class="error-box" role="alert">지금은 AI 피드백을 쓸 수 없어요.</div>' : v.feedbackError ? '<div class="error-box" role="alert">지금은 피드백을 만들지 못했어요. 잠시 후 다시 시도해 주세요.</div>' : '';
   const ask = v.feedbackBusy ? '' : button(f ? 'AI 피드백 다시 받기' : 'AI 피드백 받기', 'feedback-humming', { class: 'secondary small' });
   return `<section class="surface practice-feedback"><h2>AI 피드백</h2>${card}${status}${ask}</section>`;
 }

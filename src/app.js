@@ -1,4 +1,4 @@
-import { hummingPayload, lineMetrics, sungLines, chorusDiffs, songPayload, songFrames } from './practice-feedback.js';
+import { hummingPayload, lineMetrics, sungLines, chorusDiffs, songPayload, songFrames, cleanFeedback } from './practice-feedback.js';
 import { createSingAlong } from './sing-along.js';
 import { createLesson, recordAttempt, nextTarget, finishLesson, summarizeLesson, recommendedNote, localDay, addActivity, needsDailyCheck } from './lesson.js';
 import { defaultState, openStore } from './storage.js';
@@ -45,8 +45,11 @@ let playlistError = '';
 let recLoading = null;
 let recError = null;
 let consentReturn = 'playlist';
-let feedbackBusy = false;
-let feedbackError = false;
+// The lesson whose feedback is being made, and the lesson whose last request failed ({ id, error: 'off' | 'failed' }).
+let feedbackFor = null;
+let feedbackFailed = null;
+// Bumped by each sing-along take, so an answer for an older take is dropped.
+let singRequest = 0;
 let pendingPickList = null;
 // Pages that own the shared pick state: onboarding and '곡 찾아 담기'.
 const isPickerPage = target => target.startsWith('voice-') || target === 'song-pick';
@@ -89,7 +92,7 @@ function toast(message) {
 }
 
 function render(focus = false) {
-  const v = { page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, recLoading, recError, onboarding, loading: !initialized && !demo, songUi: { ...songUi, consent: hasCurrentConsent(state.settings) }, lyricsLines: songLyrics.get(selectedSongId) ?? null, feedbackBusy, feedbackError };
+  const v = { page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, recLoading, recError, onboarding, loading: !initialized && !demo, songUi: { ...songUi, consent: hasCurrentConsent(state.settings) }, lyricsLines: songLyrics.get(selectedSongId) ?? null, feedbackBusy: Boolean(session) && feedbackFor === session.id, feedbackError: feedbackFailed && feedbackFailed.id === session?.id ? feedbackFailed.error : false };
   // While a song's player is mounted, only the parts around it are redrawn: moving an iframe would reload the video.
   if (!focus && page === 'song-detail' && playerFor === selectedSongId && document.querySelector('#song-player-slot')) {
     const parts = songDetailParts(v);
@@ -131,7 +134,7 @@ function navigate(target) {
   if (!isPickerPage(target)) leaveOnboarding();
   cancelCapture();
   stopSongPlayer();
-  feedbackError = false;
+  feedbackFailed = null;
   error = '';
   page = target;
   if (target === 'song-detail') songUi = { ...defaultSongUi(), lyricsStyle };
@@ -170,14 +173,11 @@ async function finishSinging() {
   const payload = songPayload(song, items, stats, chorusDiffs(stats, items), comfortableHighMidi);
   songUi = { ...songUi, singing: false, panel: null, singReport: { status: 'busy' } };
   render();
-  let feedback = null;
-  try {
-    const response = await fetch('/api/practice-feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    if (response.ok) feedback = (await response.json()).feedback ?? null;
-  } catch { feedback = null; }
-  if (!onSongScreen(song.id) || songUi.singReport?.status !== 'busy') return;
+  const token = ++singRequest;
+  const result = await askFeedback(payload, { kind: 'song', lineIds: stats.map(line => line.id) });
+  if (token !== singRequest || !onSongScreen(song.id)) return;
   const starts = Object.fromEntries(stats.map(line => [line.id, line.start]));
-  songUi = { ...songUi, singReport: feedback ? { status: 'done', feedback, starts } : { status: 'failed' } };
+  songUi = { ...songUi, singReport: result.feedback ? { status: 'done', feedback: result.feedback, starts } : { status: result.error } };
   render();
 }
 
@@ -463,6 +463,7 @@ async function handleMedia(action, id) {
     const singer = createSingAlong();
     singAlong = singer;
     singVideoId = videoId;
+    singRequest++;
     songUi = { ...songUi, singing: true, singReport: null };
     render();
     // Only while this video is playing; a paused or switched video measures nothing.
@@ -868,26 +869,36 @@ async function respond(comfort, practice = false) {
 }
 
 /** AI feedback on the lesson on screen: numbers only (no recordings); kept with the lesson. */
+/** Asks for practice feedback and checks the answer again here. Returns { feedback } or { error: 'off' | 'failed' }. */
+async function askFeedback(payload, check) {
+  try {
+    const response = await fetch('/api/practice-feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const body = await response.json().catch(() => ({}));
+    if (response.status === 503 && body.error === 'not-configured') return { error: 'off' };
+    const feedback = response.ok ? cleanFeedback(body.feedback, check) : null;
+    return feedback ? { feedback } : { error: 'failed' };
+  } catch { return { error: 'failed' }; }
+}
+
 async function requestHummingFeedback() {
-  if (!session || feedbackBusy) return;
+  if (!session) return;
+  if (feedbackFor) return toast('다른 기록의 피드백을 만들고 있어요. 잠시만 기다려 주세요.');
   if (!hasCurrentConsent(state.settings)) { consentReturn = page === 'detail' ? 'detail' : 'result'; return navigate('ai-consent'); }
   const lesson = session;
   const earlier = state.sessions.filter(s => s.id !== lesson.id && s.status === 'finished' && s.startedAt < lesson.startedAt).sort((a, b) => a.startedAt.localeCompare(b.startedAt)).at(-1);
   const payload = hummingPayload(lesson, { previousHighMidi: earlier ? summarizeLesson(earlier).highest ?? null : null, comfortableHighMidi: state.settings.voice?.comfortableHighMidi ?? null });
-  feedbackBusy = true;
-  feedbackError = false;
+  feedbackFor = lesson.id;
+  feedbackFailed = null;
   render();
-  let feedback = null;
-  try {
-    const response = await fetch('/api/practice-feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    if (response.ok) feedback = (await response.json()).feedback ?? null;
-  } catch { feedback = null; }
-  feedbackBusy = false;
-  if (!feedback || session?.id !== lesson.id) { feedbackError = !feedback; return render(); }
-  session = { ...session, feedback: { ...feedback, createdAt: new Date().toISOString() } };
-  // A saved lesson is updated in place; a lesson still on the result screen keeps it in its draft until saved.
-  if (state.sessions.some(s => s.id === session.id)) await persist({ ...state, sessions: state.sessions.map(s => s.id === session.id ? session : s) });
-  else await saveDraft();
+  const result = await askFeedback(payload, { kind: 'humming' });
+  feedbackFor = null;
+  if (!result.feedback) { feedbackFailed = { id: lesson.id, error: result.error }; return render(); }
+  const feedback = { ...result.feedback, createdAt: new Date().toISOString() };
+  // Kept with the lesson it was asked for, even if another one is open now: a saved lesson is updated by id;
+  // an unsaved one keeps it in its draft while it is still the lesson on screen.
+  const saved = state.sessions.some(s => s.id === lesson.id);
+  if (saved) await persist({ ...state, sessions: state.sessions.map(s => s.id === lesson.id ? { ...s, feedback } : s) });
+  if (session?.id === lesson.id) { session = { ...session, feedback }; if (!saved) await saveDraft(); }
   render();
 }
 

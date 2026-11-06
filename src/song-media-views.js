@@ -116,7 +116,8 @@ function singBlock(media, ui, videoId, lines) {
   const report = ui.singReport;
   const status = report?.status === 'busy' ? '<p class="media-status" role="status">피드백을 만들고 있어요…</p>'
     : report?.status === 'short' ? '<p class="media-status" role="status">조금 더 불러 주세요. 가사 4줄 이상 부르면 피드백을 드릴게요.</p>'
-    : report?.status === 'failed' ? '<div class="error-box" role="alert">지금은 피드백을 만들지 못했어요. 잠시 후 다시 시도해 주세요.</div>' : '';
+    : report?.status === 'failed' ? '<div class="error-box" role="alert">지금은 피드백을 만들지 못했어요. 잠시 후 다시 시도해 주세요.</div>'
+    : report?.status === 'off' ? '<div class="error-box" role="alert">지금은 AI 피드백을 쓸 수 없어요.</div>' : '';
   if (!videoId || !media.sections?.items?.length || !lines?.length) return status;
   // While the microphone is open the stop button stays, whatever other panel was opened meanwhile.
   if (ui.panel !== 'sing' && !ui.singing) return `<div class="media-sing">${report?.status === 'busy' ? '' : '<button class="button secondary small" data-action="media-sing-open">따라 부르고 피드백 받기</button>'}${status}</div>`;
@@ -136,11 +137,11 @@ function singReportBlock(media, ui, lines) {
     const line = lines?.[item.lineId];
     const t = line?.t ?? report.starts?.[item.lineId] ?? 0;
     const where = [sectionAt(t), line?.text ? `“${e(line.text)}”` : formatTime(t)].filter(Boolean).join(' · ');
-    return `<li><span class="sing-where">${where}</span> ${e(item.text)} <button class="text-button" data-action="media-lyric" data-id="${item.lineId}">여기로 가기</button></li>`;
+    return `<li><span class="sing-where">${where}</span> ${e(item.text)} <button class="text-button" data-action="media-lyric" data-id="${e(item.lineId)}">여기로 가기</button></li>`;
   };
   const list = (title, items) => items.length ? `<h3>${title}</h3><ul class="feedback-list">${items.join('')}</ul>` : '';
   const { good, improve, practice } = report.feedback;
-  const practiceItems = practice.map(p => `<li>${e(p.text)}${p.link ? ` <button class="text-button" data-action="${SING_LINKS[p.link][1]}">${SING_LINKS[p.link][0]}</button>` : ''}</li>`);
+  const practiceItems = practice.map(p => `<li>${e(p.text)}${SING_LINKS[p.link] ? ` <button class="text-button" data-action="${SING_LINKS[p.link][1]}">${SING_LINKS[p.link][0]}</button>` : ''}</li>`);
   return `<section class="surface practice-feedback sing-report"><h2>따라 부르기 피드백</h2>${list('잘한 점', good.map(point))}${improve.length ? list('아쉬운 점', improve.map(point)) : '<h3>아쉬운 점</h3><p class="subtle">이번엔 크게 아쉬운 점이 없었어요.</p>'}${list('추천 연습', practiceItems)}</section>`;
 }
 

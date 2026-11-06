@@ -84,12 +84,12 @@ export function lineMetrics(frames, lines, { comfortableHighMidi = null } = {}) 
 
 export const sungLines = stats => stats.filter(line => line.voiced >= SUNG).length;
 
-/** The first two choruses: the nth sung line of one against the nth of the other, in semitones (at most 6 pairs). */
+/** The first two choruses that were sung: the nth sung line of one against the nth of the other, in semitones (at most 6 pairs). */
 export function chorusDiffs(stats, sections) {
-  const ranges = sections.map((section, i) => ({ section, end: sections[i + 1]?.t ?? Infinity })).filter(({ section }) => section.kind === 'chorus').slice(0, 2);
-  if (ranges.length < 2) return [];
+  const ranges = sections.map((section, i) => ({ section, end: sections[i + 1]?.t ?? Infinity })).filter(({ section }) => section.kind === 'chorus');
   const sungIn = ({ section, end }) => stats.filter(line => line.start >= section.t && line.start < end && line.voiced >= SUNG && line.median !== null);
-  const [first, second] = ranges.map(sungIn);
+  const [first, second] = ranges.map(sungIn).filter(list => list.length);
+  if (!second) return [];
   const pairs = [];
   for (let n = 0; n < Math.min(first.length, second.length, 6); n++) pairs.push({ ids: [first[n].id, second[n].id], semitones: round1(first[n].median - second[n].median) });
   return pairs;

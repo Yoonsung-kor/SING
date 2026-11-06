@@ -134,5 +134,5 @@ test('final #3: the add-by-search screen takes a typed title as a pick instead o
 
 test('the intro says practice measurements go out only for feedback, recordings never', () => {
   const html = voiceIntroView({ state: defaultState() });
-  assert.ok(html.includes('녹음은 보내지 않아요. 연습 측정값은 피드백을 받을 때만 보내요.') && html.includes('연습 피드백을 받을 때 연습 측정값(목표음, 낸 음, 흔들림, 체감)이 OpenAI로 가요. 녹음은 보내지 않아요.') && !html.includes('연습 기록은 보내지 않아요'));
+  assert.ok(html.includes('녹음은 보내지 않아요. 연습 측정값은 피드백을 받을 때만 보내요.') && html.includes('연습 피드백을 받을 때 연습 측정값(목표음, 낸 음, 흔들림, 체감)이 OpenAI로 가요. 노래를 따라 부르고 받을 때는 곡 제목·가수와 구간 이름, 가사 줄 번호도 함께 가요. 녹음과 가사 글자는 보내지 않아요.') && !html.includes('연습 기록은 보내지 않아요'));
 });

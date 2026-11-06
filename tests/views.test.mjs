@@ -40,3 +40,10 @@ test('when nothing stood out, the card says so instead of inventing a problem', 
   const html = resultPage({ session: { ...lesson, feedback } });
   assert.match(html, /아쉬운 점<\/h3>[\s\S]*?이번엔 크게 아쉬운 점이 없었어요\./);
 });
+
+test('feedback: AI switched off says so; odd links in a saved card do not break the page', () => {
+  assert.ok(resultPage({ feedbackError: 'off' }).includes('지금은 AI 피드백을 쓸 수 없어요.'));
+  assert.ok(!resultPage({ feedbackError: 'off' }).includes('잠시 후 다시 시도해 주세요'));
+  const feedback = { good: ['좋아요'], improve: [], practice: [{ text: '허밍해요', link: 'evil' }], createdAt: '2026-11-07T01:00:00.000Z' };
+  assert.ok(resultPage({ session: { ...lesson, feedback } }).includes('허밍해요'));
+});

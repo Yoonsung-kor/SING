@@ -140,3 +140,10 @@ test('song feedback: 아쉬운 점 only on lines with problems, 잘한 점 only 
   const raw = { good: [{ lineId: 0, text: '좋아요' }, { lineId: 1, text: '끊긴 줄 칭찬' }], improve: [{ lineId: 0, text: '문제없는 줄' }, { lineId: 1, text: '끊겼어요' }], practice: [] };
   assert.deepEqual(cleanFeedback(raw, { kind: 'song', lineIds: [0, 1], problemIds: [1] }), { good: [{ lineId: 0, text: '좋아요' }], improve: [{ lineId: 1, text: '끊겼어요' }], practice: [] });
 });
+
+test('chorus comparison uses the first two choruses that were sung, not just the first two', () => {
+  const sections = [{ t: 0, label: '1절', kind: 'start' }, { t: 10, label: '후렴 1', kind: 'chorus' }, { t: 20, label: '2절', kind: 'verse' }, { t: 30, label: '후렴 2', kind: 'chorus' }, { t: 40, label: '마지막 후렴', kind: 'chorus' }];
+  const stat = (id, start, median) => ({ id, start, voiced: 1, median });
+  const stats = [stat(0, 31, 60), stat(1, 35, 62), stat(2, 41, 59), stat(3, 45, 62)];
+  assert.deepEqual(chorusDiffs(stats, sections), [{ ids: [0, 2], semitones: 1 }, { ids: [1, 3], semitones: 0 }]);
+});
