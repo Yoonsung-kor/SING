@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { hummingPayload, lineMetrics, chorusDiffs, songPayload, sungLines, cleanFeedback } from '../src/practice-feedback.js';
+import { hummingPayload, lineMetrics, chorusDiffs, songPayload, sungLines, cleanFeedback, songFrames } from '../src/practice-feedback.js';
 
 // 50 ms frames: 0-2 s steady A3, 2-4 s A3/B3 alternating, 4-6 s silence, 6-8 s E4.
 const frames = [];
@@ -16,7 +16,7 @@ test('line metrics: steady, wobbling, silent and above the comfortable top', () 
   const [steady, wobbly, silent, high] = stats;
   assert.deepEqual([steady.voiced, steady.wobble, steady.top, steady.overComfort, steady.gaps], [1, 0, '1옥 라', 0, 0]);
   assert.ok(wobbly.wobble > 0.9 && wobbly.voiced === 1);
-  assert.deepEqual([silent.voiced, silent.gaps, silent.top], [0, 1, null]);
+  assert.deepEqual([silent.voiced, silent.gaps, silent.top], [0, 0, null]);
   assert.deepEqual([high.overComfort, high.top], [1, '2옥 미']);
   assert.deepEqual([steady.start, steady.end], [0, 2]);
 });
@@ -94,4 +94,33 @@ test('feedback requests are checked before they reach the AI', () => {
     { ...humming, attempts: [{ ...humming.attempts[0], comfort: 'x' }] },
     null,
   ]) assert.throws(() => validatePracticeRequest(bad), undefined, JSON.stringify(bad)?.slice(0, 60));
+});
+
+test('a line runs at most 7 s, so an interlude or outro is not counted as a break', () => {
+  // Lines at 50, 54, 80: sung 50-58, then the interlude and outro are silent until 90.
+  const f = [];
+  for (let i = 0; i < 800; i++) { const t = Math.round((50 + i * 0.05) * 100) / 100; f.push({ songTime: t, midi: t < 58 ? 60 : null }); }
+  const [, b, c] = lineMetrics(f, [{ t: 50, text: 'x' }, { t: 54, text: 'y' }, { t: 80, text: 'z' }]);
+  assert.equal(b.end, 61);
+  assert.ok(b.voiced >= 0.5, String(b.voiced));
+  assert.equal(b.gaps, 0);
+  assert.deepEqual([c.end, c.voiced, c.gaps], [87, 0, 0]);
+});
+
+test('a gap is a silence over 0.4 s between sung moments, not before the first or after the last', () => {
+  const f = [];
+  for (let i = 0; i < 80; i++) { const t = Math.round(i * 5) / 100; f.push({ songTime: t, midi: t < 0.5 || (t >= 1.5 && t < 2) || (t >= 2.5 && t < 2.7) ? null : 60 }); }
+  // Silent 0-0.5 (before), 1.5-2 (between: a break), 2.5-2.7 (between, too short), 3.5-4 sung to the end.
+  assert.equal(lineMetrics(f, [{ t: 0, text: 'x' }, { t: 4, text: 'y' }])[0].gaps, 1);
+});
+
+test('above the comfortable top means the sung note, rounded, is higher', () => {
+  const at = (midi, high) => lineMetrics([0, 0.05, 0.1].map(songTime => ({ songTime, midi })), [{ t: 0, text: 'x' }], { comfortableHighMidi: high })[0];
+  assert.deepEqual([at(64.15, 64).overComfort, at(64.15, 64).top], [0, '2옥 미']);
+  assert.equal(at(64.6, 64).overComfort, 1);
+});
+
+test('measured video times become song times by taking off the start difference (0 before aligning)', () => {
+  assert.deepEqual(songFrames([{ time: 20, midi: 60 }, { time: 21.5, midi: null }], 15), [{ songTime: 5, midi: 60 }, { songTime: 6.5, midi: null }]);
+  assert.deepEqual(songFrames([{ time: 3, midi: 57 }], 0), [{ songTime: 3, midi: 57 }]);
 });

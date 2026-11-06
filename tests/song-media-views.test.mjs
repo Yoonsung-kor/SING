@@ -203,3 +203,12 @@ test('sing-along report: section, the line (escaped) or its time, a jump button,
   assert.ok(songMediaBelow(ready, ui({ singReport: { status: 'failed' } }), singLines).includes('지금은 피드백을 만들지 못했어요. 잠시 후 다시 시도해 주세요.'));
   assert.ok(!page.includes('style="'));
 });
+
+test('sing-along: while measuring, the stop button stays even if another panel was opened', () => {
+  const ready = songWith({ mv: audioEntry, sections: twoSections });
+  for (const panel of [null, 'pin', 'change']) {
+    const html = songMediaBelow(ready, ui({ panel, singing: true }), singLines);
+    assert.ok(html.includes('data-action="media-sing-stop"'), String(panel));
+    assert.ok(!html.includes('data-action="media-sing-open"'), String(panel));
+  }
+});

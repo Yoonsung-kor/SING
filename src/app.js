@@ -1,4 +1,4 @@
-import { hummingPayload, lineMetrics, sungLines, chorusDiffs, songPayload } from './practice-feedback.js';
+import { hummingPayload, lineMetrics, sungLines, chorusDiffs, songPayload, songFrames } from './practice-feedback.js';
 import { createSingAlong } from './sing-along.js';
 import { createLesson, recordAttempt, nextTarget, finishLesson, summarizeLesson, recommendedNote, localDay, addActivity, needsDailyCheck } from './lesson.js';
 import { defaultState, openStore } from './storage.js';
@@ -69,8 +69,9 @@ let pinDraft = null;
 let mediaTicker = null;
 // Lyrics live in memory only (per song, gone when the app reloads); they are never saved or backed up.
 const songLyrics = new Map();
-// The sing-along measurement in progress (microphone open), or null.
+// The sing-along measurement in progress (microphone open) and the video it times, or null.
 let singAlong = null;
+let singVideoId = null;
 let lyricsStyle = 'karaoke';
 let lyricsScrollAt = 0;
 const lookupsInFlight = new Set();
@@ -150,7 +151,7 @@ function stopSongPlayer() {
 function dropSinging() {
   if (!singAlong) return;
   singAlong.stop();
-  singAlong = null;
+  singAlong = singVideoId = null;
   songUi = { ...songUi, singing: false };
 }
 
@@ -158,9 +159,10 @@ function dropSinging() {
 async function finishSinging() {
   const song = selectedSong();
   if (!singAlong || !song) return;
-  const frames = singAlong.stop();
-  singAlong = null;
   const media = readMedia(song);
+  // Frames carry the video's time; the start difference is read now, so aligning during the take still counts.
+  const frames = songFrames(singAlong.stop(), startOf(media, singVideoId));
+  singAlong = singVideoId = null;
   const items = media.sections?.items ?? [];
   const comfortableHighMidi = state.settings.voice?.comfortableHighMidi ?? null;
   const stats = lineMetrics(frames, songLyrics.get(song.id) ?? [], { comfortableHighMidi });
@@ -410,6 +412,7 @@ function pasteLink(form) {
     render();
     return toast('지금 보고 있는 영상이에요.');
   }
+  dropSinging();
   pendingPaste = { songId: song.id, side: songUi.side, videoId, previous: currentVideoId(song, songUi.side) };
   songUi = { ...songUi, pasteError: '', playerError: null };
   render();
@@ -457,18 +460,18 @@ async function handleMedia(action, id) {
   if (action === 'media-sing-start') {
     if (!videoId || singAlong) return;
     if (songPlayer.currentTime() === null) return toast('영상이 준비되면 다시 눌러 주세요.');
-    const offset = startOf(media, videoId);
     const singer = createSingAlong();
     singAlong = singer;
+    singVideoId = videoId;
     songUi = { ...songUi, singing: true, singReport: null };
     render();
     // Only while this video is playing; a paused or switched video measures nothing.
-    const songTime = () => {
+    const videoTime = () => {
       const t = songPlayer.currentTime();
-      return t !== null && songPlayer.playbackState() === 1 && songPlayer.currentVideoId() === videoId ? t - offset : null;
+      return t !== null && songPlayer.playbackState() === 1 && songPlayer.currentVideoId() === videoId ? t : null;
     };
     let failure = null;
-    const started = await singer.start(songTime).catch(err => { failure = err; return false; });
+    const started = await singer.start(videoTime).catch(err => { failure = err; return false; });
     if (singAlong !== singer) return;
     if (!started) { dropSinging(); render(); return toast(microphoneError(failure)); }
     if (songPlayer.playbackState() !== 1) songPlayer.seekTo(songPlayer.currentTime() ?? 0);
@@ -528,6 +531,7 @@ async function handleMedia(action, id) {
     return;
   }
   if (action === 'media-next') {
+    dropSinging();
     songUi = { ...songUi, panel: null, playerError: null };
     await saveMedia(song.id, current => nextCandidate(current, songUi.side));
     return showCurrentVideo();
@@ -1460,7 +1464,10 @@ document.addEventListener('visibilitychange', () => {
     render();
   }
 });
-window.addEventListener('pagehide', () => audio.cancel());
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && singAlong) { dropSinging(); render(); toast('화면을 벗어나 따라 부르기를 멈췄어요.'); }
+});
+window.addEventListener('pagehide', () => { audio.cancel(); dropSinging(); });
 
 render();
 initialize();

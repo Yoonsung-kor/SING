@@ -6,6 +6,8 @@ import { koreanNote } from './notes.js';
 const FRAME_S = 0.05;
 const GAP_S = 0.4;
 const SUNG = 0.3;
+// A line ends at the next line or 7 s after it starts (the same 7 s sections.js gives a line before an interlude).
+const LINE_MAX_S = 7;
 const TEXT_MAX = 80;
 const PER_LIST = 2;
 const LINKS = ['practice', 'learn'];
@@ -42,36 +44,36 @@ export function hummingPayload(session, { previousHighMidi = null, comfortableHi
   };
 }
 
-/** Per lyric line (non-empty text, from its start to the next line): how it was sung. */
+/** Measured times (the video's) as song times: take off the start difference (0 until it is aligned). */
+export const songFrames = (frames, offset) => frames.map(frame => ({ songTime: frame.time - offset, midi: frame.midi }));
+
+/** Per lyric line (non-empty text, from its start to the next line, at most 7 s): how it was sung. */
 export function lineMetrics(frames, lines, { comfortableHighMidi = null } = {}) {
   const stats = [];
   lines.forEach((line, id) => {
     if (!line.text) return;
     const start = line.t;
-    const end = lines[id + 1]?.t ?? Infinity;
+    const end = Math.min(lines[id + 1]?.t ?? Infinity, start + LINE_MAX_S);
     const inside = frames.filter(frame => frame.songTime >= start && frame.songTime < end);
     if (!inside.length) return;
     const voicedMidi = inside.filter(frame => frame.midi !== null).map(frame => frame.midi);
     let pairs = 0;
     let jumps = 0;
+    // A gap is a break between sung moments; silence before the first or after the last is phrasing, not a break.
     let gaps = 0;
-    let silentFrom = null;
+    let lastSung = null;
     inside.forEach((frame, i) => {
       const previous = inside[i - 1];
       if (frame.midi !== null && previous?.midi !== null && previous) { pairs++; if (Math.abs(frame.midi - previous.midi) >= 1) jumps++; }
-      if (frame.midi === null && silentFrom === null) silentFrom = frame.songTime;
-      const silenceEnds = frame.midi !== null || i === inside.length - 1;
-      if (silentFrom !== null && silenceEnds) {
-        const last = frame.midi === null ? frame.songTime : previous.songTime;
-        if (last - silentFrom + FRAME_S > GAP_S) gaps++;
-        silentFrom = null;
-      }
+      if (frame.midi === null) return;
+      if (lastSung !== null && frame.songTime - lastSung - FRAME_S > GAP_S) gaps++;
+      lastSung = frame.songTime;
     });
     stats.push({
       id, start, end,
       voiced: round2(voicedMidi.length / inside.length),
       top: note(voicedMidi.length ? Math.max(...voicedMidi) : null),
-      overComfort: Number.isFinite(comfortableHighMidi) && voicedMidi.length ? round2(voicedMidi.filter(m => m > comfortableHighMidi).length / voicedMidi.length) : 0,
+      overComfort: Number.isFinite(comfortableHighMidi) && voicedMidi.length ? round2(voicedMidi.filter(m => Math.round(m) > comfortableHighMidi).length / voicedMidi.length) : 0,
       wobble: pairs ? round2(jumps / pairs) : 0,
       gaps,
       median: median(voicedMidi),

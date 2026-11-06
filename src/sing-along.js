@@ -1,4 +1,4 @@
-// Sing-along measuring: every 50 ms, the note the microphone hears, stamped with where the song is.
+// Sing-along measuring: every 50 ms, the note the microphone hears, stamped with the time getTime() gives.
 // Nothing is recorded: stop() hands over the frames and lets go of the microphone.
 import { MicrophoneLease } from './capture.js';
 import { detectPitch, frequencyToMidi } from './pitch.js';
@@ -6,8 +6,8 @@ import { detectPitch, frequencyToMidi } from './pitch.js';
 const FRAME_MS = 50;
 const CLARITY = 0.85;
 
-/** getSongTime() returns the song's time in seconds, or null while the song is not playing (that moment is skipped). */
-export function createSingAlong({ lease = new MicrophoneLease(), AudioContextImpl = globalThis.AudioContext } = {}) {
+/** getTime() returns the playing video's time in seconds, or null while it is not playing (that moment is skipped). */
+export function createSingAlong({ lease = new MicrophoneLease(), AudioContextImpl = globalThis.AudioContext ?? globalThis.webkitAudioContext } = {}) {
   let generation = 0;
   let context = null;
   let timer = null;
@@ -27,7 +27,7 @@ export function createSingAlong({ lease = new MicrophoneLease(), AudioContextImp
     return taken;
   }
 
-  async function start(getSongTime) {
+  async function start(getTime) {
     if (active) stop();
     const mine = ++generation;
     active = true;
@@ -38,17 +38,20 @@ export function createSingAlong({ lease = new MicrophoneLease(), AudioContextImp
       return false;
     }
     context = new AudioContextImpl();
+    // Phones may start a context suspended when it is made after the permission prompt; a suspended one hears nothing.
+    if (context.state === 'suspended') await context.resume().catch(() => {});
+    if (mine !== generation) return false;
     const analyser = context.createAnalyser();
     analyser.fftSize = 2048;
     context.createMediaStreamSource(stream).connect(analyser);
     const buffer = new Float32Array(2048);
     const rate = context.sampleRate;
     timer = setInterval(() => {
-      const songTime = getSongTime();
-      if (!Number.isFinite(songTime)) return;
+      const time = getTime();
+      if (!Number.isFinite(time)) return;
       analyser.getFloatTimeDomainData(buffer);
       const pitch = detectPitch(buffer, rate);
-      frames.push({ songTime, midi: pitch && pitch.clarity >= CLARITY ? frequencyToMidi(pitch.frequency) : null });
+      frames.push({ time, midi: pitch && pitch.clarity >= CLARITY ? frequencyToMidi(pitch.frequency) : null });
     }, FRAME_MS);
     return true;
   }

@@ -118,7 +118,8 @@ function singBlock(media, ui, videoId, lines) {
     : report?.status === 'short' ? '<p class="media-status" role="status">조금 더 불러 주세요. 가사 4줄 이상 부르면 피드백을 드릴게요.</p>'
     : report?.status === 'failed' ? '<div class="error-box" role="alert">지금은 피드백을 만들지 못했어요. 잠시 후 다시 시도해 주세요.</div>' : '';
   if (!videoId || !media.sections?.items?.length || !lines?.length) return status;
-  if (ui.panel !== 'sing') return `<div class="media-sing">${report?.status === 'busy' ? '' : '<button class="button secondary small" data-action="media-sing-open">따라 부르고 피드백 받기</button>'}${status}</div>`;
+  // While the microphone is open the stop button stays, whatever other panel was opened meanwhile.
+  if (ui.panel !== 'sing' && !ui.singing) return `<div class="media-sing">${report?.status === 'busy' ? '' : '<button class="button secondary small" data-action="media-sing-open">따라 부르고 피드백 받기</button>'}${status}</div>`;
   const act = ui.singing
     ? '<button class="button small" data-action="media-sing-stop">멈추고 피드백 받기</button><p class="media-status" role="status">듣고 있어요. 노래가 흐르는 동안만 재요.</p>'
     : '<button class="button small" data-action="media-sing-start">부르기 시작</button><button class="text-button" data-action="media-panel-close">닫기</button>';

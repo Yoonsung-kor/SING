@@ -33,7 +33,7 @@ test('sing-along: one frame per 50 ms with the song time and the sung note; paus
     mock.timers.tick(50);
     const frames = singer.stop();
     assert.equal(frames.length, 3);
-    assert.deepEqual(frames.map(f => f.songTime), [10, 10, 10.2]);
+    assert.deepEqual(frames.map(f => f.time), [10, 10, 10.2]);
     for (const frame of frames) assert.ok(Math.abs(frame.midi - 57) < 0.1, String(frame.midi));
     assert.equal(singer.active, false);
     assert.equal(lease.released, 1);
@@ -53,4 +53,21 @@ test('sing-along: stopping while the microphone is still being asked for leaves 
   resolve({ id: 'late' });
   assert.equal(await started, false);
   assert.equal(singer.active, false);
+});
+
+test('sing-along: a context that starts suspended (phones) is resumed before measuring', async () => {
+  const { lease } = fakes();
+  let resumed = 0;
+  class Suspended {
+    state = 'suspended'; sampleRate = 48000;
+    createMediaStreamSource() { return { connect() {} }; }
+    createAnalyser() { return { getFloatTimeDomainData() {} }; }
+    resume() { resumed++; this.state = 'running'; return Promise.resolve(); }
+    close() { return Promise.resolve(); }
+  }
+  const singer = createSingAlong({ lease, AudioContextImpl: Suspended });
+  try {
+    assert.equal(await singer.start(() => 0), true);
+    assert.equal(resumed, 1);
+  } finally { singer.stop(); }
 });
