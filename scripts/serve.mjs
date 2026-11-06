@@ -21,7 +21,7 @@ const model = process.env.OPENAI_MODEL;
 // Song search needs no key, so it stays on even when the AI is off.
 // TJ first (one page per user search, nothing stored), MusicBrainz when TJ has nothing or is down.
 const search = createSongSearch({ tj: createTjClient(), musicbrainz: createSearcher(), queue: createQueue() });
-const { lookupRange, recommend, searchSongs } = createServices({ apiKey, model, search });
+const { lookupRange, recommend, searchSongs, practiceFeedback } = createServices({ apiKey, model, search });
 
 // Song sections come from lyric timing (no key); only section times and names leave the server.
 const findSections = createLrclibClient({ queue: createQueue() });
@@ -29,6 +29,6 @@ const findSections = createLrclibClient({ queue: createQueue() });
 const youtubeKey = process.env.YOUTUBE_API_KEY;
 const findVideos = youtubeKey ? createYoutubeClient({ apiKey: youtubeKey, queue: createQueue({ minIntervalMs: 250 }) }) : null;
 
-const server = http.createServer(createHandler({ root, recommend, lookupRange, searchSongs, findSections, findVideos }));
+const server = http.createServer(createHandler({ root, recommend, lookupRange, searchSongs, findSections, findVideos, practiceFeedback }));
 server.listen(port, host, () => console.log(`SING is ready at http://${host}:${port} · AI 추천: ${recommend ? '켜짐' : '꺼짐'} · 영상 찾기: ${findVideos ? '켜짐' : '꺼짐'}`));
 server.on('error', error => { console.error(error.message); process.exitCode = 1; });

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { AiError } from './ai.mjs';
 import { YoutubeError } from './youtube.mjs';
 import { validateRecommendationRequest, validateRangeRequest } from '../src/recommend.js';
+import { validatePracticeRequest } from '../src/practice-feedback.js';
 
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.json': 'application/json; charset=utf-8', '.mp3': 'audio/mpeg', '.txt': 'text/plain; charset=utf-8' };
 const staticHeaders = {
@@ -109,7 +110,8 @@ async function handleVideos(req, res, findVideos) {
   }
 }
 
-export function createHandler({ root, recommend, lookupRange = null, searchSongs = null, findSections = null, findVideos = null }) {
+export function createHandler({ root, recommend, lookupRange = null, searchSongs = null, findSections = null, findVideos = null, practiceFeedback = null }) {
+  const practiceRun = practiceFeedback && (async body => { const feedback = await practiceFeedback(body); return feedback ? { feedback } : null; });
   // An empty list is a real answer ("no song fits"); only a missing result counts as an upstream failure.
   const recommendRun = recommend && (async body => {
     const result = await recommend(body);
@@ -120,6 +122,7 @@ export function createHandler({ root, recommend, lookupRange = null, searchSongs
     try {
       const pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
       if (req.method === 'POST' && pathname === '/api/recommend') return await handleJson(req, res, { maxBody: RECOMMEND_MAX_BODY, validate: validateRecommendationRequest, run: recommendRun });
+      if (req.method === 'POST' && pathname === '/api/practice-feedback') return await handleJson(req, res, { maxBody: 32 * 1024, validate: validatePracticeRequest, run: practiceRun });
       if (req.method === 'POST' && pathname === '/api/song-range') return await handleJson(req, res, { maxBody: RANGE_MAX_BODY, validate: validateRangeRequest, run: rangeRun });
       if (req.method === 'GET' && pathname === '/api/song-search') return await handleSearch(req, res, searchSongs);
       if (req.method === 'GET' && pathname === '/api/song-sections') return await handleSections(req, res, findSections);

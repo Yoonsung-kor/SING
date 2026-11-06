@@ -1,3 +1,5 @@
+import { hummingPayload, lineMetrics, sungLines, chorusDiffs, songPayload, songFrames } from './practice-feedback.js';
+import { createSingAlong } from './sing-along.js';
 import { createLesson, recordAttempt, nextTarget, finishLesson, summarizeLesson, recommendedNote, localDay, addActivity, needsDailyCheck } from './lesson.js';
 import { defaultState, openStore } from './storage.js';
 import { AudioEngine, microphoneError } from './audio.js';
@@ -43,6 +45,8 @@ let playlistError = '';
 let recLoading = null;
 let recError = null;
 let consentReturn = 'playlist';
+let feedbackBusy = false;
+let feedbackError = false;
 let pendingPickList = null;
 // Pages that own the shared pick state: onboarding and '곡 찾아 담기'.
 const isPickerPage = target => target.startsWith('voice-') || target === 'song-pick';
@@ -65,6 +69,9 @@ let pinDraft = null;
 let mediaTicker = null;
 // Lyrics live in memory only (per song, gone when the app reloads); they are never saved or backed up.
 const songLyrics = new Map();
+// The sing-along measurement in progress (microphone open) and the video it times, or null.
+let singAlong = null;
+let singVideoId = null;
 let lyricsStyle = 'karaoke';
 let lyricsScrollAt = 0;
 const lookupsInFlight = new Set();
@@ -82,7 +89,7 @@ function toast(message) {
 }
 
 function render(focus = false) {
-  const v = { page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, recLoading, recError, onboarding, loading: !initialized && !demo, songUi: { ...songUi, consent: hasCurrentConsent(state.settings) }, lyricsLines: songLyrics.get(selectedSongId) ?? null };
+  const v = { page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, recLoading, recError, onboarding, loading: !initialized && !demo, songUi: { ...songUi, consent: hasCurrentConsent(state.settings) }, lyricsLines: songLyrics.get(selectedSongId) ?? null, feedbackBusy, feedbackError };
   // While a song's player is mounted, only the parts around it are redrawn: moving an iframe would reload the video.
   if (!focus && page === 'song-detail' && playerFor === selectedSongId && document.querySelector('#song-player-slot')) {
     const parts = songDetailParts(v);
@@ -124,6 +131,7 @@ function navigate(target) {
   if (!isPickerPage(target)) leaveOnboarding();
   cancelCapture();
   stopSongPlayer();
+  feedbackError = false;
   error = '';
   page = target;
   if (target === 'song-detail') songUi = { ...defaultSongUi(), lyricsStyle };
@@ -132,10 +140,45 @@ function navigate(target) {
 }
 
 function stopSongPlayer() {
+  dropSinging();
   clearInterval(mediaTicker);
   mediaTicker = null;
   if (playerFor !== null) songPlayer.destroy();
   playerFor = pendingPaste = pinDraft = null;
+}
+
+/** Lets go of the microphone without asking for feedback (leaving the screen, switching the video). */
+function dropSinging() {
+  if (!singAlong) return;
+  singAlong.stop();
+  singAlong = singVideoId = null;
+  songUi = { ...songUi, singing: false };
+}
+
+/** Sing-along stopped: per-line numbers (no lyric text, no recording) go to the AI; the card stays on this screen only. */
+async function finishSinging() {
+  const song = selectedSong();
+  if (!singAlong || !song) return;
+  const media = readMedia(song);
+  // Frames carry the video's time; the start difference is read now, so aligning during the take still counts.
+  const frames = songFrames(singAlong.stop(), startOf(media, singVideoId));
+  singAlong = singVideoId = null;
+  const items = media.sections?.items ?? [];
+  const comfortableHighMidi = state.settings.voice?.comfortableHighMidi ?? null;
+  const stats = lineMetrics(frames, songLyrics.get(song.id) ?? [], { comfortableHighMidi });
+  if (sungLines(stats) < 4) { songUi = { ...songUi, singing: false, singReport: { status: 'short' } }; return render(); }
+  const payload = songPayload(song, items, stats, chorusDiffs(stats, items), comfortableHighMidi);
+  songUi = { ...songUi, singing: false, panel: null, singReport: { status: 'busy' } };
+  render();
+  let feedback = null;
+  try {
+    const response = await fetch('/api/practice-feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    if (response.ok) feedback = (await response.json()).feedback ?? null;
+  } catch { feedback = null; }
+  if (!onSongScreen(song.id) || songUi.singReport?.status !== 'busy') return;
+  const starts = Object.fromEntries(stats.map(line => [line.id, line.start]));
+  songUi = { ...songUi, singReport: feedback ? { status: 'done', feedback, starts } : { status: 'failed' } };
+  render();
 }
 
 const selectedSong = () => state.songs.find(s => s.id === selectedSongId);
@@ -369,6 +412,7 @@ function pasteLink(form) {
     render();
     return toast('지금 보고 있는 영상이에요.');
   }
+  dropSinging();
   pendingPaste = { songId: song.id, side: songUi.side, videoId, previous: currentVideoId(song, songUi.side) };
   songUi = { ...songUi, pasteError: '', playerError: null };
   render();
@@ -401,11 +445,38 @@ async function handleMedia(action, id) {
   if (action === 'media-side') {
     if (!['mv', 'karaoke'].includes(id) || id === songUi.side) return;
     pendingPaste = null;
+    dropSinging();
     songUi = { ...songUi, side: id, panel: null, pasteError: '', pinError: '', playerError: null };
     render();
     return showCurrentVideo();
   }
   if (action === 'media-consent') { consentReturn = 'song-detail'; return navigate('ai-consent'); }
+  if (action === 'media-sing-open') {
+    if (!hasCurrentConsent(state.settings)) { consentReturn = 'song-detail'; return navigate('ai-consent'); }
+    songUi = { ...songUi, panel: 'sing', pasteError: '', pinError: '', singReport: songUi.singReport?.status === 'done' ? songUi.singReport : null };
+    return render();
+  }
+  if (action === 'media-sing-stop') return finishSinging();
+  if (action === 'media-sing-start') {
+    if (!videoId || singAlong) return;
+    if (songPlayer.currentTime() === null) return toast('영상이 준비되면 다시 눌러 주세요.');
+    const singer = createSingAlong();
+    singAlong = singer;
+    singVideoId = videoId;
+    songUi = { ...songUi, singing: true, singReport: null };
+    render();
+    // Only while this video is playing; a paused or switched video measures nothing.
+    const videoTime = () => {
+      const t = songPlayer.currentTime();
+      return t !== null && songPlayer.playbackState() === 1 && songPlayer.currentVideoId() === videoId ? t : null;
+    };
+    let failure = null;
+    const started = await singer.start(videoTime).catch(err => { failure = err; return false; });
+    if (singAlong !== singer) return;
+    if (!started) { dropSinging(); render(); return toast(microphoneError(failure)); }
+    if (songPlayer.playbackState() !== 1) songPlayer.seekTo(songPlayer.currentTime() ?? 0);
+    return;
+  }
   if (action === 'media-change') {
     songUi = { ...songUi, panel: 'change', pasteError: '' };
     render();
@@ -454,11 +525,13 @@ async function handleMedia(action, id) {
     return tickMedia();
   }
   if (action === 'media-lyric') {
-    const line = songLyrics.get(song.id)?.[Number(id)];
-    if (line && videoId) songPlayer.seekTo(toVideoTime(media, videoId, Math.max(0, line.t - 0.3)));
+    // A feedback card can point at a line by its start even if the lyrics are gone meanwhile.
+    const t = songLyrics.get(song.id)?.[Number(id)]?.t ?? songUi.singReport?.starts?.[id];
+    if (Number.isFinite(t) && videoId) songPlayer.seekTo(toVideoTime(media, videoId, Math.max(0, t - 0.3)));
     return;
   }
   if (action === 'media-next') {
+    dropSinging();
     songUi = { ...songUi, panel: null, playerError: null };
     await saveMedia(song.id, current => nextCandidate(current, songUi.side));
     return showCurrentVideo();
@@ -792,6 +865,30 @@ async function respond(comfort, practice = false) {
     await saveDraft();
     navigate(session.status === 'finished' ? 'result' : 'explore');
   }
+}
+
+/** AI feedback on the lesson on screen: numbers only (no recordings); kept with the lesson. */
+async function requestHummingFeedback() {
+  if (!session || feedbackBusy) return;
+  if (!hasCurrentConsent(state.settings)) { consentReturn = page === 'detail' ? 'detail' : 'result'; return navigate('ai-consent'); }
+  const lesson = session;
+  const earlier = state.sessions.filter(s => s.id !== lesson.id && s.status === 'finished' && s.startedAt < lesson.startedAt).sort((a, b) => a.startedAt.localeCompare(b.startedAt)).at(-1);
+  const payload = hummingPayload(lesson, { previousHighMidi: earlier ? summarizeLesson(earlier).highest ?? null : null, comfortableHighMidi: state.settings.voice?.comfortableHighMidi ?? null });
+  feedbackBusy = true;
+  feedbackError = false;
+  render();
+  let feedback = null;
+  try {
+    const response = await fetch('/api/practice-feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    if (response.ok) feedback = (await response.json()).feedback ?? null;
+  } catch { feedback = null; }
+  feedbackBusy = false;
+  if (!feedback || session?.id !== lesson.id) { feedbackError = !feedback; return render(); }
+  session = { ...session, feedback: { ...feedback, createdAt: new Date().toISOString() } };
+  // A saved lesson is updated in place; a lesson still on the result screen keeps it in its draft until saved.
+  if (state.sessions.some(s => s.id === session.id)) await persist({ ...state, sessions: state.sessions.map(s => s.id === session.id ? session : s) });
+  else await saveDraft();
+  render();
 }
 
 async function saveSession(destination = 'done') {
@@ -1215,12 +1312,14 @@ async function handle(action, id) {
   if (action === 'rec-nope') return rejectRecommendationAt(id);
   if (action === 'song-range') return lookupSongRange();
   if (action === 'consent-back') {
+    if (consentReturn === 'result' || consentReturn === 'detail') return navigate(consentReturn);
     if (consentReturn === 'song-pick') return openManualSongForm(pendingPickList);
     if (consentReturn === 'song-detail') return navigate('song-detail');
     return navigate(consentReturn === 'song-form' ? 'song-form' : state.playlists.some(p => p.id === selectedPlaylistId) ? 'playlist' : 'songs');
   }
   if (action === 'ai-consent-accept') {
     if (!(await persist({ ...state, settings: withConsent(state.settings, new Date()) }))) return;
+    if (consentReturn === 'result' || consentReturn === 'detail') { navigate(consentReturn); return requestHummingFeedback(); }
     if (consentReturn === 'song-form') { navigate('song-form'); return lookupSongRange(); }
     if (consentReturn === 'song-pick') return beginPicker(pendingPickList);
     if (consentReturn === 'song-detail') return navigate('song-detail');
@@ -1280,6 +1379,7 @@ async function handle(action, id) {
   if (action === 'learn-complete') return recordActivity('learn');
   if (action === 'rest-complete') return recordActivity('rest');
   if (action === 'detail') { session = state.sessions.find(s => s.id === id); if (session) navigate('detail'); return; }
+  if (action === 'feedback-humming') return requestHummingFeedback();
   if (action === 'delete-session') return deleteSession(id);
   if (action === 'play-saved') return playSaved(id);
   if (action === 'export') return exportBackup();
@@ -1364,7 +1464,10 @@ document.addEventListener('visibilitychange', () => {
     render();
   }
 });
-window.addEventListener('pagehide', () => audio.cancel());
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && singAlong) { dropSinging(); render(); toast('화면을 벗어나 따라 부르기를 멈췄어요.'); }
+});
+window.addEventListener('pagehide', () => { audio.cancel(); dropSinging(); });
 
 render();
 initialize();

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { fetchRecommendations, fetchSongRange } from '../scripts/ai.mjs';
+import { fetchRecommendations, fetchSongRange, fetchPracticeFeedback } from '../scripts/ai.mjs';
 
 const request = { playlistName: '도전하기', songs: [], exclude: [], rejected: [] };
 const reply = (status, body) => async () => ({ ok: status < 300, status, json: async () => body });
@@ -75,4 +75,21 @@ test('song range lookup v2 asks for chest, falsetto, the exact quote and the ori
   assert.match(seen.instructions, /2옥타브 라 = A4/);
   assert.doesNotMatch(seen.instructions, /hiA = A5/);
   assert.doesNotMatch(seen.instructions, /나무위키|namu/i);
+});
+
+test('practice feedback asks without web search, with a schema per kind and the rules in Korean', async () => {
+  const seen = [];
+  const fetchImpl = async (url, init) => { seen.push(JSON.parse(init.body)); return ok('{"good":[],"improve":[],"practice":[]}')(); };
+  await fetchPracticeFeedback({ kind: 'song', lines: [{ id: 3 }] }, { apiKey: 'k', model: 'm', fetchImpl });
+  await fetchPracticeFeedback({ kind: 'humming', attempts: [] }, { apiKey: 'k', model: 'm', fetchImpl });
+  assert.equal(seen[0].tools, undefined);
+  assert.equal(seen[0].text.format.name, 'practice_feedback_song');
+  assert.equal(seen[1].text.format.name, 'practice_feedback_humming');
+  assert.deepEqual(seen[0].text.format.schema.properties.good.items.required, ['lineId', 'text']);
+  assert.equal(seen[1].text.format.schema.properties.good.items.type, 'string');
+  assert.match(seen[0].instructions, /지어내지/);
+  assert.match(seen[0].instructions, /lineId/);
+  assert.match(seen[1].instructions, /쉬어/);
+  assert.match(seen[1].instructions, /쉬운 말/);
+  assert.ok(seen[0].input.includes('"id":3'));
 });

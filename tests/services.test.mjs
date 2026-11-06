@@ -69,3 +69,13 @@ test('a source page that never answers leaves that song unchecked within the bud
   assert.ok(Date.now() - started < 2000);
   assert.equal(result.items[0].range, null);
 });
+
+test('practice feedback keeps only lines it was given', async () => {
+  const { createServices } = await import('../scripts/services.mjs');
+  const text = JSON.stringify({ good: [{ lineId: 1, text: '안정적이에요' }, { lineId: 7, text: '없는 줄' }], improve: [], practice: [{ text: '허밍', link: 'practice' }] });
+  const fetchImpl = async () => ({ ok: true, status: 200, json: async () => ({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }] }) });
+  const { practiceFeedback } = createServices({ apiKey: 'k', model: 'm', fetchImpl });
+  const payload = { kind: 'song', song: { title: 'x', artist: '' }, comfortableHigh: null, lines: [{ id: 1, section: '', voiced: 1, top: null, overComfort: 0, wobble: 0, gaps: 0 }], chorusDiffs: [] };
+  assert.deepEqual(await practiceFeedback(payload), { good: [{ lineId: 1, text: '안정적이에요' }], improve: [], practice: [{ text: '허밍', link: 'practice' }] });
+  assert.equal(createServices({}).practiceFeedback, null);
+});
