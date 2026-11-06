@@ -212,3 +212,17 @@ test('sing-along: while measuring, the stop button stays even if another panel w
     assert.ok(!html.includes('data-action="media-sing-open"'), String(panel));
   }
 });
+
+test('sing-along report: when no line had a problem, it says so', () => {
+  const ready = songWith({ mv: audioEntry, sections: twoSections });
+  const report = { status: 'done', feedback: { good: [{ lineId: 0, text: '안정적이에요' }], improve: [], practice: [] }, starts: { 0: 17.6 } };
+  assert.match(reportOf(songMediaBelow(ready, ui({ singReport: report }), singLines)), /아쉬운 점<\/h3>[\s\S]*?이번엔 크게 아쉬운 점이 없었어요\./);
+});
+
+test('sing-along report: AI switched off says so; odd values from the server do not break the page', () => {
+  const ready = songWith({ mv: audioEntry, sections: twoSections });
+  assert.ok(songMediaBelow(ready, ui({ singReport: { status: 'off' } }), singLines).includes('지금은 AI 피드백을 쓸 수 없어요.'));
+  const report = { status: 'done', feedback: { good: [{ lineId: '1"><b', text: '좋아요' }], improve: [], practice: [{ text: '허밍해요', link: 'evil' }] }, starts: {} };
+  const html = reportOf(songMediaBelow(ready, ui({ singReport: report }), singLines));
+  assert.ok(html.includes('허밍해요') && !html.includes('"><b'));
+});
