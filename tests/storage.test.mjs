@@ -188,12 +188,14 @@ test('a backup whose song media is broken is rejected', () => {
   }
 });
 
-test('consent versions up to 4 are kept and an unknown version is rejected', () => {
+test('consent versions up to 5 are kept and an unknown version is rejected', () => {
   const v3 = structuredClone(backup);
   v3.state.settings = { ...v3.state.settings, aiConsentAt: '2026-11-03T01:00:00.000Z', aiConsentVersion: 3 };
   assert.equal(parseBackup(JSON.stringify(v3)).state.settings.aiConsentVersion, 3);
   v3.state.settings.aiConsentVersion = 4;
   assert.equal(parseBackup(JSON.stringify(v3)).state.settings.aiConsentVersion, 4);
   v3.state.settings.aiConsentVersion = 5;
+  assert.equal(parseBackup(JSON.stringify(v3)).state.settings.aiConsentVersion, 5);
+  v3.state.settings.aiConsentVersion = 6;
   assert.throws(() => parseBackup(JSON.stringify(v3)));
 });

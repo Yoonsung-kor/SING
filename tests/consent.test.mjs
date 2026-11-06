@@ -4,14 +4,15 @@ import { AI_CONSENT_VERSION, hasCurrentConsent, withConsent, withoutConsent } fr
 
 const now = new Date('2026-11-03T01:00:00.000Z');
 
-test('only a version 4 consent counts as current', () => {
-  assert.equal(AI_CONSENT_VERSION, 4);
+test('only a version 5 consent counts as current', () => {
+  assert.equal(AI_CONSENT_VERSION, 5);
+  assert.equal(hasCurrentConsent({ aiConsentAt: '2026-11-03T01:00:00.000Z', aiConsentVersion: 4 }), false);
   assert.equal(hasCurrentConsent({ aiConsentAt: '2026-11-03T01:00:00.000Z', aiConsentVersion: 3 }), false);
   assert.equal(hasCurrentConsent({ aiConsentAt: '2026-11-03T01:00:00.000Z', aiConsentVersion: 2 }), false);
   assert.equal(hasCurrentConsent({ aiConsentAt: null, aiConsentVersion: null }), false);
   assert.equal(hasCurrentConsent({ aiConsentAt: '2026-11-02T01:00:00.000Z', aiConsentVersion: 1 }), false);
   const given = withConsent({ keepAudio: true, aiConsentAt: null, aiConsentVersion: null }, now);
-  assert.deepEqual(given, { keepAudio: true, aiConsentAt: now.toISOString(), aiConsentVersion: 4 });
+  assert.deepEqual(given, { keepAudio: true, aiConsentAt: now.toISOString(), aiConsentVersion: 5 });
   assert.equal(hasCurrentConsent(given), true);
   assert.deepEqual(withoutConsent(given), { keepAudio: true, aiConsentAt: null, aiConsentVersion: null });
 });

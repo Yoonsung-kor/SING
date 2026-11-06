@@ -4,7 +4,7 @@ import { voiceIntroView, voicePickView, voiceResultView, voiceManualView, voiceC
 import { startOnboarding, addPick, applyLookup, setPickKey, emptySearch, markSlow, startPicker } from '../src/onboarding.js';
 import { defaultState } from '../src/storage.js';
 
-const consented = { ...defaultState(), settings: { ...defaultState().settings, aiConsentAt: '2026-11-03T01:00:00.000Z', aiConsentVersion: 4 } };
+const consented = { ...defaultState(), settings: { ...defaultState().settings, aiConsentAt: '2026-11-03T01:00:00.000Z', aiConsentVersion: 5 } };
 const checked = (highestMidi, vocal = 'male') => ({ highestMidi, falsettoHighestMidi: null, lowestMidi: null, sourceUrl: 'https://example.org/s', sourceQuote: `최고음 ${highestMidi}`, vocal });
 function withPick(voiceType, title, artist, result, keyOffset = 0) {
   let onb = { ...startOnboarding(defaultState()), voiceType };
@@ -130,4 +130,9 @@ test('the add-by-search screen has no voice type, offers manual entry, and can s
 test('final #3: the add-by-search screen takes a typed title as a pick instead of leaving the screen', () => {
   const html = songPickView({ state: consented, onboarding: startPicker(defaultState(), null) });
   assert.match(html, /id="voice-direct-form"/);
+});
+
+test('the intro says practice measurements go out only for feedback, recordings never', () => {
+  const html = voiceIntroView({ state: defaultState() });
+  assert.ok(html.includes('녹음은 보내지 않아요. 연습 측정값은 피드백을 받을 때만 보내요.') && html.includes('연습 피드백을 받을 때 연습 측정값(목표음, 낸 음, 흔들림, 체감)이 OpenAI로 가요. 녹음은 보내지 않아요.') && !html.includes('연습 기록은 보내지 않아요'));
 });
