@@ -14,10 +14,10 @@ test('line metrics: steady, wobbling, silent and above the comfortable top', () 
   const stats = lineMetrics(frames, lines, { comfortableHighMidi: 60 });
   assert.deepEqual(stats.map(s => s.id), [0, 1, 2, 3]);
   const [steady, wobbly, silent, high] = stats;
-  assert.deepEqual([steady.voiced, steady.wobble, steady.top, steady.overComfort, steady.gaps], [1, 0, 'A3', 0, 0]);
+  assert.deepEqual([steady.voiced, steady.wobble, steady.top, steady.overComfort, steady.gaps], [1, 0, '1옥 라', 0, 0]);
   assert.ok(wobbly.wobble > 0.9 && wobbly.voiced === 1);
   assert.deepEqual([silent.voiced, silent.gaps, silent.top], [0, 1, null]);
-  assert.deepEqual([high.overComfort, high.top], [1, 'E4']);
+  assert.deepEqual([high.overComfort, high.top], [1, '2옥 미']);
   assert.deepEqual([steady.start, steady.end], [0, 2]);
 });
 
@@ -42,7 +42,7 @@ test('the song payload names sections and never carries lyric text', () => {
   const payload = songPayload({ title: '너의 모든 순간', artist: '성시경' }, sections, stats, [], 60);
   assert.equal(payload.kind, 'song');
   assert.deepEqual(payload.song, { title: '너의 모든 순간', artist: '성시경' });
-  assert.equal(payload.comfortableHigh, 'C4');
+  assert.equal(payload.comfortableHigh, '2옥 도');
   assert.deepEqual(payload.lines.map(l => l.section), ['노래 시작 · 1절', '노래 시작 · 1절', '노래 시작 · 1절', '후렴 1']);
   assert.deepEqual(Object.keys(payload.lines[0]).sort(), ['gaps', 'id', 'overComfort', 'section', 'top', 'voiced', 'wobble']);
   assert.ok(!JSON.stringify(payload).includes('word-'));
@@ -55,9 +55,9 @@ test('the humming payload uses note names and flags a painful attempt', () => {
     { targetMidi: 59, midi: null, cents: null, comfort: 'pain', reason: 'unconfirmed', verified: false, reliable: false },
   ] };
   const payload = hummingPayload(session, { previousHighMidi: 54, comfortableHighMidi: 62 });
-  assert.deepEqual(payload.attempts[0], { target: null, sung: 'G3', centsOff: null, comfort: 'comfortable', reason: 'stable' });
-  assert.deepEqual(payload.attempts[1], { target: 'A3', sung: 'G♯3', centsOff: -70, comfort: 'effort', reason: 'stable' });
-  assert.deepEqual([payload.comfortableNotes, payload.todayHigh, payload.previousHigh, payload.comfortableHigh, payload.stoppedForPain], [['G3'], 'G3', 'F♯3', 'D4', true]);
+  assert.deepEqual(payload.attempts[0], { target: null, sung: '1옥 솔', centsOff: null, comfort: 'comfortable', reason: 'stable' });
+  assert.deepEqual(payload.attempts[1], { target: '1옥 라', sung: '1옥 솔♯', centsOff: -70, comfort: 'effort', reason: 'stable' });
+  assert.deepEqual([payload.comfortableNotes, payload.todayHigh, payload.previousHigh, payload.comfortableHigh, payload.stoppedForPain], [['1옥 솔'], '1옥 솔', '1옥 파♯', '2옥 레', true]);
   assert.equal(hummingPayload({ ...session, attempts: session.attempts.slice(0, 2) }, {}).stoppedForPain, false);
 });
 
@@ -75,4 +75,23 @@ test('feedback from the AI: only known lines, short texts, two per list, links c
   assert.deepEqual(cleanFeedback({ good: ['좋아요'], improve: [], practice: [] }, { kind: 'humming' }), { good: ['좋아요'], improve: [], practice: [] });
   assert.equal(cleanFeedback({ good: [{ lineId: 9, text: 'x' }], improve: [], practice: [] }, { kind: 'song', lineIds: [0] }), null);
   assert.equal(cleanFeedback(null, { kind: 'humming' }), null);
+});
+
+import { validatePracticeRequest } from '../src/practice-feedback.js';
+
+test('feedback requests are checked before they reach the AI', () => {
+  const song = { kind: 'song', song: { title: '너의 모든 순간', artist: '성시경' }, comfortableHigh: '2옥 도', lines: [{ id: 0, section: '후렴 1', voiced: 1, top: '1옥 라', overComfort: 0, wobble: 0.1, gaps: 0 }], chorusDiffs: [{ ids: [0, 3], semitones: -1 }] };
+  assert.deepEqual(validatePracticeRequest(song), song);
+  const humming = { kind: 'humming', attempts: [{ target: '1옥 라', sung: '1옥 솔♯', centsOff: -70, comfort: 'effort', reason: 'stable' }], comfortableNotes: ['1옥 솔'], todayHigh: '1옥 솔', previousHigh: null, comfortableHigh: '2옥 레', stoppedForPain: false };
+  assert.deepEqual(validatePracticeRequest(humming), humming);
+  for (const bad of [
+    { ...song, kind: 'x' },
+    { ...song, lines: Array.from({ length: 301 }, (_, id) => ({ ...song.lines[0], id })) },
+    { ...song, lines: [{ ...song.lines[0], voiced: 2 }] },
+    { ...song, lines: [{ ...song.lines[0], text: '가사' }] },
+    { ...song, comfortableHigh: '<b>' },
+    { ...humming, attempts: Array.from({ length: 41 }, () => humming.attempts[0]) },
+    { ...humming, attempts: [{ ...humming.attempts[0], comfort: 'x' }] },
+    null,
+  ]) assert.throws(() => validatePracticeRequest(bad), undefined, JSON.stringify(bad)?.slice(0, 60));
 });

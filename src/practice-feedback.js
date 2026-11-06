@@ -1,7 +1,7 @@
 // Practice feedback: the app measures, the AI only explains. Everything here is pure: payloads carry numbers,
 // note names, section names and line ids — never recordings or lyric text — and the AI's answer is checked
 // so it can only point at lines it was given.
-import { noteName } from './pitch.js';
+import { koreanNote } from './notes.js';
 
 const FRAME_S = 0.05;
 const GAP_S = 0.4;
@@ -12,7 +12,8 @@ const LINKS = ['practice', 'learn'];
 
 const round1 = value => Math.round(value * 10) / 10;
 const round2 = value => Math.round(value * 100) / 100;
-const note = midi => Number.isFinite(midi) ? noteName(Math.round(midi))?.scientific ?? null : null;
+// Notes are named the way the app shows them ("2옥 라"), so the AI's words match the screen.
+const note = midi => Number.isFinite(midi) ? koreanNote(Math.round(midi)) || null : null;
 const median = values => {
   if (!values.length) return null;
   const sorted = [...values].sort((a, b) => a - b);
@@ -128,4 +129,55 @@ export function cleanFeedback(raw, { kind, lineIds = [] }) {
   }).slice(0, PER_LIST);
   const feedback = { good: pointed(raw.good), improve: pointed(raw.improve), practice };
   return feedback.good.length || feedback.improve.length || feedback.practice.length ? feedback : null;
+}
+
+const NOTE = /^-?\d옥 [도레미파솔라시]♯?$/;
+const COMFORTS = ['comfortable', 'effort', 'unsure', 'pain'];
+function invalid(field) { throw new Error(`bad practice request: ${field}`); }
+const isObject = value => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+const noteOrNull = (value, field) => { if (value !== null && !(typeof value === 'string' && NOTE.test(value))) invalid(field); };
+const share = (value, field) => { if (typeof value !== 'number' || !(value >= 0 && value <= 1)) invalid(field); };
+const keysOnly = (value, keys, field) => { if (!isObject(value) || Object.keys(value).some(key => !keys.includes(key))) invalid(field); };
+const shortText = (value, max, field) => { if (typeof value !== 'string' || value.length > max) invalid(field); };
+
+/** The server's check of a feedback request: only the numbers and names the payloads above produce. */
+export function validatePracticeRequest(body) {
+  if (!isObject(body)) invalid('body');
+  if (body.kind === 'humming') {
+    keysOnly(body, ['kind', 'attempts', 'comfortableNotes', 'todayHigh', 'previousHigh', 'comfortableHigh', 'stoppedForPain'], 'humming');
+    if (!Array.isArray(body.attempts) || body.attempts.length > 40) invalid('attempts');
+    for (const attempt of body.attempts) {
+      keysOnly(attempt, ['target', 'sung', 'centsOff', 'comfort', 'reason'], 'attempt');
+      noteOrNull(attempt.target, 'target'); noteOrNull(attempt.sung, 'sung');
+      if (attempt.centsOff !== null && !(Number.isInteger(attempt.centsOff) && Math.abs(attempt.centsOff) <= 4800)) invalid('centsOff');
+      if (!COMFORTS.includes(attempt.comfort)) invalid('comfort');
+      shortText(attempt.reason, 40, 'reason');
+    }
+    if (!Array.isArray(body.comfortableNotes) || body.comfortableNotes.length > 40) invalid('comfortableNotes');
+    body.comfortableNotes.forEach(value => noteOrNull(value, 'comfortableNotes'));
+    ['todayHigh', 'previousHigh', 'comfortableHigh'].forEach(field => noteOrNull(body[field], field));
+    if (typeof body.stoppedForPain !== 'boolean') invalid('stoppedForPain');
+    return body;
+  }
+  if (body.kind !== 'song') invalid('kind');
+  keysOnly(body, ['kind', 'song', 'comfortableHigh', 'lines', 'chorusDiffs'], 'song');
+  keysOnly(body.song, ['title', 'artist'], 'song.song');
+  shortText(body.song.title, 120, 'title'); shortText(body.song.artist, 120, 'artist');
+  noteOrNull(body.comfortableHigh, 'comfortableHigh');
+  if (!Array.isArray(body.lines) || body.lines.length > 300) invalid('lines');
+  for (const line of body.lines) {
+    keysOnly(line, ['id', 'section', 'voiced', 'top', 'overComfort', 'wobble', 'gaps'], 'line');
+    if (!Number.isInteger(line.id) || line.id < 0 || line.id > 999) invalid('id');
+    shortText(line.section, 40, 'section');
+    share(line.voiced, 'voiced'); share(line.overComfort, 'overComfort'); share(line.wobble, 'wobble');
+    noteOrNull(line.top, 'top');
+    if (!Number.isInteger(line.gaps) || line.gaps < 0 || line.gaps > 100) invalid('gaps');
+  }
+  if (!Array.isArray(body.chorusDiffs) || body.chorusDiffs.length > 6) invalid('chorusDiffs');
+  for (const diff of body.chorusDiffs) {
+    keysOnly(diff, ['ids', 'semitones'], 'diff');
+    if (!Array.isArray(diff.ids) || diff.ids.length !== 2 || !diff.ids.every(Number.isInteger)) invalid('ids');
+    if (typeof diff.semitones !== 'number' || Math.abs(diff.semitones) > 48) invalid('semitones');
+  }
+  return body;
 }

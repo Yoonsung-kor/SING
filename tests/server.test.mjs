@@ -160,3 +160,21 @@ test('pages allow only the YouTube player script and its nocookie frame, and kee
     assert.equal(response.headers.get('referrer-policy'), null);
   } finally { s.close(); }
 });
+
+test('practice-feedback endpoint checks the request and maps the answers', async () => {
+  const send = (port, body) => fetch(`http://127.0.0.1:${port}/api/practice-feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const humming = { kind: 'humming', attempts: [], comfortableNotes: [], todayHigh: null, previousHigh: null, comfortableHigh: null, stoppedForPain: false };
+  let answer = { good: ['좋아요'], improve: [], practice: [] };
+  let asked;
+  const s = await start({ recommend: null, practiceFeedback: async body => { asked = body; return answer; } });
+  const off = await start({ recommend: null });
+  try {
+    assert.equal((await send(s.port, { ...humming, kind: 'x' })).status, 400);
+    const ok = await send(s.port, humming);
+    assert.deepEqual([ok.status, await ok.json()], [200, { feedback: answer }]);
+    assert.deepEqual(asked, humming);
+    answer = null;
+    assert.equal((await send(s.port, humming)).status, 502);
+    assert.equal((await send(off.port, humming)).status, 503);
+  } finally { s.close(); off.close(); }
+});

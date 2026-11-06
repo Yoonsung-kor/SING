@@ -74,7 +74,7 @@ function redact(text, apiKey) {
   return String(text).split(apiKey).join('[key]').replace(/sk-[\w*-]+/g, '[key]');
 }
 
-async function requestJson({ apiKey, model, fetchImpl, timeoutMs, instructions, input, schemaName, schema }) {
+async function requestJson({ apiKey, model, fetchImpl, timeoutMs, instructions, input, schemaName, schema, webSearch = true }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let body;
@@ -82,7 +82,7 @@ async function requestJson({ apiKey, model, fetchImpl, timeoutMs, instructions, 
     const response = await fetchImpl(ENDPOINT, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, instructions, input, tools: [{ type: 'web_search' }], reasoning: REASONING, text: { format: { type: 'json_schema', name: schemaName, strict: true, schema } } }),
+      body: JSON.stringify({ model, instructions, input, ...(webSearch ? { tools: [{ type: 'web_search' }] } : {}), reasoning: REASONING, text: { format: { type: 'json_schema', name: schemaName, strict: true, schema } } }),
       signal: controller.signal,
     });
     body = await response.json().catch(() => null);
@@ -112,4 +112,29 @@ export function fetchRecommendations(request, { apiKey, model, fetchImpl = fetch
 
 export function fetchSongRange({ title, artist }, { apiKey, model, fetchImpl = fetch, timeoutMs = TIMEOUT_MS }) {
   return requestJson({ apiKey, model, fetchImpl, timeoutMs, instructions: SONG_RANGE_INSTRUCTIONS, input: JSON.stringify({ title, artist }), schemaName: 'song_range', schema: SONG_RANGE_SCHEMA });
+}
+
+// Practice feedback: the app measured everything; the model only explains those numbers (no web search).
+const LINK_SCHEMA = { anyOf: [{ type: 'string', enum: ['practice', 'learn'] }, { type: 'null' }] };
+const PRACTICE_ITEM = { type: 'object', additionalProperties: false, required: ['text', 'link'], properties: { text: { type: 'string' }, link: LINK_SCHEMA } };
+const feedbackSchema = point => ({
+  type: 'object', additionalProperties: false, required: ['good', 'improve', 'practice'],
+  properties: { good: { type: 'array', items: point }, improve: { type: 'array', items: point }, practice: { type: 'array', items: PRACTICE_ITEM } },
+});
+const LINE_POINT = { type: 'object', additionalProperties: false, required: ['lineId', 'text'], properties: { lineId: { type: 'integer' }, text: { type: 'string' } } };
+const FEEDBACK_RULES = `너는 친절한 보컬 코치다. 앱이 잰 숫자만 근거로 한국어로 피드백한다. 숫자에 없는 내용은 지어내지 않는다.
+- good(잘한 점) 1~2개, improve(아쉬운 점) 1~2개, practice(추천 연습) 1~2개. 항목마다 80자 이내.
+- 실력을 평가하거나 깎아내리는 말은 쓰지 않는다. 성장에 초점을 두고 부드럽게 말한다. 의학적 진단은 하지 않는다.
+- 음 이름은 받은 그대로 쓴다(예: 2옥 라). 센트·비율 같은 숫자나 voiced, wobble 같은 측정 이름은 그대로 쓰지 않고 쉬운 말로 바꾼다(예: '조금 낮았어요', '음이 살짝 흔들렸어요', '중간에 숨이 끊겼어요').
+- practice.link: 허밍 연습이 도움이 되면 'practice', 읽을거리가 도움이 되면 'learn', 아니면 null.
+- 통증(pain)이 있었거나 stoppedForPain이 true면 improve 첫 항목은 무리하지 말고 쉬어 가자는 말이다.`;
+const HUMMING_INSTRUCTIONS = `${FEEDBACK_RULES}
+입력은 허밍 연습 한 번이다. attempts: target(목표음), sung(낸 음), centsOff(목표음과의 차이, 센트), comfort(comfortable 편함 / effort 힘듦 / unsure 모름 / pain 불편), reason(측정 결과). comfortableNotes는 편하게 확인한 음, todayHigh는 오늘 가장 높게 편했던 음, previousHigh는 지난번, comfortableHigh는 내 편한 최고음이다.`;
+const SONG_INSTRUCTIONS = `${FEEDBACK_RULES}
+입력은 노래 한 곡을 따라 부른 측정이다. 가사는 받지 않았으니 가사를 지어내지 않는다. good과 improve는 반드시 lines에 있는 id 하나를 lineId로 가리킨다.
+lines: section(구간 이름), voiced(소리를 낸 비율), top(가장 높은 음), overComfort(내 편한 최고음보다 높았던 비율), wobble(음이 반음 넘게 튄 비율), gaps(0.4초 넘게 끊긴 횟수). chorusDiffs는 같은 멜로디를 두 번 부른 줄끼리의 중간음 차이(반음)이다. 0에 가까우면 일정하게 부른 것이다.`;
+
+export function fetchPracticeFeedback(payload, { apiKey, model, fetchImpl = fetch, timeoutMs = TIMEOUT_MS }) {
+  const song = payload.kind === 'song';
+  return requestJson({ apiKey, model, fetchImpl, timeoutMs, webSearch: false, instructions: song ? SONG_INSTRUCTIONS : HUMMING_INSTRUCTIONS, input: JSON.stringify(payload), schemaName: song ? 'practice_feedback_song' : 'practice_feedback_humming', schema: feedbackSchema(song ? LINE_POINT : { type: 'string' }) });
 }
