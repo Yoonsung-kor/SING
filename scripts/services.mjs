@@ -1,6 +1,6 @@
 // Server-side services behind the API: the AI finds, this code checks. Each piece can be swapped in tests.
 import { fetchRecommendations, fetchSongRange, fetchPracticeFeedback } from './ai.mjs';
-import { cleanFeedback } from '../src/practice-feedback.js';
+import { cleanFeedback, withIssues, problemLines } from '../src/practice-feedback.js';
 import { verifyHighest, fetchPageText } from './verify-source.mjs';
 import { toCandidates } from '../src/recommend.js';
 import { pickRecommendations } from '../src/vocal-range.js';
@@ -62,10 +62,13 @@ export function createServices({ apiKey, model, fetchImpl = fetch, getPage = fet
     return { ...pickRecommendations(items, { voice: body.voice, intent }), intent };
   }
 
-  /** Practice feedback from measured numbers; only items that point at given lines survive. */
+  /** Practice feedback from measured numbers. For a song the app names each line's problems, and only items that
+   * call those lines 아쉬운 점 (and the others 잘한 점) survive: the AI words the problems, it does not find them. */
   async function practiceFeedback(payload) {
-    const raw = await fetchPracticeFeedback(payload, { apiKey, model, fetchImpl });
-    return cleanFeedback(raw, { kind: payload.kind, lineIds: (payload.lines ?? []).map(line => line.id) });
+    if (payload.kind !== 'song') return cleanFeedback(await fetchPracticeFeedback(payload, { apiKey, model, fetchImpl }), { kind: payload.kind });
+    const input = withIssues(payload);
+    const raw = await fetchPracticeFeedback(input, { apiKey, model, fetchImpl });
+    return cleanFeedback(raw, { kind: 'song', lineIds: input.lines.map(line => line.id), problemIds: problemLines(input) });
   }
 
   return { lookupRange: aiOn ? lookupRange : null, recommend: aiOn ? recommend : null, practiceFeedback: aiOn ? practiceFeedback : null, searchSongs: search };

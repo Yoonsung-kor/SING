@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { hummingPayload, lineMetrics, chorusDiffs, songPayload, sungLines, cleanFeedback, songFrames } from '../src/practice-feedback.js';
+import { hummingPayload, lineMetrics, chorusDiffs, songPayload, sungLines, cleanFeedback, songFrames, withIssues, problemLines } from '../src/practice-feedback.js';
 
 // 50 ms frames: 0-2 s steady A3, 2-4 s A3/B3 alternating, 4-6 s silence, 6-8 s E4.
 const frames = [];
@@ -123,4 +123,20 @@ test('above the comfortable top means the sung note, rounded, is higher', () => 
 test('measured video times become song times by taking off the start difference (0 before aligning)', () => {
   assert.deepEqual(songFrames([{ time: 20, midi: 60 }, { time: 21.5, midi: null }], 15), [{ songTime: 5, midi: 60 }, { songTime: 6.5, midi: null }]);
   assert.deepEqual(songFrames([{ time: 3, midi: 57 }], 0), [{ songTime: 3, midi: 57 }]);
+});
+
+test('the app names each sung line\'s problems; lines not sung are left out', () => {
+  const line = (id, extra = {}) => ({ id, section: '1절', voiced: 0.9, top: '2옥 도', overComfort: 0, wobble: 0.02, gaps: 0, ...extra });
+  const payload = { kind: 'song', song: { title: 't', artist: 'a' }, comfortableHigh: '2옥 미',
+    lines: [line(0), line(1, { gaps: 2 }), line(2, { wobble: 0.5 }), line(3, { overComfort: 0.4 }), line(4, { voiced: 0.1, gaps: 3 }), line(5, { wobble: 0.19, overComfort: 0.09 }), line(6), line(7)],
+    chorusDiffs: [{ ids: [6, 7], semitones: 1 }, { ids: [0, 5], semitones: 0.4 }] };
+  const out = withIssues(payload);
+  assert.deepEqual(out.lines.map(l => [l.id, l.issues]), [[0, []], [1, ['gap']], [2, ['wobble']], [3, ['high']], [5, []], [6, ['chorus']], [7, ['chorus']]]);
+  assert.deepEqual(problemLines(out), [1, 2, 3, 6, 7]);
+  assert.equal(payload.lines.length, 8, 'the request itself is not changed');
+});
+
+test('song feedback: 아쉬운 점 only on lines with problems, 잘한 점 only on lines without', () => {
+  const raw = { good: [{ lineId: 0, text: '좋아요' }, { lineId: 1, text: '끊긴 줄 칭찬' }], improve: [{ lineId: 0, text: '문제없는 줄' }, { lineId: 1, text: '끊겼어요' }], practice: [] };
+  assert.deepEqual(cleanFeedback(raw, { kind: 'song', lineIds: [0, 1], problemIds: [1] }), { good: [{ lineId: 0, text: '좋아요' }], improve: [{ lineId: 1, text: '끊겼어요' }], practice: [] });
 });

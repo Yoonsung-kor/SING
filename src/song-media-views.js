@@ -141,7 +141,7 @@ function singReportBlock(media, ui, lines) {
   const list = (title, items) => items.length ? `<h3>${title}</h3><ul class="feedback-list">${items.join('')}</ul>` : '';
   const { good, improve, practice } = report.feedback;
   const practiceItems = practice.map(p => `<li>${e(p.text)}${p.link ? ` <button class="text-button" data-action="${SING_LINKS[p.link][1]}">${SING_LINKS[p.link][0]}</button>` : ''}</li>`);
-  return `<section class="surface practice-feedback sing-report"><h2>따라 부르기 피드백</h2>${list('잘한 점', good.map(point))}${list('아쉬운 점', improve.map(point))}${list('추천 연습', practiceItems)}</section>`;
+  return `<section class="surface practice-feedback sing-report"><h2>따라 부르기 피드백</h2>${list('잘한 점', good.map(point))}${improve.length ? list('아쉬운 점', improve.map(point)) : '<h3>아쉬운 점</h3><p class="subtle">이번엔 크게 아쉬운 점이 없었어요.</p>'}${list('추천 연습', practiceItems)}</section>`;
 }
 
 /** Everything under the player, in the order of the spec's screen (section 5, lyrics from 11.2). */
