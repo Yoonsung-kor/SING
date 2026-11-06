@@ -213,3 +213,10 @@ test('a lesson can carry its AI feedback; old lessons without it still load; bro
     { ...feedback, extra: 1 },
   ]) assert.throws(() => parseBackup(withFeedback(bad)), undefined, JSON.stringify(bad).slice(0, 60));
 });
+
+test('the day the columns started is kept as a plain date; anything else is refused', () => {
+  const withStart = value => JSON.stringify({ ...backup, state: { ...backup.state, settings: { ...backup.state.settings, learnStartDay: value } } });
+  assert.equal(parseBackup(withStart('2026-11-07')).state.settings.learnStartDay, '2026-11-07');
+  assert.equal(parseBackup(JSON.stringify(backup)).state.settings.learnStartDay ?? null, null);
+  for (const bad of ['yesterday', '2026-13-01', 20261107]) assert.throws(() => parseBackup(withStart(bad)), undefined, String(bad));
+});

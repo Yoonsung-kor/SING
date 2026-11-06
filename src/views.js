@@ -1,5 +1,6 @@
 import { localDay, weekDays, summarizeLesson, recommendedNote } from './lesson.js';
 import { hasCurrentConsent } from './consent.js';
+import { COLUMNS, columnIndexFor, pastColumns } from './columns.js';
 import { noteName } from './pitch.js';
 import { songFormView, songDetailView } from './song-views.js';
 import { HUM_SAMPLES, humSampleFor } from './voice.js';
@@ -136,8 +137,27 @@ function history(v) {
   <details class="settings"><summary>기록과 개인정보 관리</summary><p>이 브라우저에만 저장돼요. 사이트 데이터를 지우거나 저장 공간이 정리되면 기록이 없어질 수 있어요. 소중한 기록은 백업해 두세요.</p><label class="checkbox-label"><input id="keep-audio" type="checkbox" ${v.state.settings.keepAudio ? 'checked' : ''}><span>앞으로의 원음도 보관하기 (기존 녹음은 유지돼요)</span></label>${consentRow(v.state.settings)}<div class="action-row">${button('백업 내려받기', 'export', { class: 'secondary small', disabled: v.demo || Boolean(v.busy) })}${button('백업 가져오기', 'import', { class: 'secondary small', disabled: v.demo || Boolean(v.busy) })}</div><input class="file-input" type="file" id="backup-file" accept="application/json,.json"><p>곡과 플레이리스트도 함께 백업해요. 가져오면 현재 기록과 플레이리스트가 백업 내용으로 바뀝니다. 먼저 현재 기록을 백업해 주세요.</p>${button('모든 기록 삭제', 'clear', { class: 'quiet', disabled: v.demo || Boolean(v.busy) })}</details></div>`;
 }
 
-function learn() {
-  return `<div class="narrow">${back()}${header('잘 부르기 전에,<br>내 소리를 알아가기.', '처음 연습할 때 알아두면 좋은 세 가지.')}<article class="surface learning-article"><p class="lead">음이 높아지는 것과<br>편하게 소리를 내는 것은 달라요.</p><div class="theory-block"><span class="theory-number">01</span><div><h2>음높이는 소리의 위치예요</h2><p>앱은 마이크로 소리의 높이를 확인해요. 정확한 음을 냈다고 해도, 목에 힘이 들지는 않았는지 내 느낌을 따로 살펴봐야 해요.</p></div></div><div class="theory-block"><span class="theory-number">02</span><div><h2>허밍으로 편한 시작점을 찾아요</h2><p>입술만 살짝 맞대고, 턱과 어깨를 편하게 둬요. 편한 높이에서 작게 ‘음—’ 해보세요. 입술 주변이 살짝 울릴 수 있지만 그 느낌을 억지로 만들지는 않아요. 코로 밀거나 크게 내지 않아도 괜찮아요. 힘들거나 불편하면 멈춰요.</p></div></div><div class="theory-block"><span class="theory-number">03</span><div><h2>매일의 목소리는 달라요</h2><p>어제 기록은 오늘의 출발점에 참고해요. 목이 쉬거나 피곤한 날은 발성을 쉬어가요. 한 번의 측정으로 내 전체 음역이나 발성 방법을 단정하지 않아요.</p></div></div><div class="hint">앱의 ‘도 · C4’에서 C4는 가온도예요. 음 이름을 외우지 않아도 기준음을 다시 들을 수 있어요.</div><p class="subtle">피아노 기준음은 음높이만 알려줘요. 피아노 음색을 흉내 낼 필요는 없어요. 사람의 허밍 시범은 아직 준비 중이에요.</p><a class="source-link" href="https://www.cuh.nhs.uk/patient-information/humming-exercises/" target="_blank" rel="noopener noreferrer">허밍 참고 · Cambridge University Hospitals</a><br><a class="source-link" href="https://www.nidcd.nih.gov/health/taking-care-your-voice" target="_blank" rel="noopener noreferrer">목소리 관리 참고 · NIDCD</a><br><a class="source-link" href="/assets/piano-credits.txt" target="_blank" rel="noopener noreferrer">피아노 음원 · Alexander Holm / Salamander Grand Piano</a></article><div class="action-row">${button('오늘의 배움으로 남기기', 'learn-complete', { icon: 'check' })}</div></div>`;
+/** 알아두기: today's column (or a past one chosen from the list), the same article layout for every column. */
+function learn(v) {
+  const columns = v.columns ?? COLUMNS;
+  const today = v.today ?? localDay();
+  const startDay = v.state.settings.learnStartDay ?? null;
+  const todays = columns[columnIndexFor(startDay, today, columns.length)];
+  const column = columns.find(c => c.id === v.learnColumnId) ?? todays;
+  const past = pastColumns(startDay, today, columns).filter(c => c !== column);
+  const lines = text => e(text).replace(/\n/g, '<br>');
+  let number = 0;
+  const blocks = column.blocks.map(block => {
+    if (block.type === 'point') return `<div class="theory-block"><span class="theory-number">${String(++number).padStart(2, '0')}</span><div><h2>${lines(block.title)}</h2><p>${lines(block.text)}</p></div></div>`;
+    if (block.type === 'hint') return `<div class="hint">${lines(block.text)}</div>`;
+    if (block.type === 'note') return `<p class="subtle">${lines(block.text)}</p>`;
+    if (block.type === 'h') return `<h2>${lines(block.text)}</h2>`;
+    return `<p>${lines(block.text)}</p>`;
+  }).join('');
+  const sources = column.sources.map(s => `<a class="source-link" href="${e(s.url)}" target="_blank" rel="noopener noreferrer">${e(s.label)}</a>`).join('<br>');
+  const isToday = column === todays;
+  const list = past.length ? `<section class="surface column-list"><h2>지난 칼럼</h2><ul>${past.map(c => `<li><button class="text-button" data-action="learn-column" data-id="${e(c.id)}">${e(c.title.replace(/\n/g, ' '))}</button></li>`).join('')}</ul></section>` : '';
+  return `<div class="narrow">${back()}<div class="lesson-header"><p class="eyebrow">${isToday ? '오늘의 칼럼' : '지난 칼럼'}</p><h1>${lines(column.title)}</h1>${column.subtitle ? `<p>${lines(column.subtitle)}</p>` : ''}</div><article class="surface learning-article"><p class="lead">${lines(column.lead)}</p>${blocks}${sources}</article><div class="action-row">${button('오늘의 배움으로 남기기', 'learn-complete', { icon: 'check' })}${isToday ? '' : button('오늘의 칼럼 보기', 'learn', { class: 'secondary' })}</div>${list}</div>`;
 }
 
 function rest() {

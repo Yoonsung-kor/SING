@@ -47,3 +47,25 @@ test('feedback: AI switched off says so; odd links in a saved card do not break 
   const feedback = { good: ['좋아요'], improve: [], practice: [{ text: '허밍해요', link: 'evil' }], createdAt: '2026-11-07T01:00:00.000Z' };
   assert.ok(resultPage({ session: { ...lesson, feedback } }).includes('허밍해요'));
 });
+
+test('알아두기 shows today\'s column and the past ones to read again', async () => {
+  const { COLUMNS } = await import('../src/columns.js');
+  const state = { ...defaultState(), settings: { ...defaultState().settings, learnStartDay: '2026-11-07' } };
+  const first = renderView({ page: 'learn', state, today: '2026-11-07' });
+  assert.ok(first.includes('오늘의 칼럼') && first.includes('음높이는 소리의 위치예요') && first.includes('data-action="learn-complete"'));
+  assert.ok(!first.includes('data-action="learn-column"'));
+  const third = renderView({ page: 'learn', state, today: '2026-11-09' });
+  assert.ok(third.includes(COLUMNS[2].sources[0].url.replace(/&/g, '&amp;')));
+  assert.match(third, new RegExp(`data-action="learn-column" data-id="${COLUMNS[1].id}"[\\s\\S]*data-action="learn-column" data-id="${COLUMNS[0].id}"`));
+  const past = renderView({ page: 'learn', state, today: '2026-11-09', learnColumnId: COLUMNS[0].id });
+  assert.ok(past.includes('지난 칼럼') && past.includes('음높이는 소리의 위치예요'));
+  assert.match(past, /data-action="learn"[^>]*>[\s\S]*?오늘의 칼럼 보기/);
+  assert.ok(!past.includes('style="'));
+});
+
+test('a column\'s text is escaped and keeps its line breaks', () => {
+  const columns = [{ id: 'x', title: 'a\nb', lead: '<b>x</b>', blocks: [{ type: 'point', title: '<i>t</i>', text: 'y' }, { type: 'p', text: '<i>z</i>' }], sources: [{ label: 'L', url: 'https://e.org/?a=1&b=2' }] }];
+  const html = renderView({ page: 'learn', state: defaultState(), today: '2026-11-07', columns });
+  for (const text of ['a<br>b', '&lt;b&gt;x', '&lt;i&gt;t', '&lt;i&gt;z', 'a=1&amp;b=2', '01']) assert.ok(html.includes(text), text);
+  assert.ok(!html.includes('<b>x') && !html.includes('<i>z'));
+});

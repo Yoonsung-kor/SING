@@ -46,6 +46,8 @@ let recLoading = null;
 let recError = null;
 let consentReturn = 'playlist';
 // The lesson whose feedback is being made, and the lesson whose last request failed ({ id, error: 'off' | 'failed' }).
+// The past column opened from 알아두기's list (null: today's).
+let learnColumnId = null;
 let feedbackFor = null;
 let feedbackFailed = null;
 // Bumped by each sing-along take, so an answer for an older take is dropped.
@@ -92,7 +94,7 @@ function toast(message) {
 }
 
 function render(focus = false) {
-  const v = { page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, recLoading, recError, onboarding, loading: !initialized && !demo, songUi: { ...songUi, consent: hasCurrentConsent(state.settings) }, lyricsLines: songLyrics.get(selectedSongId) ?? null, feedbackBusy: Boolean(session) && feedbackFor === session.id, feedbackError: feedbackFailed && feedbackFailed.id === session?.id ? feedbackFailed.error : false };
+  const v = { page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, recLoading, recError, onboarding, loading: !initialized && !demo, songUi: { ...songUi, consent: hasCurrentConsent(state.settings) }, lyricsLines: songLyrics.get(selectedSongId) ?? null, feedbackBusy: Boolean(session) && feedbackFor === session.id, feedbackError: feedbackFailed && feedbackFailed.id === session?.id ? feedbackFailed.error : false, learnColumnId };
   // While a song's player is mounted, only the parts around it are redrawn: moving an iframe would reload the video.
   if (!focus && page === 'song-detail' && playerFor === selectedSongId && document.querySelector('#song-player-slot')) {
     const parts = songDetailParts(v);
@@ -138,7 +140,10 @@ function navigate(target) {
   error = '';
   page = target;
   if (target === 'song-detail') songUi = { ...defaultSongUi(), lyricsStyle };
+  if (target === 'learn') learnColumnId = null;
   render(true);
+  // The columns start the first time 알아두기 is opened: column 1 that day, the next one each day after.
+  if (target === 'learn' && !state.settings.learnStartDay) persist({ ...state, settings: { ...state.settings, learnStartDay: localDay() } });
   if (target === 'song-detail') openSongDetail();
 }
 
@@ -1388,6 +1393,7 @@ async function handle(action, id) {
   if (action === 'save-session') return saveSession();
   if (action === 'save-and-learn') return saveSession('learn');
   if (action === 'learn-complete') return recordActivity('learn');
+  if (action === 'learn-column') { learnColumnId = id; return render(true); }
   if (action === 'rest-complete') return recordActivity('rest');
   if (action === 'detail') { session = state.sessions.find(s => s.id === id); if (session) navigate('detail'); return; }
   if (action === 'feedback-humming') return requestHummingFeedback();

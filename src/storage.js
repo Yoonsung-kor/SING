@@ -152,6 +152,8 @@ function validateState(value) {
   if (aiConsentVersion !== null && ![1, 2, 3, 4, 5].includes(aiConsentVersion)) invalid('settings.aiConsentVersion');
   const voice = value.settings.voice ?? null;
   if (voice !== null) { try { validateVoice(voice); } catch { invalid('settings.voice'); } }
+  const learnStartDay = value.settings.learnStartDay ?? null;
+  if (learnStartDay !== null && !(typeof learnStartDay === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(learnStartDay) && new Date(`${learnStartDay}T00:00:00Z`).toISOString().startsWith(learnStartDay))) invalid('settings.learnStartDay');
   const voiceOnboardingDismissedAt = value.settings.voiceOnboardingDismissedAt ?? null;
   if (voiceOnboardingDismissedAt !== null) timestamp(voiceOnboardingDismissedAt, 'settings.voiceOnboardingDismissedAt');
   return { ...value, songs, playlists, settings: { ...value.settings, aiConsentAt, aiConsentVersion, voice, voiceOnboardingDismissedAt } };
