@@ -69,7 +69,10 @@ export class AudioEngine {
       source.stop(context.currentTime + duration / 1000 + 0.02);
     });
   }
-  async record({ duration = 3000, onProgress = () => {}, onPitch = () => {} } = {}) {
+  // The measured window starts at the first voiced frame, not at the tap: on a phone it takes a second
+  // or more to start humming, and that silence alone used to sink a steady hum below the voicing ratio.
+  // With no voice within `waitForVoice` the attempt ends with no frames (insufficient voicing).
+  async record({ duration = 3000, waitForVoice = 4000, onProgress = () => {}, onPitch = () => {} } = {}) {
     this.cancel();
     const generation = this.generation;
     const context = await this.contextForGesture();
@@ -134,17 +137,30 @@ export class AudioEngine {
         recorder.onerror = () => finish(true, new Error('녹음이 중단됐어요. 브라우저의 마이크 권한을 확인해 주세요.'));
         try { recorder.start(); } catch (error) { finish(true, error); return; }
       }
-      const started = performance.now();
+      // The voice has started once ONSET_FRAMES frames in a row are voiced; a lone noise blip does not count.
+      // The window then includes those frames, so it still spans `duration`.
+      const ONSET_FRAMES = 3;
+      const STEP_MS = 60;
+      let run = [];
+      let voiceAt = null;
       onProgress(0);
       interval = setInterval(() => {
         if (generation !== this.generation) { finish(true); return; }
         analyser.getFloatTimeDomainData(samples);
         const frame = detectPitch(samples, context.sampleRate);
-        frames.push(frame);
         onPitch(frame);
-        onProgress(Math.min((performance.now() - started) / duration, 1));
-      }, 60);
-      timeout = setTimeout(() => finish(), duration);
+        if (voiceAt === null) {
+          run = frame ? [...run, frame] : [];
+          if (run.length < ONSET_FRAMES) return;
+          const lead = (ONSET_FRAMES - 1) * STEP_MS;
+          voiceAt = performance.now() - lead;
+          clearTimeout(timeout);
+          timeout = setTimeout(() => finish(), duration - lead);
+          frames.push(...run);
+        } else frames.push(frame);
+        onProgress(Math.min((performance.now() - voiceAt) / duration, 1));
+      }, STEP_MS);
+      timeout = setTimeout(() => finish(), waitForVoice);
     });
   }
 }

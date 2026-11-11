@@ -69,3 +69,14 @@ test('a column\'s text is escaped and keeps its line breaks', () => {
   for (const text of ['a<br>b', '&lt;b&gt;x', '&lt;i&gt;t', '&lt;i&gt;z', 'a=1&amp;b=2', '01']) assert.ok(html.includes(text), text);
   assert.ok(!html.includes('<b>x') && !html.includes('<i>z'));
 });
+
+test('the humming screens say the three seconds start once the hum is heard', async () => {
+  const { createLesson } = await import('../src/lesson.js');
+  const session = { ...createLesson(new Date(), null), phase: 'start' };
+  const explore = renderView({ page: 'explore', state: defaultState(), session, busy: false });
+  assert.ok(explore.includes('버튼을 누르고 ‘음—’ 하면 그때부터 3초 들어요'));
+  assert.ok(!explore.includes('녹음은 버튼을 누르면 시작해요'));
+  const intro = renderView({ page: 'intro', state: defaultState(), session, busy: false });
+  assert.ok(intro.includes('소리가 들리면 그때부터 3초 들어요.'));
+  assert.ok(!intro.includes('녹음은 3초예요.'));
+});

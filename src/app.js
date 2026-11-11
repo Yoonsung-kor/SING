@@ -795,7 +795,9 @@ function updateProgress(amount, frame) {
   if (progress) { progress.hidden = false; progress.value = amount; }
   if (status) {
     const text = frame ? noteName(Math.round(frequencyToMidi(frame.frequency)))?.label : null;
-    status.textContent = `${Math.max(1, Math.ceil(3 * (1 - amount)))}초 · 편한 소리로 ‘음—’${text ? ` · ${text}` : ''}`;
+    status.textContent = amount === 0 && !text
+      ? '‘음—’ 소리를 기다리고 있어요'
+      : `${Math.max(1, Math.ceil(3 * (1 - amount)))}초 · 편한 소리로 ‘음—’${text ? ` · ${text}` : ''}`;
   }
 }
 
