@@ -62,6 +62,17 @@ test('a chest note above A5 is treated as an octave mix-up in the source, while 
   assert.deepEqual((await verifyHighest({ chestHighest: 'A5', falsettoHighest: 'C6', lowest: null, sourceUrl: 'https://example.org/h', sourceQuote: high, vocal: 'female' }, { getPage: async () => high }))?.falsettoHighestMidi, 84);
 });
 
+test('a male chest note above F5 is a score written an octave up, so it is not confirmed', async () => {
+  // Seen with a real key: a sheet-music page listed 끝사랑 (김범수) as "음역대 E3 A5", the octave-up way scores write men's songs.
+  const check = (chestHighest, sourceQuote, vocal) => verifyHighest(
+    { chestHighest, falsettoHighest: null, lowest: null, sourceUrl: 'https://example.org/m', sourceQuote, vocal }, { getPage: async () => sourceQuote });
+  assert.equal(await check('A5', '음역대 E3 A5', 'male'), null);
+  assert.equal(await check('F#5', '최고음 3옥 파#', 'male'), null);
+  assert.equal((await check('F5', '최고음 3옥 파', 'male'))?.highestMidi, 77);
+  assert.equal((await check('A5', '음역대 E3 A5', 'female'))?.highestMidi, 81, 'female voices keep the A5 ceiling');
+  assert.equal((await check('A5', '음역대 E3 A5', 'mixed'))?.highestMidi, 81, 'a duet may have a female part');
+});
+
 test('a single unlabeled value is chest, a stated lowest is kept, unknown vocal becomes null', async () => {
   const q = '* 최고음: 2옥타브 시(B4) * 최저음: 0옥타브 파♯(F♯2)';
   assert.deepEqual(await verifyHighest({ chestHighest: 'B4', falsettoHighest: null, lowest: 'F#2', sourceUrl: 'https://example.org/t', sourceQuote: q, vocal: 'robot' }, { getPage: async () => q }),

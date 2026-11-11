@@ -13,6 +13,9 @@ const BOUNDS = { min: 55, max: 88 };
 // Pop chest voice tops out around A5. A higher "chest" note means the source counted octaves differently
 // (a real lookup returned "4옥 도" = C6 for 밤편지), and both the quote and our reader would agree on it.
 const CHEST_MAX = 81;
+// Scores write men's songs an octave up on a plain treble staff (TJ's screen does too), so a sheet-music page
+// can list a male song's top as A5 (끝사랑: "음역대 E3 A5"). Male chest above F5 is taken as that, not as sung.
+const MALE_CHEST_MAX = 77;
 const VOCALS = ['male', 'female', 'mixed'];
 
 function ipv4Public(address) {
@@ -134,7 +137,7 @@ export async function verifyHighest(claim, { getPage = fetchPageText } = {}) {
   if (!isHttps(sourceUrl) || sourceUrl.length > 2048 || !sourceQuote || sourceQuote.length > 120) return null;
   const chest = parseNoteName(claim.chestHighest);
   const falsetto = claim.falsettoHighest == null ? null : parseNoteName(claim.falsettoHighest);
-  if (!inBounds(chest) || chest > CHEST_MAX || (claim.falsettoHighest != null && (!inBounds(falsetto) || falsetto <= chest))) return null;
+  if (!inBounds(chest) || chest > (claim.vocal === 'male' ? MALE_CHEST_MAX : CHEST_MAX) || (claim.falsettoHighest != null && (!inBounds(falsetto) || falsetto <= chest))) return null;
   const notes = notesInText(sourceQuote);
   if (falsetto === null && notes.length >= 2 && /가성|팔세토|두성|falsetto/i.test(sourceQuote)) return null;
   if (!notes.includes(chest)) return null;
