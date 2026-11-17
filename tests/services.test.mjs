@@ -91,3 +91,20 @@ test('practice feedback: the AI is told each sung line\'s problems and may call 
   assert.deepEqual(await practiceFeedback(payload), { good: [{ lineId: 0, text: '안정적이에요' }], improve: [{ lineId: 1, text: '끊겼어요' }], practice: [] });
   assert.deepEqual(sent.lines.map(l => [l.id, l.issues]), [[0, []], [1, ['gap']]]);
 });
+
+test('spot words: a skipped spot and ungrounded words fall back to the app\'s own sentences', async () => {
+  const { createServices } = await import('../scripts/services.mjs');
+  const { defaultSentence } = await import('../src/spot-words.js');
+  const { koreanNote } = await import('../src/notes.js');
+  const answer = items => async () => ({ ok: true, status: 200, json: async () => ({ output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify({ items }) }] }] }) });
+  const payload = { kind: 'spots', song: { title: '곡', artist: '' }, comfortableHigh: koreanNote(69), items: [
+    { id: 's1', kind: 'leap', outcome: 'sag', section: '', from: koreanNote(60), to: koreanNote(67), over: null, repeated: false },
+    { id: 's2', kind: 'high-hold', outcome: 'kept', section: '', from: null, to: koreanNote(69), over: null, repeated: false },
+  ] };
+  const words = fetchImpl => createServices({ apiKey: 'k', model: 'm', fetchImpl }).practiceFeedback(payload);
+  assert.deepEqual(await words(answer([{ id: 's1', text: '크게 올라간 뒤 음이 내려왔어요.' }])), { words: [{ id: 's1', text: '크게 올라간 뒤 음이 내려왔어요.' }, { id: 's2', text: defaultSentence(payload.items[1]) }] });
+  assert.equal((await words(answer([{ id: 's1', text: `${koreanNote(74)}까지 올라갔어요.` }]))).words[0].text, defaultSentence(payload.items[0]));
+  // Deliberately wrong: every sentence carries a time it was never given.
+  assert.deepEqual((await words(answer(payload.items.map(item => ({ id: item.id, text: '1분 3초쯤 그랬어요.' }))))).words.map(entry => entry.text), payload.items.map(defaultSentence));
+  await assert.rejects(words(async () => { throw new Error('down'); }));
+});

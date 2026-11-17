@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { fetchRecommendations, fetchSongRange, fetchPracticeFeedback } from '../scripts/ai.mjs';
+import { fetchRecommendations, fetchSongRange, fetchPracticeFeedback, fetchSpotWords } from '../scripts/ai.mjs';
 
 const request = { playlistName: '도전하기', songs: [], exclude: [], rejected: [] };
 const reply = (status, body) => async () => ({ ok: status < 300, status, json: async () => body });
@@ -103,4 +103,19 @@ test('practice feedback rules: 아쉬운 점 may be empty, and only the problems
   assert.match(seen[0].instructions, /issues/);
   for (const name of ['gap', 'wobble', 'high', 'chorus']) assert.match(seen[0].instructions, new RegExp(name));
   assert.match(seen[1].instructions, /50/);
+});
+
+test('spot words are asked without web search, with every id to answer and the rules in Korean', async () => {
+  const seen = [];
+  const fetchImpl = async (url, init) => { seen.push(JSON.parse(init.body)); return ok('{"items":[]}')(); };
+  const payload = { kind: 'spots', song: { title: '곡', artist: '' }, comfortableHigh: null, items: [{ id: 's1', kind: 'high-hold', outcome: 'kept', section: '', from: null, to: '2옥 라', over: null, repeated: false }] };
+  assert.deepEqual(await fetchSpotWords(payload, { apiKey: 'k', model: 'm', fetchImpl }), { items: [] });
+  assert.equal(seen[0].tools, undefined);
+  assert.equal(seen[0].text.format.name, 'spot_words');
+  assert.deepEqual(seen[0].text.format.schema.properties.items.items.required, ['id', 'text']);
+  assert.equal(seen[0].text.format.schema.properties.items.items.additionalProperties, false);
+  assert.match(seen[0].instructions, /받은 id를 빠짐없이, 받은 id만 쓴다/);
+  assert.match(seen[0].instructions, /물음표는 outcome이 ask일 때만 쓴다/);
+  assert.match(seen[0].instructions, /따옴표를 쓰지 않는다/);
+  assert.ok(seen[0].input.includes('"id":"s1"'));
 });

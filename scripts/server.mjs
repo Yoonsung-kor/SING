@@ -112,7 +112,12 @@ async function handleVideos(req, res, findVideos) {
 
 /** access: scripts/access.mjs (invite code, pace, daily caps), or null for no checks. config.feedbackUrl: the survey link. */
 export function createHandler({ root, recommend, lookupRange = null, searchSongs = null, findSections = null, findVideos = null, practiceFeedback = null, access = null, config = {} }) {
-  const practiceRun = practiceFeedback && (async body => { const feedback = await practiceFeedback(body); return feedback ? { feedback } : null; });
+  // The report's spots come back as { words }; humming feedback as { feedback }.
+  const practiceRun = practiceFeedback && (async body => {
+    const result = await practiceFeedback(body);
+    if (!result) return null;
+    return body.kind === 'spots' ? { words: result.words } : { feedback: result };
+  });
   // An empty list is a real answer ("no song fits"); only a missing result counts as an upstream failure.
   const recommendRun = recommend && (async body => {
     const result = await recommend(body);

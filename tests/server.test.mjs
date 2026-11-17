@@ -233,3 +233,20 @@ test('the home-screen files are served with their types, and nothing else new is
     assert.equal((await get('/render.yaml')).status, 404);
   } finally { s.close(); }
 });
+
+test('practice-feedback takes spot requests and answers with words', async () => {
+  const send = (port, body) => fetch(`http://127.0.0.1:${port}/api/practice-feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const item = id => ({ id, kind: 'high-hold', outcome: 'kept', section: '', from: null, to: '2옥 라', over: null, repeated: false });
+  const spots = { kind: 'spots', song: { title: '곡', artist: '' }, comfortableHigh: null, items: [item('s1')] };
+  const words = [{ id: 's1', text: '높은 음을 끝까지 지켰어요.' }];
+  const s = await start({ recommend: null, practiceFeedback: async body => (body.kind === 'spots' ? { words } : null) });
+  const slow = await start({ recommend: null, practiceFeedback: async () => { throw new AiError('timeout', 't'); } });
+  const off = await start({ recommend: null });
+  try {
+    const ok = await send(s.port, spots);
+    assert.deepEqual([ok.status, await ok.json()], [200, { words }]);
+    assert.equal((await send(s.port, { ...spots, items: ['s1', 's2', 's3', 's1'].map(item) })).status, 400);
+    assert.equal((await send(off.port, spots)).status, 503);
+    assert.equal((await send(slow.port, spots)).status, 504);
+  } finally { s.close(); slow.close(); off.close(); }
+});

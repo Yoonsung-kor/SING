@@ -2,6 +2,7 @@
 // note names, section names and line ids — never recordings or lyric text — and the AI's answer is checked
 // so it can only point at lines it was given.
 import { koreanNote } from './notes.js';
+import { validateSpotsRequest } from './spot-words.js';
 
 const FRAME_S = 0.05;
 const GAP_S = 0.4;
@@ -169,6 +170,7 @@ const shortText = (value, max, field) => { if (typeof value !== 'string' || valu
 /** The server's check of a feedback request: only the numbers and names the payloads above produce. */
 export function validatePracticeRequest(body) {
   if (!isObject(body)) invalid('body');
+  if (body.kind === 'spots') return validateSpotsRequest(body);
   if (body.kind === 'humming') {
     keysOnly(body, ['kind', 'attempts', 'comfortableNotes', 'todayHigh', 'previousHigh', 'comfortableHigh', 'stoppedForPain'], 'humming');
     if (!Array.isArray(body.attempts) || body.attempts.length > 40) invalid('attempts');

@@ -142,3 +142,21 @@ export function fetchPracticeFeedback(payload, { apiKey, model, fetchImpl = fetc
   const song = payload.kind === 'song';
   return requestJson({ apiKey, model, fetchImpl, timeoutMs, webSearch: false, instructions: song ? SONG_INSTRUCTIONS : HUMMING_INSTRUCTIONS, input: JSON.stringify(payload), schemaName: song ? 'practice_feedback_song' : 'practice_feedback_humming', schema: feedbackSchema(song ? LINE_POINT : { type: 'string' }) });
 }
+
+// The report's spots: the app found them and has its own sentence for each; the model only rephrases (no web search).
+const SPOT_SCHEMA = {
+  type: 'object', additionalProperties: false, required: ['items'],
+  properties: { items: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['id', 'text'], properties: { id: { type: 'string' }, text: { type: 'string' } } } } },
+};
+export const SPOT_INSTRUCTIONS = `너는 친절한 보컬 코치다. 앱이 노래에서 찾은 자리마다 무슨 자리였는지 한국어 한 문장으로 말해 준다.
+- 입력의 items마다 id와 text를 하나씩 돌려준다. 받은 id를 빠짐없이, 받은 id만 쓴다.
+- text는 80자 이내 한 문장이다. 입력에 있는 사실만 말한다: section(구간 이름), from·to(음 이름), over(편한 최고음보다 높은 반음 수), repeated(두 번 다 그랬음).
+- kind의 뜻: leap(from에서 to까지 한 번에 크게 올라가는 자리), high-hold(높은 음 to를 길게 내는 자리), over(편한 최고음보다 높은 to까지 올라간 자리).
+- outcome의 뜻: kept(그 음을 끝까지 지킴), sag(그 음이 끝으로 갈수록 내려옴. 얼마나 내려왔는지는 말하지 않는다), ask(소리가 잠깐 끊김. 단정하지 말고 "소리가 뒤집힌 느낌이 있었나요?"처럼 물음으로 끝낸다), null(어떻게 넘겼는지 모름. 어떤 자리인지만 말한다).
+- 물음표는 outcome이 ask일 때만 쓴다.
+- 음 이름은 받은 그대로 쓴다(예: 2옥 라). 다른 음 이름, 시간, 가사, 숫자를 지어내지 않는다. 따옴표를 쓰지 않는다.
+- 연습 방법이나 조언은 쓰지 않는다(앱이 따로 보여 준다). 실력을 평가하거나 깎아내리는 말은 쓰지 않는다.`;
+
+export function fetchSpotWords(payload, { apiKey, model, fetchImpl = fetch, timeoutMs = 30000 }) {
+  return requestJson({ apiKey, model, fetchImpl, timeoutMs, webSearch: false, instructions: SPOT_INSTRUCTIONS, input: JSON.stringify(payload), schemaName: 'spot_words', schema: SPOT_SCHEMA });
+}
