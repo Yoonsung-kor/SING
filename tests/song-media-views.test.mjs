@@ -316,3 +316,28 @@ test('karaoke report: the summary\'s second half follows the comfortable top', (
   const none = karaokeReportOf(karaokePage(karaokeDone({ result: { ...karaokeDone().result, spots: [], range: { topHeld: null, keptHigh: null }, suggestion: null } })));
   assert.ok(none.includes('이번에는 크게 올라가거나 높이 올라가는 자리를 찾지 못했어요.') && !none.includes('가장 높게'));
 });
+
+test('karaoke mode: recording in the app is offered only when it is switched on, after the file button', () => {
+  assert.ok(!karaokePage(null, { panel: 'karaoke' }).includes('media-karaoke-record'));
+  const panel = karaokePage(null, { panel: 'karaoke', recordInApp: true });
+  assert.match(panel, /data-action="media-karaoke-record"[^>]*>여기서 녹음하기/);
+  assert.ok(panel.indexOf('data-action="media-karaoke-file"') < panel.indexOf('data-action="media-karaoke-record"'), 'the file comes first');
+});
+
+test('karaoke mode: while recording, the time heard and the stop button stay whatever panel is open', () => {
+  for (const panel of ['karaoke', 'sing', null]) {
+    const html = karaokePage({ status: 'recording', seconds: 65 }, { panel, recordInApp: true });
+    assert.ok(html.includes('녹음하고 있어요. 화면을 켜 둔 채로 두세요.'), String(panel));
+    assert.ok(html.includes('1:05'), String(panel));
+    assert.match(html, /data-action="media-karaoke-record-stop"[^>]*>녹음 멈추고 분석하기/);
+    assert.ok(!html.includes('data-action="media-karaoke-record"'), 'no second recording meanwhile');
+  }
+  assert.ok(karaokePage({ status: 'recording', seconds: 5 }, { panel: 'karaoke', recordInApp: true }).includes('0:05'));
+});
+
+test('karaoke mode: a recording cut short by leaving the screen says so while analysing and in the report', () => {
+  const text = '화면을 벗어나 녹음을 멈췄어요. 여기까지 분석할게요.';
+  assert.ok(karaokePage({ status: 'analyzing', progress: 0.1, notice: 'left' }).includes(text));
+  assert.ok(karaokeReportOf(karaokePage(karaokeDone({ notice: 'left' }))).includes(text));
+  assert.ok(!karaokeReportOf(karaokePage(karaokeDone())).includes(text));
+});

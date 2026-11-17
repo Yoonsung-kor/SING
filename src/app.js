@@ -4,6 +4,7 @@ import { findSpots } from './hard-spots.js';
 import { spotsPayload, defaultSentence, cleanSpotWords } from './spot-words.js';
 import { fileProblem, decodeToMono } from './karaoke-file.js';
 import { runAnalysis } from './analysis-client.js';
+import { createKaraokeRecorder } from './karaoke-recorder.js';
 import { createLesson, recordAttempt, nextTarget, finishLesson, summarizeLesson, recommendedNote, localDay, addActivity, needsDailyCheck } from './lesson.js';
 import { defaultState, openStore } from './storage.js';
 import { AudioEngine, microphoneError } from './audio.js';
@@ -108,6 +109,11 @@ let reportBeforeConsent = null;
 // The karaoke recording being analysed or reported on ({ samples, cancel }), in memory only; and its playback.
 let karaokeTake = null;
 let karaokePlayback = null;
+// Recording at the karaoke room inside the app, while the microphone is open (src/karaoke-recorder.js).
+let karaokeRecorder = null;
+// Recording in the app is shown only on pages opened with ?record until it has been checked at a karaoke room
+// (plan N Task 7): phones may treat the sound differently from their own recorder app, which is what was tested.
+const RECORD_IN_APP = (() => { try { return new URLSearchParams(location.search).has('record'); } catch { return false; } })();
 let pendingPickList = null;
 // Pages that own the shared pick state: onboarding and '곡 찾아 담기'.
 const isPickerPage = target => target.startsWith('voice-') || target === 'song-pick';
@@ -154,7 +160,7 @@ function render(focus = false) {
   const nudge = initialized && !demo && page === 'home'
     ? nextNudge(state, { today: localDay(), now: Date.now(), standalone: isStandalone({ matchMedia: query => window.matchMedia(query), standalone: navigator.standalone }), hasFeedbackUrl: Boolean(appConfig.feedbackUrl) })
     : null;
-  const v = { page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, recLoading, recError, onboarding, loading: !initialized && !demo, songUi: { ...songUi, consent: hasCurrentConsent(state.settings), comfortHigh: state.settings.voice?.comfortableHighMidi ?? null, karaokeAudio: Boolean(karaokeTake?.samples) }, lyricsLines: songLyrics.get(selectedSongId) ?? null, feedbackBusy: Boolean(session) && feedbackFor === session.id, feedbackError: feedbackFailed && feedbackFailed.id === session?.id ? feedbackFailed.error : false, learnColumnId, serverWaking, inviteError, outsideUrl, nudge, feedbackUrl: appConfig.feedbackUrl, installHelp };
+  const v = { page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, recLoading, recError, onboarding, loading: !initialized && !demo, songUi: { ...songUi, consent: hasCurrentConsent(state.settings), comfortHigh: state.settings.voice?.comfortableHighMidi ?? null, karaokeAudio: Boolean(karaokeTake?.samples), recordInApp: RECORD_IN_APP }, lyricsLines: songLyrics.get(selectedSongId) ?? null, feedbackBusy: Boolean(session) && feedbackFor === session.id, feedbackError: feedbackFailed && feedbackFailed.id === session?.id ? feedbackFailed.error : false, learnColumnId, serverWaking, inviteError, outsideUrl, nudge, feedbackUrl: appConfig.feedbackUrl, installHelp };
   // While a song's player is mounted, only the parts around it are redrawn: moving an iframe would reload the video.
   if (!focus && page === 'song-detail' && playerFor === selectedSongId && document.querySelector('#song-player-slot')) {
     const parts = songDetailParts(v);
@@ -211,7 +217,8 @@ function navigate(target) {
 
 function stopSongPlayer() {
   dropSinging();
-  // Leaving the song screen drops the karaoke recording and stops its analysis and playback.
+  // Leaving the song screen drops the karaoke recording (or the one being made) and stops its analysis and playback.
+  discardKaraokeRecording();
   karaokeTake?.cancel?.();
   karaokeTake = null;
   stopKaraokePlayback();
@@ -274,33 +281,98 @@ async function polishWords(key = 'singReport') {
 async function analyzeKaraokeFile(file) {
   const song = selectedSong();
   if (!file || !song) return;
+  dropKaraokeTake();
+  const problem = fileProblem(file);
+  if (problem) return showKaraoke({ status: 'problem', problem });
+  const take = { samples: null, cancel: () => {} };
+  karaokeTake = take;
+  showKaraoke({ status: 'analyzing', progress: 0 });
+  const decoded = await decodeToMono(file);
+  if (karaokeTake !== take || !onSongScreen(song.id)) return;
+  if (decoded.problem) { karaokeTake = null; return showKaraoke({ status: 'problem', problem: decoded.problem }); }
+  return analyzeKaraokeTake(take, song, decoded.samples);
+}
+
+function showKaraoke(karaoke) {
+  songUi = { ...songUi, karaoke };
+  render();
+}
+
+/** Drops whatever karaoke take there is: a recording still being made, the analysis, the playback. */
+function dropKaraokeTake() {
+  discardKaraokeRecording();
   karaokeTake?.cancel?.();
   karaokeTake = null;
   stopKaraokePlayback();
-  const show = karaoke => { songUi = { ...songUi, karaoke }; render(); };
-  const problem = fileProblem(file);
-  if (problem) return show({ status: 'problem', problem });
-  const take = { samples: null, cancel: () => {} };
-  karaokeTake = take;
-  show({ status: 'analyzing', progress: 0 });
-  const decoded = await decodeToMono(file);
-  if (karaokeTake !== take || !onSongScreen(song.id)) return;
-  if (decoded.problem) { karaokeTake = null; return show({ status: 'problem', problem: decoded.problem }); }
+}
+
+/** A take's 16 kHz samples analysed in the worker, then the report (notice 'left': cut short by leaving the screen). */
+async function analyzeKaraokeTake(take, song, samples, notice = null) {
   const comfortableHighMidi = state.settings.voice?.comfortableHighMidi ?? null;
-  const run = runAnalysis(decoded.samples, { comfortableHighMidi }, {
-    onProgress: progress => { if (karaokeTake === take && onSongScreen(song.id)) show({ status: 'analyzing', progress }); },
+  const run = runAnalysis(samples, { comfortableHighMidi }, {
+    onProgress: progress => { if (karaokeTake === take && onSongScreen(song.id)) showKaraoke({ status: 'analyzing', progress, notice }); },
   });
-  take.samples = decoded.samples;
+  take.samples = samples;
   take.cancel = run.cancel;
   const result = await run.promise;
   if (karaokeTake !== take || !onSongScreen(song.id) || result.status === 'cancelled') return;
-  if (result.status === 'unsupported' || result.status === 'error') { karaokeTake = null; return show({ status: 'problem', problem: result.status }); }
-  if (result.status === 'short') { karaokeTake = null; return show({ status: 'short' }); }
+  if (result.status === 'unsupported' || result.status === 'error') { karaokeTake = null; return showKaraoke({ status: 'problem', problem: result.status }); }
+  if (result.status === 'short') { karaokeTake = null; return showKaraoke({ status: 'short' }); }
   const payload = spotsPayload(song, result, comfortableHighMidi);
   const words = Object.fromEntries(payload.items.map(item => [item.id, defaultSentence(item)]));
-  songUi = { ...songUi, panel: null, karaoke: { status: 'done', result, words, polish: 'idle', answers: {}, suggestionDone: false, payload } };
+  songUi = { ...songUi, panel: null, karaoke: { status: 'done', result, words, polish: 'idle', answers: {}, suggestionDone: false, payload, notice } };
   render();
   if (payload.items.length && hasCurrentConsent(state.settings)) await polishWords('karaoke');
+}
+
+const MICROPHONE_FAILURES = ['NotAllowedError', 'SecurityError', 'NotFoundError', 'NotReadableError', 'Error'];
+
+/** "여기서 녹음하기": the video pauses and the microphone records until stopped, ten minutes, or the screen is left. */
+async function startKaraokeRecording() {
+  const song = selectedSong();
+  if (!song || karaokeRecorder) return;
+  dropSinging();
+  dropKaraokeTake();
+  releasePlayback();
+  songPlayer.pause();
+  const recorder = createKaraokeRecorder();
+  karaokeRecorder = recorder;
+  showKaraoke({ status: 'recording', seconds: 0 });
+  let failure = null;
+  const started = await recorder.start(seconds => {
+    if (karaokeRecorder !== recorder) return;
+    // Ten minutes: it stopped by itself, and what it heard is analysed.
+    if (!recorder.active) return finishKaraokeRecording();
+    showKaraoke({ status: 'recording', seconds });
+  }).catch(err => { failure = err; return false; });
+  if (karaokeRecorder !== recorder || started) return;
+  karaokeRecorder = null;
+  recorder.stop();
+  // A refused or missing microphone says why; anything else (no AudioWorklet, its module not loading) cannot record here.
+  if (failure && MICROPHONE_FAILURES.includes(failure.name)) { showKaraoke(null); return toast(microphoneError(failure)); }
+  showKaraoke({ status: 'problem', problem: 'unsupported' });
+}
+
+/** "녹음 멈추고 분석하기", ten minutes, or the screen left ('left'): the microphone goes and the sound is analysed. */
+function finishKaraokeRecording(notice = null) {
+  const recorder = karaokeRecorder;
+  const song = selectedSong();
+  if (!recorder) return;
+  karaokeRecorder = null;
+  const samples = recorder.stop();
+  if (!song || !onSongScreen(song.id)) return;
+  if (!samples) return showKaraoke({ status: 'short' });
+  const take = { samples: null, cancel: () => {} };
+  karaokeTake = take;
+  showKaraoke({ status: 'analyzing', progress: 0, notice });
+  return analyzeKaraokeTake(take, song, samples, notice).catch(() => showKaraoke({ status: 'problem', problem: 'error' }));
+}
+
+/** A recording still being made is thrown away (leaving the song screen or the page). */
+function discardKaraokeRecording() {
+  const recorder = karaokeRecorder;
+  karaokeRecorder = null;
+  recorder?.stop();
 }
 
 /** "내 녹음 듣기": eight seconds of the recording from three seconds before the spot; the video pauses meanwhile. */
@@ -639,6 +711,8 @@ async function handleMedia(action, id) {
   if (action === 'media-karaoke-open') { songUi = { ...songUi, panel: 'karaoke', pasteError: '', pinError: '' }; return render(); }
   if (action === 'media-karaoke-close') { songUi = { ...songUi, panel: null }; return render(); }
   if (action === 'media-karaoke-file') return document.querySelector('#karaoke-file')?.click();
+  if (action === 'media-karaoke-record') return RECORD_IN_APP ? startKaraokeRecording() : undefined;
+  if (action === 'media-karaoke-record-stop') return finishKaraokeRecording();
   if (action === 'media-karaoke-play') return playKaraokeAt(Number(id));
   if (action === 'media-karaoke-high-yes' || action === 'media-karaoke-high-no') {
     const report = songUi.karaoke;
@@ -655,6 +729,7 @@ async function handleMedia(action, id) {
   }
   if (action === 'media-sing-start') {
     if (!videoId || singAlong) return;
+    if (karaokeRecorder) return toast('노래방 녹음을 먼저 멈춰 주세요.');
     if (songPlayer.currentTime() === null) return toast('영상이 준비되면 다시 눌러 주세요.');
     const singer = createSingAlong();
     singAlong = singer;
@@ -1807,11 +1882,15 @@ document.addEventListener('visibilitychange', () => {
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && singAlong) { dropSinging(); render(); toast('화면을 벗어나 따라 부르기를 멈췄어요.'); }
 });
+// A karaoke recording stops when the screen is left (switched off, another app) and what was heard is analysed.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && karaokeRecorder) finishKaraokeRecording('left');
+});
 // Coming back after a while: the server may have fallen asleep meanwhile.
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && Date.now() - lastAwake > WAKE_AGAIN_MS) wakeServer();
 });
-window.addEventListener('pagehide', () => { audio.cancel(); dropSinging(); });
+window.addEventListener('pagehide', () => { audio.cancel(); dropSinging(); discardKaraokeRecording(); });
 
 render();
 initialize();

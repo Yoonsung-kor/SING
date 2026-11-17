@@ -12,7 +12,7 @@ test('every API call goes through the one client (invite code, device id, limits
 
 test('the karaoke analysis path never sends or stores the recording', async () => {
   const { existsSync } = await import('node:fs');
-  for (const name of ['melody-tracker.js', 'resample.js', 'karaoke-analysis.js', 'analysis-worker.js', 'pcm-worklet.js']) {
+  for (const name of ['melody-tracker.js', 'resample.js', 'karaoke-analysis.js', 'analysis-worker.js', 'pcm-worklet.js', 'karaoke-recorder.js', 'karaoke-file.js', 'analysis-client.js']) {
     const file = new URL(`../src/${name}`, import.meta.url);
     if (!existsSync(file)) continue;
     const text = readFileSync(file, 'utf8');
@@ -24,5 +24,13 @@ test('the karaoke analysis path never sends or stores the recording', async () =
 test('the karaoke recording is never saved: it never reaches persist() or the store', () => {
   const calls = app.split('\n').filter(line => /persist\(|store\./.test(line));
   assert.ok(calls.length > 5);
-  for (const line of calls) assert.ok(!/karaokeTake|decoded/.test(line), line.trim());
+  for (const line of calls) assert.ok(!/karaokeTake|karaokeRecorder|decoded/.test(line), line.trim());
+});
+
+test('recording in the app stays behind ?record until it is checked at a karaoke room, and stops when the screen is left', () => {
+  assert.match(app, /new URLSearchParams\(location\.search\)\.has\('record'\)/);
+  assert.match(app, /document\.hidden && karaokeRecorder/);
+  // Leaving the song screen or the page lets go of the microphone.
+  assert.match(app.slice(app.indexOf('function stopSongPlayer'), app.indexOf('function dropSinging')), /discardKaraokeRecording\(\)/);
+  assert.match(app, /addEventListener\('pagehide'[^\n]*discardKaraokeRecording\(\)/);
 });

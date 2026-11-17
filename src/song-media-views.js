@@ -160,14 +160,23 @@ const KARAOKE_PROBLEMS = {
 // "2옥 라예요" but "2옥 솔이에요" / "2옥 도♯이에요" (솔 and ♯ end in a consonant).
 const isWhat = name => `${name}${/[솔♯]$/.test(name) ? '이에요' : '예요'}`;
 
+const LEFT_NOTICE = '<p class="subtle">화면을 벗어나 녹음을 멈췄어요. 여기까지 분석할게요.</p>';
+const clock = seconds => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+
 function karaokeBlock(ui) {
   const state = ui.karaoke;
-  const status = state?.status === 'analyzing' ? `<p class="media-status" role="status">녹음을 분석하고 있어요… ${Math.round((state.progress ?? 0) * 100)}%</p>`
+  // While the microphone is open the time and the stop button stay, whatever other panel was opened meanwhile.
+  if (state?.status === 'recording') {
+    return `<div class="media-karaoke open"><p class="media-status"><span role="status">녹음하고 있어요. 화면을 켜 둔 채로 두세요.</span> <span class="karaoke-clock">${clock(Math.max(0, Math.floor(state.seconds ?? 0)))}</span></p><button class="button small" data-action="media-karaoke-record-stop">녹음 멈추고 분석하기</button></div>`;
+  }
+  const status = state?.status === 'analyzing' ? `${state.notice === 'left' ? LEFT_NOTICE : ''}<p class="media-status" role="status">녹음을 분석하고 있어요… ${Math.round((state.progress ?? 0) * 100)}%</p>`
     : state?.status === 'problem' ? `<div class="error-box" role="alert">${KARAOKE_PROBLEMS[state.problem] ?? KARAOKE_PROBLEMS.error}</div>`
     : state?.status === 'short' ? '<p class="media-status" role="status">목소리가 충분히 잡히지 않았어요. 다른 녹음으로 다시 해 보세요.</p>' : '';
   if (ui.panel !== 'karaoke') return `<div class="media-karaoke"><button class="button secondary small" data-action="media-karaoke-open">노래방 녹음 분석하기</button>${status}</div>`;
   const busy = state?.status === 'analyzing';
-  return `<div class="media-karaoke open"><p>노래방에서 부른 녹음을 이 폰 안에서 분석해요. 녹음은 어디로도 보내지 않고, 이 화면을 떠나면 지워져요.</p><button class="button small" data-action="media-karaoke-file" ${busy ? 'disabled' : ''}>녹음 파일 고르기</button><p class="subtle">노래방에서 폰의 녹음 앱으로 녹음한 파일을 골라 주세요.</p><input class="file-input" type="file" id="karaoke-file" accept="audio/*,.m4a,.mp3,.wav,.aac,.ogg,.3gp"><button class="text-button" data-action="media-karaoke-close">닫기</button>${status}</div>`;
+  // Recording in the app comes second, and only where it is switched on (plan N Task 7: until checked at a karaoke room).
+  const record = ui.recordInApp ? `<button class="button secondary small" data-action="media-karaoke-record" ${busy ? 'disabled' : ''}>여기서 녹음하기</button>` : '';
+  return `<div class="media-karaoke open"><p>노래방에서 부른 녹음을 이 폰 안에서 분석해요. 녹음은 어디로도 보내지 않고, 이 화면을 떠나면 지워져요.</p><button class="button small" data-action="media-karaoke-file" ${busy ? 'disabled' : ''}>녹음 파일 고르기</button><p class="subtle">노래방에서 폰의 녹음 앱으로 녹음한 파일을 골라 주세요.</p><input class="file-input" type="file" id="karaoke-file" accept="audio/*,.m4a,.mp3,.wav,.aac,.ogg,.3gp">${record}<button class="text-button" data-action="media-karaoke-close">닫기</button>${status}</div>`;
 }
 
 function exerciseBlock(exercise) {
@@ -198,7 +207,7 @@ function karaokeReportBlock(ui) {
   const name = Number.isInteger(suggestion) ? e(koreanNote(suggestion)) : '';
   const suggest = name && !report.suggestionDone
     ? `<div class="suggest-card"><p>이 노래에서 ${name}까지 길게 지켰어요. 편한 최고음을 여기(${name})로 바꿀까요?</p><div class="action-row"><button class="button small" data-action="media-karaoke-high-yes">바꾸기</button><button class="text-button" data-action="media-karaoke-high-no">그대로 두기</button></div></div>` : '';
-  return `<section class="surface practice-feedback karaoke-report"><h2>노래방 녹음 리포트</h2>${summary}<p class="subtle">노래방 녹음에서는 길게 낸 높은 음을 중심으로 봐요. 반주가 섞여 있어서 짧은 음은 정확하지 않을 수 있어요.</p>${polishing}${polish}<h3>이 노래의 어려운 자리</h3>${list}${suggest}</section>`;
+  return `<section class="surface practice-feedback karaoke-report"><h2>노래방 녹음 리포트</h2>${report.notice === 'left' ? LEFT_NOTICE : ''}${summary}<p class="subtle">노래방 녹음에서는 길게 낸 높은 음을 중심으로 봐요. 반주가 섞여 있어서 짧은 음은 정확하지 않을 수 있어요.</p>${polishing}${polish}<h3>이 노래의 어려운 자리</h3>${list}${suggest}</section>`;
 }
 
 /** The sing-along report, once there is one. */
