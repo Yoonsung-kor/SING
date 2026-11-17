@@ -219,3 +219,17 @@ test('every API path but health and config needs the invite code', async () => {
     assert.equal((await fetch(url('/'))).status, 200, 'pages need no code');
   } finally { s.close(); }
 });
+
+test('the home-screen files are served with their types, and nothing else new is', async () => {
+  const s = await start({ recommend: null });
+  const get = path => fetch(`http://127.0.0.1:${s.port}${path}`);
+  try {
+    for (const [path, type] of [['/sw.js', 'text/javascript'], ['/manifest.webmanifest', 'application/manifest+json'], ['/assets/icon-192.png', 'image/png'], ['/assets/icon-512.png', 'image/png'], ['/assets/apple-touch-icon.png', 'image/png']]) {
+      const response = await get(path);
+      assert.equal(response.status, 200, path);
+      assert.ok(response.headers.get('content-type').startsWith(type), `${path}: ${response.headers.get('content-type')}`);
+    }
+    assert.equal((await get('/package.json')).status, 404);
+    assert.equal((await get('/render.yaml')).status, 404);
+  } finally { s.close(); }
+});

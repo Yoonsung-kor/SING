@@ -5,7 +5,7 @@ import { YoutubeError } from './youtube.mjs';
 import { validateRecommendationRequest, validateRangeRequest } from '../src/recommend.js';
 import { validatePracticeRequest } from '../src/practice-feedback.js';
 
-const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.json': 'application/json; charset=utf-8', '.mp3': 'audio/mpeg', '.txt': 'text/plain; charset=utf-8' };
+const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.json': 'application/json; charset=utf-8', '.mp3': 'audio/mpeg', '.txt': 'text/plain; charset=utf-8', '.webmanifest': 'application/manifest+json; charset=utf-8', '.png': 'image/png' };
 const staticHeaders = {
   'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
   'Permissions-Policy': 'camera=(), microphone=(self)',
@@ -145,7 +145,8 @@ export function createHandler({ root, recommend, lookupRange = null, searchSongs
       if (pathname.startsWith('/api/')) return sendJson(res, 404, { error: 'not-found' });
       if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405).end(); return; }
       const relative = pathname === '/' ? 'index.html' : pathname.slice(1);
-      if (!/^(index\.html|src\/[\w.-]+|assets\/[\w.-]+|tests\/browser[\w.-]*)$/.test(relative)) { res.writeHead(404).end('Not found'); return; }
+      // The page, its scripts and assets, and the home-screen files (service worker at the root so it covers every page).
+      if (!/^(index\.html|sw\.js|manifest\.webmanifest|src\/[\w.-]+|assets\/[\w.-]+|tests\/browser[\w.-]*)$/.test(relative)) { res.writeHead(404).end('Not found'); return; }
       const filename = path.resolve(root, relative);
       if (!filename.startsWith(root) || !(await stat(filename)).isFile()) { res.writeHead(404).end('Not found'); return; }
       const data = await readFile(filename);

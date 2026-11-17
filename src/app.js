@@ -1588,3 +1588,6 @@ window.addEventListener('pagehide', () => { audio.cancel(); dropSinging(); });
 
 render();
 initialize();
+// The app's files are kept on the phone (sw.js) so a sleeping server does not hold the first screen.
+// Only on HTTPS: during development on http://localhost old files would linger.
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('/sw.js').catch(() => {});
