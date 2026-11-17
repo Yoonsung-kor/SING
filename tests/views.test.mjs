@@ -87,3 +87,18 @@ test('the page notice says the practice room is opening, unless a storage proble
   assert.doesNotMatch(pageNotice({ storageError: '저장하지 못했어요', serverWaking: true }), /연습실을 여는 중/);
   assert.equal(pageNotice({}), '');
 });
+
+const gate = extra => renderView({ state: defaultState(), session: null, busy: false, demo: false, ...extra });
+
+test('the invite screen asks for the code and shows no menu', () => {
+  const html = gate({ page: 'invite' });
+  assert.match(html, /초대받은 분만 쓸 수 있어요/);
+  assert.match(html, /받은 초대 링크로 다시 열거나, 초대 코드를 적어 주세요\./);
+  assert.match(html, /<form id="invite-form"/);
+  assert.match(html, /name="code"[^>]*autocapitalize="off"/);
+  assert.match(html, /autocomplete="off"/);
+  assert.match(html, />들어가기</);
+  assert.doesNotMatch(html, /class="navigation"/);
+  assert.doesNotMatch(html, /role="alert"/);
+  assert.match(gate({ page: 'invite', inviteError: '초대 코드가 맞지 않아요. 다시 확인해 주세요.' }), /role="alert"[^>]*>초대 코드가 맞지 않아요\. 다시 확인해 주세요\.</);
+});

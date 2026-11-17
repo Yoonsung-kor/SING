@@ -17,13 +17,16 @@ import { hasCurrentConsent, withConsent, withoutConsent } from './consent.js';
 import { shouldShowOnboarding, startOnboarding, addPick, applyLookup, setVoiceType, setPickKey, toggleOctave, removePick, onboardingResult, commitOnboarding, commitManual, dismissOnboarding, emptySearch, markSlow, startPicker, commitPicks } from './onboarding.js';
 import { searchResultsHtml, voicePicksHtml, pickActionsHtml } from './onboarding-views.js';
 import { RANGE_BOUNDS, candidateShift } from './vocal-range.js';
-import { createApi } from './api.js';
+import { createApi, inviteFromHash } from './api.js';
 
 const root = document.querySelector('#app');
 const audio = new AudioEngine();
 // A free server sleeps when nobody uses it; the notice shows while it wakes (stays under any storage notice).
 let serverWaking = false;
 let lastAwake = 0;
+// What the server told us (GET /api/config), and the invite screen's message.
+let appConfig = { inviteRequired: false, feedbackUrl: null };
+let inviteError = '';
 const WAKE_AGAIN_MS = 10 * 60 * 1000;
 const LIMIT_MESSAGES = { 'daily-limit': '오늘 쓸 수 있는 횟수를 다 썼어요. 내일 다시 쓸 수 있어요.', 'slow-down': '잠시 후 다시 시도해 주세요.' };
 const api = createApi({
@@ -33,6 +36,7 @@ const api = createApi({
     if (box) box.innerHTML = pageNotice({ storageError, serverWaking });
   },
   onLimit: kind => toast(LIMIT_MESSAGES[kind]),
+  onInvite: () => inviteRefused(),
 });
 
 /** Asks the server to wake up; the notice appears only if it is slow to answer. */
@@ -113,7 +117,7 @@ function toast(message) {
 }
 
 function render(focus = false) {
-  const v = { page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, recLoading, recError, onboarding, loading: !initialized && !demo, songUi: { ...songUi, consent: hasCurrentConsent(state.settings) }, lyricsLines: songLyrics.get(selectedSongId) ?? null, feedbackBusy: Boolean(session) && feedbackFor === session.id, feedbackError: feedbackFailed && feedbackFailed.id === session?.id ? feedbackFailed.error : false, learnColumnId, serverWaking };
+  const v = { page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, recLoading, recError, onboarding, loading: !initialized && !demo, songUi: { ...songUi, consent: hasCurrentConsent(state.settings) }, lyricsLines: songLyrics.get(selectedSongId) ?? null, feedbackBusy: Boolean(session) && feedbackFor === session.id, feedbackError: feedbackFailed && feedbackFailed.id === session?.id ? feedbackFailed.error : false, learnColumnId, serverWaking, inviteError };
   // While a song's player is mounted, only the parts around it are redrawn: moving an iframe would reload the video.
   if (!focus && page === 'song-detail' && playerFor === selectedSongId && document.querySelector('#song-player-slot')) {
     const parts = songDetailParts(v);
@@ -764,6 +768,7 @@ async function saveDraft() {
 }
 
 async function initialize() {
+  wakeServer();
   try {
     store = await openStore();
     const loadedState = await store.getState();
@@ -777,8 +782,58 @@ async function initialize() {
     if (demo) liveStorageError = message;
     else storageError = message;
   }
+  await checkInvite();
   render();
-  wakeServer();
+}
+
+/** The invite link's code is kept on this phone; a friend with a code never waits for the server here. */
+async function checkInvite() {
+  const linked = inviteFromHash(location.hash);
+  if (linked) {
+    api.invite.set(linked);
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+  if (api.invite.get()) {
+    loadConfig();
+    // Counts today's visit; a code the server no longer takes brings the invite screen back (onInvite).
+    api.request('/api/hello').catch(() => {});
+    return;
+  }
+  const config = await loadConfig();
+  if (config.inviteRequired && !demo) page = 'invite';
+}
+
+async function loadConfig() {
+  try {
+    const response = await api.request('/api/config');
+    const body = response.ok ? await response.json() : null;
+    if (body) appConfig = { inviteRequired: body.inviteRequired === true, feedbackUrl: typeof body.feedbackUrl === 'string' ? body.feedbackUrl : null };
+  } catch { /* the server is out of reach: keep what we know */ }
+  return appConfig;
+}
+
+function inviteRefused() {
+  if (page === 'invite') return;
+  inviteError = '';
+  navigate('invite');
+}
+
+async function submitInvite(form) {
+  if (busy) return;
+  const code = String(new FormData(form).get('code') ?? '').trim();
+  const wrong = '초대 코드가 맞지 않아요. 다시 확인해 주세요.';
+  if (!/^[A-Za-z0-9_-]{8,64}$/.test(code)) { inviteError = wrong; return render(); }
+  api.invite.set(code);
+  busy = 'invite';
+  inviteError = '';
+  render();
+  const response = await api.request('/api/hello').catch(() => null);
+  busy = false;
+  if (response?.ok) { inviteError = ''; return navigate('home'); }
+  if (response?.status === 401) inviteError = wrong;
+  else { api.invite.clear(); inviteError = '잠시 후 다시 시도해 주세요.'; }
+  page = 'invite';
+  render();
 }
 
 async function resumeOrCreate() {
@@ -1329,6 +1384,8 @@ async function handleVoice(action, id) {
 async function handle(action, id) {
   // Persistence writes must finish before navigating or changing their source state.
   if (busy === 'saving') return;
+  // The invite screen has only its form.
+  if (page === 'invite') return;
   if (action === 'songs') selectedPlaylistId = null;
   // Tapping the tab you are already on keeps an onboarding in progress instead of starting it over.
   if (action === 'songs' && page.startsWith('voice-') && onboarding) return;
@@ -1477,6 +1534,7 @@ root.addEventListener('input', event => {
 });
 
 root.addEventListener('submit', async event => {
+  if (event.target.id === 'invite-form') { event.preventDefault(); return submitInvite(event.target); }
   if (event.target.id === 'voice-direct-form') {
     event.preventDefault();
     const data = new FormData(event.target);
