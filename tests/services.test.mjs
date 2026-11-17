@@ -70,28 +70,6 @@ test('a source page that never answers leaves that song unchecked within the bud
   assert.equal(result.items[0].range, null);
 });
 
-test('practice feedback keeps only lines it was given', async () => {
-  const { createServices } = await import('../scripts/services.mjs');
-  const text = JSON.stringify({ good: [{ lineId: 1, text: '안정적이에요' }, { lineId: 7, text: '없는 줄' }], improve: [], practice: [{ text: '허밍', link: 'practice' }] });
-  const fetchImpl = async () => ({ ok: true, status: 200, json: async () => ({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }] }) });
-  const { practiceFeedback } = createServices({ apiKey: 'k', model: 'm', fetchImpl });
-  const payload = { kind: 'song', song: { title: 'x', artist: '' }, comfortableHigh: null, lines: [{ id: 1, section: '', voiced: 1, top: null, overComfort: 0, wobble: 0, gaps: 0 }], chorusDiffs: [] };
-  assert.deepEqual(await practiceFeedback(payload), { good: [{ lineId: 1, text: '안정적이에요' }], improve: [], practice: [{ text: '허밍', link: 'practice' }] });
-  assert.equal(createServices({}).practiceFeedback, null);
-});
-
-test('practice feedback: the AI is told each sung line\'s problems and may call only those lines 아쉬운 점', async () => {
-  const { createServices } = await import('../scripts/services.mjs');
-  let sent = null;
-  const text = JSON.stringify({ good: [{ lineId: 0, text: '안정적이에요' }], improve: [{ lineId: 0, text: '지어낸 흔들림' }, { lineId: 1, text: '끊겼어요' }], practice: [] });
-  const fetchImpl = async (url, init) => { sent = JSON.parse(JSON.parse(init.body).input); return { ok: true, status: 200, json: async () => ({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }] }) }; };
-  const { practiceFeedback } = createServices({ apiKey: 'k', model: 'm', fetchImpl });
-  const line = (id, extra = {}) => ({ id, section: '', voiced: 0.9, top: null, overComfort: 0, wobble: 0, gaps: 0, ...extra });
-  const payload = { kind: 'song', song: { title: 'x', artist: '' }, comfortableHigh: null, lines: [line(0), line(1, { gaps: 1 }), line(2, { voiced: 0.1 })], chorusDiffs: [] };
-  assert.deepEqual(await practiceFeedback(payload), { good: [{ lineId: 0, text: '안정적이에요' }], improve: [{ lineId: 1, text: '끊겼어요' }], practice: [] });
-  assert.deepEqual(sent.lines.map(l => [l.id, l.issues]), [[0, []], [1, ['gap']]]);
-});
-
 test('spot words: a skipped spot and ungrounded words fall back to the app\'s own sentences', async () => {
   const { createServices } = await import('../scripts/services.mjs');
   const { defaultSentence } = await import('../src/spot-words.js');
@@ -107,4 +85,14 @@ test('spot words: a skipped spot and ungrounded words fall back to the app\'s ow
   // Deliberately wrong: every sentence carries a time it was never given.
   assert.deepEqual((await words(answer(payload.items.map(item => ({ id: item.id, text: '1분 3초쯤 그랬어요.' }))))).words.map(entry => entry.text), payload.items.map(defaultSentence));
   await assert.rejects(words(async () => { throw new Error('down'); }));
+});
+
+test('humming feedback keeps short texts and checked links; without a key it is off', async () => {
+  const { createServices } = await import('../scripts/services.mjs');
+  const text = JSON.stringify({ good: ['안정적이에요', 'x'.repeat(81)], improve: [], practice: [{ text: '허밍', link: 'practice' }] });
+  const fetchImpl = async () => ({ ok: true, status: 200, json: async () => ({ output: [{ type: 'message', content: [{ type: 'output_text', text }] }] }) });
+  const { practiceFeedback } = createServices({ apiKey: 'k', model: 'm', fetchImpl });
+  const payload = { kind: 'humming', attempts: [], comfortableNotes: [], todayHigh: null, previousHigh: null, comfortableHigh: null, stoppedForPain: false };
+  assert.deepEqual(await practiceFeedback(payload), { good: ['안정적이에요'], improve: [], practice: [{ text: '허밍', link: 'practice' }] });
+  assert.equal(createServices({}).practiceFeedback, null);
 });

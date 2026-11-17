@@ -188,26 +188,6 @@ test('sing-along: offered whenever a video is shown (the report needs no lyrics)
   assert.ok(!singing.includes('media-sing-start'));
 });
 
-test('sing-along report: section, the line (escaped) or its time, a jump button, and the plain states', () => {
-  const ready = songWith({ mv: audioEntry, sections: twoSections });
-  const feedback = { good: [{ lineId: 0, text: '안정적이에요' }], improve: [{ lineId: 1, text: '<b>숨</b>이 끊겼어요' }], practice: [{ text: '허밍해요', link: 'practice' }] };
-  const report = { status: 'done', feedback, starts: { 0: 17.6, 1: 30.9 } };
-  const page = songMediaBelow(ready, ui({ singReport: report }), singLines);
-  const html = reportOf(page);
-  for (const text of ['잘한 점', '아쉬운 점', '추천 연습', '노래 시작 · 1절', 'word-a', '&lt;i&gt;word-b', '&lt;b&gt;숨', '안정적이에요']) assert.ok(html.includes(text), text);
-  assert.ok(!html.includes('<i>word-b') && !html.includes('<b>숨'));
-  assert.match(html, /data-action="media-lyric" data-id="1"/);
-  assert.ok(html.includes('여기로 가기'));
-  const noLyrics = reportOf(songMediaBelow(ready, ui({ singReport: report }), null));
-  assert.ok(noLyrics.includes('0:30') && !noLyrics.includes('word-b'));
-  assert.ok(songMediaBelow(ready, ui({ singReport: { status: 'busy' } }), singLines).includes('피드백을 만들고 있어요…'));
-  const short = songMediaBelow(ready, ui({ singReport: { status: 'short' } }), singLines);
-  assert.ok(short.includes('조금 더 불러 주세요. 20초 넘게 소리가 잡혀야 리포트를 만들 수 있어요.'));
-  assert.ok(short.includes('소리가 작으면 잘 안 잡혀요. 평소 크기로 불러 주세요.'));
-  assert.ok(songMediaBelow(ready, ui({ singReport: { status: 'failed' } }), singLines).includes('지금은 피드백을 만들지 못했어요. 잠시 후 다시 시도해 주세요.'));
-  assert.ok(!page.includes('style="'));
-});
-
 test('sing-along: while measuring, the stop button stays even if another panel was opened', () => {
   const ready = songWith({ mv: audioEntry, sections: twoSections });
   for (const panel of [null, 'pin', 'change']) {
@@ -215,20 +195,6 @@ test('sing-along: while measuring, the stop button stays even if another panel w
     assert.ok(html.includes('data-action="media-sing-stop"'), String(panel));
     assert.ok(!html.includes('data-action="media-sing-open"'), String(panel));
   }
-});
-
-test('sing-along report: when no line had a problem, it says so', () => {
-  const ready = songWith({ mv: audioEntry, sections: twoSections });
-  const report = { status: 'done', feedback: { good: [{ lineId: 0, text: '안정적이에요' }], improve: [], practice: [] }, starts: { 0: 17.6 } };
-  assert.match(reportOf(songMediaBelow(ready, ui({ singReport: report }), singLines)), /아쉬운 점<\/h3>[\s\S]*?이번엔 크게 아쉬운 점이 없었어요\./);
-});
-
-test('sing-along report: AI switched off says so; odd values from the server do not break the page', () => {
-  const ready = songWith({ mv: audioEntry, sections: twoSections });
-  assert.ok(songMediaBelow(ready, ui({ singReport: { status: 'off' } }), singLines).includes('지금은 AI 피드백을 쓸 수 없어요.'));
-  const report = { status: 'done', feedback: { good: [{ lineId: '1"><b', text: '좋아요' }], improve: [], practice: [{ text: '허밍해요', link: 'evil' }] }, starts: {} };
-  const html = reportOf(songMediaBelow(ready, ui({ singReport: report }), singLines));
-  assert.ok(html.includes('허밍해요') && !html.includes('"><b'));
 });
 
 // --- The report of demanding spots ---
@@ -274,4 +240,20 @@ test('spots report: all went well, nothing found, and the AI touches', () => {
   assert.match(noConsent, /data-action="media-polish"[^>]*>AI로 설명 다듬기/);
   assert.ok(!spotsPage(spotsReport([spotOf('s1', 'leap', 'sag')])).includes('media-polish'), 'with consent the AI is asked by itself');
   assert.ok(!spotsPage(spotsReport([]), { consent: false }).includes('media-polish'), 'nothing to polish');
+});
+
+test('sing-along: too little voice asks for more singing, louder, and shows no report', () => {
+  const ready = songWith({ mv: audioEntry, sections: twoSections });
+  const short = songMediaBelow(ready, ui({ singReport: { status: 'short' } }), singLines);
+  assert.ok(short.includes('조금 더 불러 주세요. 20초 넘게 소리가 잡혀야 리포트를 만들 수 있어요.'));
+  assert.ok(short.includes('소리가 작으면 잘 안 잡혀요. 평소 크기로 불러 주세요.'));
+  assert.equal(reportOf(short), '');
+});
+
+test('spots report: words and lyric lines are escaped; odd values do not break the page', () => {
+  const report = spotsReport([spotOf('s1', 'leap', 'sag', { lineId: 1 }), spotOf('s2', 'high-hold', 'kept', { time: 60, section: '<b>구간</b>' })]);
+  const html = spotsPage({ ...report, words: { s1: '<b>숨</b>이 내려왔어요', s2: '"><img src=x>' } });
+  for (const text of ['&lt;i&gt;word-b', '&lt;b&gt;숨', '&lt;b&gt;구간', '&quot;&gt;&lt;img']) assert.ok(html.includes(text), text);
+  assert.ok(!html.includes('<b>') && !html.includes('<img') && !html.includes('<i>'));
+  assert.equal(spotsPage({ status: 'spots', result: { status: 'ok', spots: [] }, words: {}, polish: 'idle' }).includes('찾지 못했어요'), true);
 });

@@ -1,6 +1,6 @@
 // Server-side services behind the API: the AI finds, this code checks. Each piece can be swapped in tests.
 import { fetchRecommendations, fetchSongRange, fetchPracticeFeedback, fetchSpotWords } from './ai.mjs';
-import { cleanFeedback, withIssues, problemLines } from '../src/practice-feedback.js';
+import { cleanFeedback } from '../src/practice-feedback.js';
 import { cleanSpotWords } from '../src/spot-words.js';
 import { verifyHighest, fetchPageText } from './verify-source.mjs';
 import { toCandidates } from '../src/recommend.js';
@@ -63,15 +63,11 @@ export function createServices({ apiKey, model, fetchImpl = fetch, getPage = fet
     return { ...pickRecommendations(items, { voice: body.voice, intent }), intent };
   }
 
-  /** Practice feedback from measured numbers. For a song the app names each line's problems, and only items that
-   * call those lines 아쉬운 점 (and the others 잘한 점) survive: the AI words the problems, it does not find them. */
+  /** Practice feedback from measured numbers: the AI words what the app found, it does not find anything. */
   async function practiceFeedback(payload) {
-    // The report's spots: every spot gets a sentence, the AI's where it holds up and the app's own otherwise.
+    // A sung song's spots: every spot gets a sentence, the AI's where it holds up and the app's own otherwise.
     if (payload.kind === 'spots') return { words: cleanSpotWords(await fetchSpotWords(payload, { apiKey, model, fetchImpl }), payload) };
-    if (payload.kind !== 'song') return cleanFeedback(await fetchPracticeFeedback(payload, { apiKey, model, fetchImpl }), { kind: payload.kind });
-    const input = withIssues(payload);
-    const raw = await fetchPracticeFeedback(input, { apiKey, model, fetchImpl });
-    return cleanFeedback(raw, { kind: 'song', lineIds: input.lines.map(line => line.id), problemIds: problemLines(input) });
+    return cleanFeedback(await fetchPracticeFeedback(payload, { apiKey, model, fetchImpl }));
   }
 
   return { lookupRange: aiOn ? lookupRange : null, recommend: aiOn ? recommend : null, practiceFeedback: aiOn ? practiceFeedback : null, searchSongs: search };

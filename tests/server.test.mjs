@@ -250,3 +250,12 @@ test('practice-feedback takes spot requests and answers with words', async () =>
     assert.equal((await send(slow.port, spots)).status, 504);
   } finally { s.close(); slow.close(); off.close(); }
 });
+
+test('the old per-line song feedback is no longer taken', async () => {
+  const s = await start({ recommend: null, practiceFeedback: async () => ({ good: ['x'], improve: [], practice: [] }) });
+  const song = { kind: 'song', song: { title: '곡', artist: '' }, comfortableHigh: null, lines: [{ id: 0, section: '', voiced: 1, top: null, overComfort: 0, wobble: 0, gaps: 0 }], chorusDiffs: [] };
+  try {
+    const response = await fetch(`http://127.0.0.1:${s.port}/api/practice-feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(song) });
+    assert.deepEqual([response.status, await response.json()], [400, { error: 'bad-request' }]);
+  } finally { s.close(); }
+});

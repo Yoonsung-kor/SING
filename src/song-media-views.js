@@ -110,19 +110,14 @@ function lyricsBlock(media, ui, lines) {
   return `<div class="lyrics"><div class="lyrics-styles" role="group" aria-label="가사 보기 방식">${button('karaoke', '노래방 자막형')}${button('full', '전체 가사형')}</div><div class="lyrics-karaoke"${style === 'karaoke' ? '' : ' hidden'}><p id="lyric-section" class="lyric-section"></p><p id="lyric-cur" class="lyric-cur">재생하면 가사가 흘러가요.</p><p id="lyric-next" class="lyric-next"></p></div><div class="lyrics-full" id="lyrics-full"${style === 'full' ? '' : ' hidden'}>${list}</div></div>`;
 }
 
-const SING_LINKS = { practice: ['연습하러 가기', 'home'], learn: ['알아두기 보기', 'learn'] };
-
 /** Sing along with earphones: offered whenever a video is shown (the report needs no lyrics or sections; they only
  * name the place when they are there); the panel asks for earphones first. */
 function singBlock(media, ui, videoId) {
   const report = ui.singReport;
-  const status = report?.status === 'busy' ? '<p class="media-status" role="status">피드백을 만들고 있어요…</p>'
-    : report?.status === 'short' ? '<p class="media-status" role="status">조금 더 불러 주세요. 20초 넘게 소리가 잡혀야 리포트를 만들 수 있어요.<br>소리가 작으면 잘 안 잡혀요. 평소 크기로 불러 주세요.</p>'
-    : report?.status === 'failed' ? '<div class="error-box" role="alert">지금은 피드백을 만들지 못했어요. 잠시 후 다시 시도해 주세요.</div>'
-    : report?.status === 'off' ? '<div class="error-box" role="alert">지금은 AI 피드백을 쓸 수 없어요.</div>' : '';
+  const status = report?.status === 'short' ? '<p class="media-status" role="status">조금 더 불러 주세요. 20초 넘게 소리가 잡혀야 리포트를 만들 수 있어요.<br>소리가 작으면 잘 안 잡혀요. 평소 크기로 불러 주세요.</p>' : '';
   if (!videoId) return status;
   // While the microphone is open the stop button stays, whatever other panel was opened meanwhile.
-  if (ui.panel !== 'sing' && !ui.singing) return `<div class="media-sing">${report?.status === 'busy' ? '' : '<button class="button secondary small" data-action="media-sing-open">따라 부르고 리포트 받기</button>'}${status}</div>`;
+  if (ui.panel !== 'sing' && !ui.singing) return `<div class="media-sing"><button class="button secondary small" data-action="media-sing-open">따라 부르고 리포트 받기</button>${status}</div>`;
   const act = ui.singing
     ? '<button class="button small" data-action="media-sing-stop">멈추고 리포트 받기</button><p class="media-status" role="status">듣고 있어요. 노래가 흐르는 동안만 재요.</p>'
     : '<button class="button small" data-action="media-sing-start">부르기 시작</button><button class="text-button" data-action="media-panel-close">닫기</button>';
@@ -155,23 +150,9 @@ function spotsReportBlock(ui, lines) {
   return `<section class="surface practice-feedback sing-report"><h2>따라 부르기 리포트</h2>${allKept ? '<p class="spot-summary">어려운 자리를 모두 잘 넘겼어요.</p>' : ''}${polishing}${polish}<h3>이 노래의 어려운 자리</h3>${list}</section>`;
 }
 
-/** The sing-along feedback card: each point names its section and lyric line (time when there are no lyrics) and can jump there. */
-function singReportBlock(media, ui, lines) {
-  const report = ui.singReport;
-  if (report?.status === 'spots') return spotsReportBlock(ui, lines);
-  if (report?.status !== 'done') return '';
-  const sections = media.sections?.items ?? [];
-  const sectionAt = t => { let label = ''; for (const section of sections) if (section.t <= t + 0.05) label = section.label; return label; };
-  const point = item => {
-    const line = lines?.[item.lineId];
-    const t = line?.t ?? report.starts?.[item.lineId] ?? 0;
-    const where = [sectionAt(t), line?.text ? `“${e(line.text)}”` : formatTime(t)].filter(Boolean).join(' · ');
-    return `<li><span class="sing-where">${where}</span> ${e(item.text)} <button class="text-button" data-action="media-lyric" data-id="${e(item.lineId)}">여기로 가기</button></li>`;
-  };
-  const list = (title, items) => items.length ? `<h3>${title}</h3><ul class="feedback-list">${items.join('')}</ul>` : '';
-  const { good, improve, practice } = report.feedback;
-  const practiceItems = practice.map(p => `<li>${e(p.text)}${SING_LINKS[p.link] ? ` <button class="text-button" data-action="${SING_LINKS[p.link][1]}">${SING_LINKS[p.link][0]}</button>` : ''}</li>`);
-  return `<section class="surface practice-feedback sing-report"><h2>따라 부르기 피드백</h2>${list('잘한 점', good.map(point))}${improve.length ? list('아쉬운 점', improve.map(point)) : '<h3>아쉬운 점</h3><p class="subtle">이번엔 크게 아쉬운 점이 없었어요.</p>'}${list('추천 연습', practiceItems)}</section>`;
+/** The sing-along report, once there is one. */
+function singReportBlock(ui, lines) {
+  return ui.singReport?.status === 'spots' ? spotsReportBlock(ui, lines) : '';
 }
 
 /** Everything under the player, in the order of the spec's screen (section 5, lyrics from 11.2). */
@@ -179,5 +160,5 @@ export function songMediaBelow(song, ui, lines = null) {
   const media = readMedia(song);
   const videoId = currentVideoId(song, ui.side);
   const tj = `<a class="media-tj" href="${e(tjVideoSearchUrl(song.title, song.artist))}" target="_blank" rel="noopener noreferrer"><strong>TJ 노래방 영상 보기 ↗</strong><span>유튜브에서 열려요${song.tjNumber ? ` · TJ ${e(song.tjNumber)}` : ''}</span></a>`;
-  return `<section class="song-media">${videoStatus(song, media, ui, videoId)}${changePanel(song, media, ui)}${lyricsBlock(media, ui, lines)}${sectionsBlock(media, ui, videoId)}${singBlock(media, ui, videoId)}${tj}</section>${singReportBlock(media, ui, lines)}${pinsBlock(media, ui, videoId)}`;
+  return `<section class="song-media">${videoStatus(song, media, ui, videoId)}${changePanel(song, media, ui)}${lyricsBlock(media, ui, lines)}${sectionsBlock(media, ui, videoId)}${singBlock(media, ui, videoId)}${tj}</section>${singReportBlock(ui, lines)}${pinsBlock(media, ui, videoId)}`;
 }

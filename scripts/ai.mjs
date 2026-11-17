@@ -114,14 +114,13 @@ export function fetchSongRange({ title, artist }, { apiKey, model, fetchImpl = f
   return requestJson({ apiKey, model, fetchImpl, timeoutMs, instructions: SONG_RANGE_INSTRUCTIONS, input: JSON.stringify({ title, artist }), schemaName: 'song_range', schema: SONG_RANGE_SCHEMA });
 }
 
-// Practice feedback: the app measured everything; the model only explains those numbers (no web search).
+// Humming feedback: the app measured everything; the model only explains those numbers (no web search).
 const LINK_SCHEMA = { anyOf: [{ type: 'string', enum: ['practice', 'learn'] }, { type: 'null' }] };
 const PRACTICE_ITEM = { type: 'object', additionalProperties: false, required: ['text', 'link'], properties: { text: { type: 'string' }, link: LINK_SCHEMA } };
 const feedbackSchema = point => ({
   type: 'object', additionalProperties: false, required: ['good', 'improve', 'practice'],
   properties: { good: { type: 'array', items: point }, improve: { type: 'array', items: point }, practice: { type: 'array', items: PRACTICE_ITEM } },
 });
-const LINE_POINT = { type: 'object', additionalProperties: false, required: ['lineId', 'text'], properties: { lineId: { type: 'integer' }, text: { type: 'string' } } };
 const FEEDBACK_RULES = `너는 친절한 보컬 코치다. 앱이 잰 숫자만 근거로 한국어로 피드백한다. 숫자에 없는 내용은 지어내지 않는다.
 - good(잘한 점) 1~2개, improve(아쉬운 점) 0~2개, practice(추천 연습) 1~2개. 항목마다 80자 이내.
 - improve는 아래 기준에 걸리는 문제가 있을 때만 쓴다. 걸리는 게 없으면 빈 목록으로 두고, 작은 수치를 문제로 부풀리지 않는다.
@@ -132,15 +131,9 @@ const FEEDBACK_RULES = `너는 친절한 보컬 코치다. 앱이 잰 숫자만 
 const HUMMING_INSTRUCTIONS = `${FEEDBACK_RULES}
 입력은 허밍 연습 한 번이다. attempts: target(목표음), sung(낸 음), centsOff(목표음과의 차이, 센트), comfort(comfortable 편함 / effort 힘듦 / unsure 모름 / pain 불편), reason(측정 결과). comfortableNotes는 편하게 확인한 음, todayHigh는 오늘 가장 높게 편했던 음, previousHigh는 지난번, comfortableHigh는 내 편한 최고음이다.
 기준: centsOff 절댓값이 50 이하면 목표음을 맞춘 것이다. improve는 50을 넘은 시도, comfort가 effort나 pain인 시도, reason이 stable이 아닌 시도가 있을 때만 쓴다.`;
-const SONG_INSTRUCTIONS = `${FEEDBACK_RULES}
-입력은 노래 한 곡을 따라 부른 측정이다. 가사는 받지 않았으니 가사를 지어내지 않는다. lines에는 부른 줄만 있다. good과 improve는 반드시 lines에 있는 id 하나를 lineId로 가리킨다.
-lines: section(구간 이름), voiced(소리를 낸 비율), top(가장 높은 음), overComfort(내 편한 최고음보다 높았던 비율), wobble(음이 반음 넘게 튄 비율, 멜로디가 움직여도 조금은 생긴다), gaps(0.4초 넘게 끊긴 횟수), issues(앱이 기준으로 고른 문제).
-issues: gap(줄 중간에 소리가 끊김), wobble(음이 자주 튐), high(내 편한 최고음보다 높이 올라감), chorus(두 후렴의 같은 줄 높이가 다름). chorus의 방향은 chorusDiffs의 semitones로 말한다. 양수면 ids의 두 번째 줄(뒤 후렴)이 더 낮게, 음수면 더 높게 불린 것이다.
-기준: improve는 issues가 있는 줄만 가리키고, 그 줄의 issues에 적힌 문제만 말한다. issues가 빈 줄을 아쉽다고 하지 않는다. good은 issues가 빈 줄에서 고른다.`;
 
 export function fetchPracticeFeedback(payload, { apiKey, model, fetchImpl = fetch, timeoutMs = TIMEOUT_MS }) {
-  const song = payload.kind === 'song';
-  return requestJson({ apiKey, model, fetchImpl, timeoutMs, webSearch: false, instructions: song ? SONG_INSTRUCTIONS : HUMMING_INSTRUCTIONS, input: JSON.stringify(payload), schemaName: song ? 'practice_feedback_song' : 'practice_feedback_humming', schema: feedbackSchema(song ? LINE_POINT : { type: 'string' }) });
+  return requestJson({ apiKey, model, fetchImpl, timeoutMs, webSearch: false, instructions: HUMMING_INSTRUCTIONS, input: JSON.stringify(payload), schemaName: 'practice_feedback_humming', schema: feedbackSchema({ type: 'string' }) });
 }
 
 // The report's spots: the app found them and has its own sentence for each; the model only rephrases (no web search).

@@ -77,34 +77,6 @@ test('song range lookup v2 asks for chest, falsetto, the exact quote and the ori
   assert.doesNotMatch(seen.instructions, /나무위키|namu/i);
 });
 
-test('practice feedback asks without web search, with a schema per kind and the rules in Korean', async () => {
-  const seen = [];
-  const fetchImpl = async (url, init) => { seen.push(JSON.parse(init.body)); return ok('{"good":[],"improve":[],"practice":[]}')(); };
-  await fetchPracticeFeedback({ kind: 'song', lines: [{ id: 3 }] }, { apiKey: 'k', model: 'm', fetchImpl });
-  await fetchPracticeFeedback({ kind: 'humming', attempts: [] }, { apiKey: 'k', model: 'm', fetchImpl });
-  assert.equal(seen[0].tools, undefined);
-  assert.equal(seen[0].text.format.name, 'practice_feedback_song');
-  assert.equal(seen[1].text.format.name, 'practice_feedback_humming');
-  assert.deepEqual(seen[0].text.format.schema.properties.good.items.required, ['lineId', 'text']);
-  assert.equal(seen[1].text.format.schema.properties.good.items.type, 'string');
-  assert.match(seen[0].instructions, /지어내지/);
-  assert.match(seen[0].instructions, /lineId/);
-  assert.match(seen[1].instructions, /쉬어/);
-  assert.match(seen[1].instructions, /쉬운 말/);
-  assert.ok(seen[0].input.includes('"id":3'));
-});
-
-test('practice feedback rules: 아쉬운 점 may be empty, and only the problems the app named count', async () => {
-  const seen = [];
-  const fetchImpl = async (url, init) => { seen.push(JSON.parse(init.body)); return ok('{"good":[],"improve":[],"practice":[]}')(); };
-  await fetchPracticeFeedback({ kind: 'song', lines: [] }, { apiKey: 'k', model: 'm', fetchImpl });
-  await fetchPracticeFeedback({ kind: 'humming', attempts: [] }, { apiKey: 'k', model: 'm', fetchImpl });
-  for (const { instructions } of seen) assert.match(instructions, /improve\(아쉬운 점\) 0~2개/);
-  assert.match(seen[0].instructions, /issues/);
-  for (const name of ['gap', 'wobble', 'high', 'chorus']) assert.match(seen[0].instructions, new RegExp(name));
-  assert.match(seen[1].instructions, /50/);
-});
-
 test('spot words are asked without web search, with every id to answer and the rules in Korean', async () => {
   const seen = [];
   const fetchImpl = async (url, init) => { seen.push(JSON.parse(init.body)); return ok('{"items":[]}')(); };
@@ -118,4 +90,19 @@ test('spot words are asked without web search, with every id to answer and the r
   assert.match(seen[0].instructions, /물음표는 outcome이 ask일 때만 쓴다/);
   assert.match(seen[0].instructions, /따옴표를 쓰지 않는다/);
   assert.ok(seen[0].input.includes('"id":"s1"'));
+});
+
+test('humming feedback asks without web search, with its schema and the rules in Korean', async () => {
+  const seen = [];
+  const fetchImpl = async (url, init) => { seen.push(JSON.parse(init.body)); return ok('{"good":[],"improve":[],"practice":[]}')(); };
+  await fetchPracticeFeedback({ kind: 'humming', attempts: [] }, { apiKey: 'k', model: 'm', fetchImpl });
+  assert.equal(seen[0].tools, undefined);
+  assert.equal(seen[0].text.format.name, 'practice_feedback_humming');
+  assert.equal(seen[0].text.format.schema.properties.good.items.type, 'string');
+  assert.match(seen[0].instructions, /지어내지/);
+  assert.match(seen[0].instructions, /쉬어/);
+  assert.match(seen[0].instructions, /쉬운 말/);
+  assert.match(seen[0].instructions, /improve\(아쉬운 점\) 0~2개/);
+  assert.match(seen[0].instructions, /50/);
+  assert.doesNotMatch(seen[0].instructions, /lineId|issues/);
 });

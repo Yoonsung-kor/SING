@@ -1,4 +1,4 @@
-import { hummingPayload, lineMetrics, sungLines, chorusDiffs, songPayload, songFrames, cleanFeedback } from './practice-feedback.js';
+import { hummingPayload, songFrames, cleanFeedback } from './practice-feedback.js';
 import { createSingAlong } from './sing-along.js';
 import { findSpots } from './hard-spots.js';
 import { spotsPayload, defaultSentence, cleanSpotWords } from './spot-words.js';
@@ -532,7 +532,7 @@ async function handleMedia(action, id) {
   if (action === 'media-consent') { consentReturn = 'song-detail'; return navigate('ai-consent'); }
   // Measuring and the report stay on the phone, so singing along needs no consent; only polishing the words does.
   if (action === 'media-sing-open') {
-    songUi = { ...songUi, panel: 'sing', pasteError: '', pinError: '', singReport: ['done', 'spots'].includes(songUi.singReport?.status) ? songUi.singReport : null };
+    songUi = { ...songUi, panel: 'sing', pasteError: '', pinError: '', singReport: songUi.singReport?.status === 'spots' ? songUi.singReport : null };
     return render();
   }
   if (action === 'media-sing-stop') return finishSinging();
@@ -627,8 +627,7 @@ async function handleMedia(action, id) {
     return tickMedia();
   }
   if (action === 'media-lyric') {
-    // A feedback card can point at a line by its start even if the lyrics are gone meanwhile.
-    const t = songLyrics.get(song.id)?.[Number(id)]?.t ?? songUi.singReport?.starts?.[id];
+    const t = songLyrics.get(song.id)?.[Number(id)]?.t;
     if (Number.isFinite(t) && videoId) songPlayer.seekTo(toVideoTime(media, videoId, Math.max(0, t - 0.3)));
     return;
   }
