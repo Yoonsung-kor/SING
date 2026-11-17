@@ -116,15 +116,11 @@ function lineAt(lines, time) {
   return null;
 }
 
-export function findSpots(frames, { comfortableHighMidi = null, sections = [], lines = [], source = 'clean', rules = SPOT_RULES } = {}) {
-  const list = Array.isArray(frames) ? frames : [];
-  const voicedSeconds = round(list.filter(sounding).length * hopOf(list));
-  if (voicedSeconds < rules.minVoiced) return { status: 'short', voicedSeconds };
-  const notes = notesOf(list, rules);
+/** Every demanding note before any choosing: its kind, how it went, and what choosing needs (rise, length). */
+export function spotCandidates(notes, { comfortableHighMidi = null, source = 'clean', rules = SPOT_RULES } = {}) {
   const comfort = Number.isFinite(comfortableHighMidi) ? comfortableHighMidi : null;
   // Without a comfortable top, the top three semitones of what was sung count as high.
   const highFrom = comfort !== null ? comfort - rules.nearComfort : Math.max(...notes.map(note => note.midi)) - 3;
-
   const candidates = [];
   notes.forEach((note, i) => {
     const prev = notes[i - 1];
@@ -140,6 +136,14 @@ export function findSpots(frames, { comfortableHighMidi = null, sections = [], l
     if (!kind) return;
     candidates.push({ kind, outcome: outcomeOf(note, { kind, high, length, source, rules }), time: note.start, end: note.end, from: kind === 'leap' ? nameOf(prev.midi) : null, to: nameOf(note.midi), over, rise, length, repeated: false });
   });
+  return candidates;
+}
+
+export function findSpots(frames, { comfortableHighMidi = null, sections = [], lines = [], source = 'clean', rules = SPOT_RULES } = {}) {
+  const list = Array.isArray(frames) ? frames : [];
+  const voicedSeconds = round(list.filter(sounding).length * hopOf(list));
+  if (voicedSeconds < rules.minVoiced) return { status: 'short', voicedSeconds };
+  const candidates = spotCandidates(notesOf(list, rules), { comfortableHighMidi, source, rules });
 
   // The same spot in two choruses is told once, as happening both times.
   const choruses = (Array.isArray(sections) ? sections : []).map((section, i) => ({ ...section, until: sections[i + 1]?.t ?? Infinity })).filter(section => section.kind === 'chorus');
