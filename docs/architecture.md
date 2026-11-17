@@ -1,6 +1,6 @@
 # SING 시스템 구조
 
-처음 작성: 2026-10-13, 갱신: 2026-11-17. 현재는 **모바일 웹 프로토타입**이며, 아래의 현재 구조와 확장 구조를 구분한다.
+처음 작성: 2026-10-13, 갱신: 2026-11-18(노래방 녹음 분석). 현재는 **모바일 웹 프로토타입**이며, 아래의 현재 구조와 확장 구조를 구분한다.
 
 ## 현재 구조
 
@@ -20,6 +20,8 @@ flowchart TD
     SongScreen -->|동의 후 · 곡 화면을 열 때| Server
     SongScreen -->|이어폰 · 따라 부르기| SingAlong[sing-along.js · 25ms마다 음높이 → hard-spots.js · 어려운 자리]
     SingAlong -->|동의 후 · 피드백을 받을 때| Server
+    SongScreen -->|노래방 녹음 파일 · 앱 안 녹음| Worker[분석 워커 · melody-tracker.js → hard-spots.js · 길게 낸 높은 음만]
+    Worker -->|자리 · 음역 · 진행률 · 녹음은 폰 밖으로 안 나감| SongScreen
     Lesson -->|결과 화면 · 지난 기록 · 피드백을 받을 때| Server
     UI <--> Voice[내 음역 온보딩 · 오선지 · 노래방 키 줄]
     Songs -->|동의 후| Server[로컬 서버 · /api/recommend · /api/song-range · /api/song-search · /api/practice-feedback]
@@ -46,6 +48,7 @@ flowchart TD
 | 내 음역 | 자신 있는 곡으로 편한 최고음 어림, 남녀 곡 옥타브 제안, 편함·도전·무리 분류, 오선지와 노래방 키 줄(원키 가운데, 맞는 키 표시) | `src/onboarding.js`, `src/onboarding-views.js`, `src/vocal-range.js`, `src/notes.js`, `src/range-graphics.js` |
 | AI와 외부 연결 | 추천·최고음 찾기 흐름, 출처 확인, 곡 검색(TJ 우선, MusicBrainz 대체), 요청 간격, 동의 버전 | `scripts/services.mjs`, `scripts/ai.mjs`, `scripts/verify-source.mjs`, `scripts/song-search.mjs`, `scripts/tj.mjs`, `scripts/throttle.mjs`, `scripts/musicbrainz.mjs`, `src/consent.js` |
 | 노래 화면 | 원곡(음원 트랙, 없으면 MV)·금영 노래방 영상 재생(플레이어를 지운 채 다시 그리지 않음), 자동 구간과 흐름 막대, 영상별 시작 맞추기, 구간 메모, 영상 바꾸기·링크 붙여넣기 | `src/song-media.js`, `src/song-media-views.js`, `src/song-player.js`, `src/sections.js`, `scripts/youtube.mjs`, `scripts/lrclib.mjs`, `scripts/title-match.mjs` |
+| 노래방 녹음 분석 | 녹음 파일 읽기(50MB·10분 한도, 16kHz 모노), 반주 속 가수의 음 따라가기(실험에서 고른 값, 20ms마다), 길게 낸 높은 음과 부른 음역·편한 최고음 제안, 첫 소리 시간, 화면과 따로 도는 워커와 진행률, 앱 안 녹음(AudioWorklet, 화면 켜 두기, `?record`일 때만) | `src/karaoke-file.js`, `src/resample.js`, `src/melody-tracker.js`, `src/karaoke-analysis.js`, `src/analysis-worker.js`, `src/analysis-client.js`, `src/karaoke-recorder.js`, `src/pcm-worklet.js` |
 | 저장 | 상태/원음 저장, 백업 검증과 복원 | `src/storage.js` |
 | 개발 서버 | 허용된 정적 파일 제공과 API 전달(입력 한도, 키는 `.env`) | `scripts/serve.mjs`, `scripts/server.mjs` |
 | 접근 관리 (배포) | 초대 코드, 접속 주소별 요청 간격, 기기별·전체 하루 한도, 날짜별 기기 수(메모리) | `scripts/access.mjs` |
@@ -73,6 +76,16 @@ flowchart TD
 3. 서버는 요청 형식(키·개수·음 이름 형식·범위)을 확인한다. 허밍은 지금처럼 숫자와 기준을 넘긴다. 따라 부르기는 자리마다 한 문장을 받는다(웹 검색 없음, JSON 스키마 `spot_words`). 옛 줄 단위 요청(`kind: song`)은 400으로 거절한다.
 4. 서버는 답에서 허밍은 항목마다 80자 이내, 목록마다 2개까지만 남긴다. 따라 부르기는 자리마다 AI 문장을 검사해, 빠진 자리나 받지 않은 음 이름·시간·숫자·따옴표가 있는 문장, 끊김을 단정하거나(물음이 아님) 다른 자리에 물음표를 쓴 문장은 앱의 문장으로 바꾼다. 브라우저도 같은 검사를 한 번 더 한다.
 5. 허밍 피드백은 그 레슨에 함께 저장한다(백업에도 포함). 따라 부르기 리포트는 화면에만 보여주고 저장하지 않으며, 가사 줄 글자는 기기 메모리의 가사에서 붙인다(가사가 없으면 시간). 화면을 떠나면 사라진다.
+
+## 노래방 녹음 데이터 흐름
+
+녹음은 폰을 떠나지 않고 저장하지 않는다. 분석 경로의 파일에는 네트워크·저장소 코드(`fetch`, `XMLHttpRequest`, `WebSocket`, `sendBeacon`, `indexedDB`, `localStorage`)가 없고, `tests/app-source.test.mjs`가 이를 확인한다.
+
+1. 노래 화면에서 파일을 고르면 `karaoke-file.js`가 크기(50MB)를 보고, 브라우저의 `decodeAudioData`로 풀어 길이(10분)를 본 뒤 `resample.js`로 16kHz 모노를 만든다. 앱 안 녹음(`?record`)은 `pcm-worklet.js`가 마이크 소리를 4096표본씩 넘기고 `karaoke-recorder.js`가 메모리에 모은다(30초 미만은 버림, 10분에서 멈춤, 화면이 꺼지면 멈추고 거기까지 분석).
+2. `analysis-client.js`가 소리의 복사본을 모듈 워커(`analysis-worker.js`)로 넘기고 진행률을 받는다. 화면을 떠나면 워커를 끝낸다.
+3. 워커 안에서 `melody-tracker.js`가 20ms마다 가장 가수다운 음을 고른다(배음 모으기 → 자연스럽게 이어지는 길 → 건반 음에 딱 맞고 움직이지 않는 반주의 음 버리기). `hard-spots.js`의 `findSpots(…, { source: 'karaoke' })`가 길게 낸 높은 음만 자리로 고르고, `karaoke-analysis.js`가 부른 음역(가장 높게 길게 낸 음, 길게 지킨 음)과 편한 최고음 제안(4반음 안쪽), 첫 소리 시간을 더한다.
+4. 리포트는 앱의 문장으로 바로 뜬다. 동의가 있으면 따라 부르기와 같은 `POST /api/practice-feedback`(자리의 종류·결과·음 이름)으로 문장만 다듬는다. 녹음·시간·가사는 보내지 않는다.
+5. ‘내 녹음 듣기’는 메모리의 소리에서 그 자리 3초 앞부터 8초를 튼다. 첫 소절을 확인하면 그 차이(숫자 하나)만 기억하고, 가사 줄 글자는 그릴 때 메모리의 가사에서 붙인다. 곡 화면을 떠나면 소리와 리포트가 모두 사라진다.
 
 ## 한 번의 연습 데이터 흐름
 
