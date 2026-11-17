@@ -110,7 +110,8 @@ async function handleVideos(req, res, findVideos) {
   }
 }
 
-export function createHandler({ root, recommend, lookupRange = null, searchSongs = null, findSections = null, findVideos = null, practiceFeedback = null }) {
+/** access: scripts/access.mjs (invite code, pace, daily caps), or null for no checks. config.feedbackUrl: the survey link. */
+export function createHandler({ root, recommend, lookupRange = null, searchSongs = null, findSections = null, findVideos = null, practiceFeedback = null, access = null, config = {} }) {
   const practiceRun = practiceFeedback && (async body => { const feedback = await practiceFeedback(body); return feedback ? { feedback } : null; });
   // An empty list is a real answer ("no song fits"); only a missing result counts as an upstream failure.
   const recommendRun = recommend && (async body => {
@@ -120,13 +121,28 @@ export function createHandler({ root, recommend, lookupRange = null, searchSongs
   const rangeRun = lookupRange && (async body => ({ range: await lookupRange(body) ?? null }));
   return async (req, res) => {
     try {
-      const pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+      const url = new URL(req.url, 'http://localhost');
+      const pathname = decodeURIComponent(url.pathname);
+      // Open to everyone: the host's health check, and what the page needs to know before it has a code.
+      if (req.method === 'GET' && pathname === '/api/health') return sendJson(res, 200, { ok: true });
+      if (req.method === 'GET' && pathname === '/api/config') return sendJson(res, 200, { inviteRequired: Boolean(access?.inviteRequired), feedbackUrl: config.feedbackUrl ?? null });
+      if (req.method === 'GET' && pathname === '/api/admin/stats') {
+        const stats = access?.stats(url.searchParams.get('key') ?? '') ?? null;
+        return stats ? sendJson(res, 200, stats) : sendJson(res, 404, { error: 'not-found' });
+      }
+      // Every other API path passes the guard before it is even looked up.
+      if (pathname.startsWith('/api/')) {
+        const refused = access?.check(req, pathname);
+        if (refused) return sendJson(res, refused.status, refused.body);
+      }
+      if (req.method === 'GET' && pathname === '/api/hello') return sendJson(res, 200, { ok: true });
       if (req.method === 'POST' && pathname === '/api/recommend') return await handleJson(req, res, { maxBody: RECOMMEND_MAX_BODY, validate: validateRecommendationRequest, run: recommendRun });
       if (req.method === 'POST' && pathname === '/api/practice-feedback') return await handleJson(req, res, { maxBody: 32 * 1024, validate: validatePracticeRequest, run: practiceRun });
       if (req.method === 'POST' && pathname === '/api/song-range') return await handleJson(req, res, { maxBody: RANGE_MAX_BODY, validate: validateRangeRequest, run: rangeRun });
       if (req.method === 'GET' && pathname === '/api/song-search') return await handleSearch(req, res, searchSongs);
       if (req.method === 'GET' && pathname === '/api/song-sections') return await handleSections(req, res, findSections);
       if (req.method === 'GET' && pathname === '/api/song-videos') return await handleVideos(req, res, findVideos);
+      if (pathname.startsWith('/api/')) return sendJson(res, 404, { error: 'not-found' });
       if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405).end(); return; }
       const relative = pathname === '/' ? 'index.html' : pathname.slice(1);
       if (!/^(index\.html|src\/[\w.-]+|assets\/[\w.-]+|tests\/browser[\w.-]*)$/.test(relative)) { res.writeHead(404).end('Not found'); return; }

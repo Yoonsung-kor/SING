@@ -178,3 +178,44 @@ test('practice-feedback endpoint checks the request and maps the answers', async
     assert.equal((await send(off.port, humming)).status, 503);
   } finally { s.close(); off.close(); }
 });
+
+test('health, config and hello answer without an access guard; usage stays hidden', async () => {
+  const s = await start({ recommend: null });
+  try {
+    const health = await fetch(`http://127.0.0.1:${s.port}/api/health`);
+    assert.deepEqual([health.status, await health.json()], [200, { ok: true }]);
+    const config = await fetch(`http://127.0.0.1:${s.port}/api/config`);
+    assert.deepEqual([config.status, await config.json()], [200, { inviteRequired: false, feedbackUrl: null }]);
+    assert.equal((await fetch(`http://127.0.0.1:${s.port}/api/hello`)).status, 200);
+    const stats = await fetch(`http://127.0.0.1:${s.port}/api/admin/stats?key=anything`);
+    assert.deepEqual([stats.status, await stats.json()], [404, { error: 'not-found' }]);
+    const unknown = await fetch(`http://127.0.0.1:${s.port}/api/nothing`);
+    assert.deepEqual([unknown.status, await unknown.json()], [404, { error: 'not-found' }]);
+  } finally { s.close(); }
+  const withForm = await start({ recommend: null, config: { feedbackUrl: 'https://forms.gle/x' } });
+  try { assert.equal((await (await fetch(`http://127.0.0.1:${withForm.port}/api/config`)).json()).feedbackUrl, 'https://forms.gle/x'); }
+  finally { withForm.close(); }
+});
+
+test('every API path but health and config needs the invite code', async () => {
+  const { createAccess } = await import('../scripts/access.mjs');
+  const access = createAccess({ inviteCodes: ['abc12345'], adminKey: 'k'.repeat(16) });
+  const s = await start({ recommend: async () => ({ items: [], intent: 'any', fallback: false }), lookupRange: async () => null, searchSongs: async () => ({}), findSections: async () => null, findVideos: async () => ({ candidates: [] }), practiceFeedback: async () => null, access });
+  const url = path => `http://127.0.0.1:${s.port}${path}`;
+  const json = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' };
+  try {
+    for (const [path, init] of [['/api/hello'], ['/api/song-search?q=a'], ['/api/song-sections?title=a'], ['/api/song-videos?title=a&side=mv'], ['/api/recommend', json], ['/api/song-range', json], ['/api/practice-feedback', json], ['/api/nothing']]) {
+      const response = await fetch(url(path), init);
+      assert.deepEqual([response.status, await response.json()], [401, { error: 'invite' }], path);
+    }
+    const headers = { 'X-Sing-Invite': 'abc12345', 'X-Sing-Device': '00000000-0000-4000-8000-000000000001' };
+    assert.equal((await fetch(url('/api/hello'), { headers })).status, 200);
+    assert.equal((await fetch(url('/api/health'))).status, 200);
+    assert.deepEqual(await (await fetch(url('/api/config'))).json(), { inviteRequired: true, feedbackUrl: null });
+    assert.equal((await fetch(url('/api/admin/stats?key=wrong'))).status, 404);
+    const stats = await fetch(url(`/api/admin/stats?key=${'k'.repeat(16)}`));
+    assert.equal(stats.status, 200);
+    assert.equal((await stats.json()).days[0].devices, 1);
+    assert.equal((await fetch(url('/'))).status, 200, 'pages need no code');
+  } finally { s.close(); }
+});
