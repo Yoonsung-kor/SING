@@ -10,6 +10,8 @@ export function monoAt16k(channels, sampleRate) {
   const mono = new Float32Array(length);
   for (const channel of channels) for (let i = 0; i < length; i++) mono[i] += channel[i] / channels.length;
   const ratio = sampleRate / TARGET;
+  // Already 16 kHz: only the averaging of channels (a running sum would add rounding noise for nothing).
+  if (ratio === 1) return mono;
   const width = Math.max(1, Math.round(ratio));
   const smooth = new Float32Array(length);
   let sum = 0;
