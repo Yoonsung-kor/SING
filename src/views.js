@@ -180,8 +180,14 @@ function inviteView(v) {
   return `<div class="narrow"><div class="lesson-header"><h1>초대받은 분만 쓸 수 있어요</h1><p>받은 초대 링크로 다시 열거나, 초대 코드를 적어 주세요.</p></div><form id="invite-form" class="surface gate-form"><label for="invite-code">초대 코드</label><input id="invite-code" name="code" type="text" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" maxlength="64" required ${v.busy ? 'disabled' : ''}>${v.inviteError ? `<p class="error-box" role="alert">${e(v.inviteError)}</p>` : ''}<button class="button" type="submit" ${v.busy ? 'disabled' : ''}>들어가기</button></form></div>`;
 }
 
+/** Before the app, inside KakaoTalk (or another app's browser): the microphone and storage may not work there. */
+function outsideView(v) {
+  const open = v.outsideUrl ? button('기본 브라우저로 열기', 'open-outside') : '';
+  return `<div class="narrow"><div class="lesson-header"><h1>다른 브라우저에서 열어 주세요</h1><p>카카오톡 같은 앱 안에서는 마이크와 저장이 잘 안 될 수 있어요.</p></div><section class="surface gate-form">${open}<p class="subtle">안 열리면 화면 구석의 ⋮(또는 공유) 버튼에서 ‘다른 브라우저로 열기’를 눌러 주세요.</p>${button('그냥 여기서 쓸게요', 'stay-inside', { class: 'secondary' })}</section></div>`;
+}
+
 // Screens shown before the app itself: no menu, nothing else to tap.
-const GATES = { invite: inviteView };
+const GATES = { invite: inviteView, 'open-outside': outsideView };
 
 export function renderView(v) {
   if (GATES[v.page]) return `<div class="wrap gate"><header class="site-header"><span class="brand"><span class="wordmark">sing<span>•</span></span><span class="brand-caption">나의 작은<br>보컬 연습실</span></span></header><main id="main" class="page" tabindex="-1"><div id="page-notice">${pageNotice(v)}</div>${GATES[v.page](v)}</main></div>`;

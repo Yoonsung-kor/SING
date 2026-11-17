@@ -19,6 +19,7 @@ import { searchResultsHtml, voicePicksHtml, pickActionsHtml } from './onboarding
 import { RANGE_BOUNDS, candidateShift } from './vocal-range.js';
 import { createApi, inviteFromHash } from './api.js';
 import { createBackTrap } from './back.js';
+import { inAppBrowser, externalUrl } from './environment.js';
 
 const root = document.querySelector('#app');
 const audio = new AudioEngine();
@@ -28,6 +29,8 @@ let lastAwake = 0;
 // What the server told us (GET /api/config), and the invite screen's message.
 let appConfig = { inviteRequired: false, feedbackUrl: null };
 let inviteError = '';
+// Inside KakaoTalk's own browser: the link that asks KakaoTalk to open the page in the default browser.
+let outsideUrl = null;
 const WAKE_AGAIN_MS = 10 * 60 * 1000;
 const LIMIT_MESSAGES = { 'daily-limit': '오늘 쓸 수 있는 횟수를 다 썼어요. 내일 다시 쓸 수 있어요.', 'slow-down': '잠시 후 다시 시도해 주세요.' };
 const api = createApi({
@@ -131,7 +134,7 @@ function toast(message) {
 }
 
 function render(focus = false) {
-  const v = { page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, recLoading, recError, onboarding, loading: !initialized && !demo, songUi: { ...songUi, consent: hasCurrentConsent(state.settings) }, lyricsLines: songLyrics.get(selectedSongId) ?? null, feedbackBusy: Boolean(session) && feedbackFor === session.id, feedbackError: feedbackFailed && feedbackFailed.id === session?.id ? feedbackFailed.error : false, learnColumnId, serverWaking, inviteError };
+  const v = { page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, recLoading, recError, onboarding, loading: !initialized && !demo, songUi: { ...songUi, consent: hasCurrentConsent(state.settings) }, lyricsLines: songLyrics.get(selectedSongId) ?? null, feedbackBusy: Boolean(session) && feedbackFor === session.id, feedbackError: feedbackFailed && feedbackFailed.id === session?.id ? feedbackFailed.error : false, learnColumnId, serverWaking, inviteError, outsideUrl };
   // While a song's player is mounted, only the parts around it are redrawn: moving an iframe would reload the video.
   if (!focus && page === 'song-detail' && playerFor === selectedSongId && document.querySelector('#song-player-slot')) {
     const parts = songDetailParts(v);
@@ -797,8 +800,25 @@ async function initialize() {
     if (demo) liveStorageError = message;
     else storageError = message;
   }
+  const app = inAppBrowser(navigator.userAgent);
+  if (app) {
+    // Stop before the invite code leaves the address: the default browser needs the whole link.
+    outsideUrl = externalUrl(app, location.href);
+    page = 'open-outside';
+    render();
+    return;
+  }
   await checkInvite();
   render();
+  backTrap.sync();
+}
+
+/** "그냥 여기서 쓸게요": carry on in the app's own browser. */
+async function stayInside() {
+  outsideUrl = null;
+  page = 'home';
+  await checkInvite();
+  render(true);
   backTrap.sync();
 }
 
@@ -1400,8 +1420,13 @@ async function handleVoice(action, id) {
 async function handle(action, id) {
   // Persistence writes must finish before navigating or changing their source state.
   if (busy === 'saving') return;
-  // The invite screen has only its form.
+  // The invite screen has only its form; the open-outside screen only its two buttons.
   if (page === 'invite') return;
+  if (page === 'open-outside') {
+    if (action === 'open-outside' && outsideUrl) location.href = outsideUrl;
+    if (action === 'stay-inside') await stayInside();
+    return;
+  }
   if (action === 'songs') selectedPlaylistId = null;
   // Tapping the tab you are already on keeps an onboarding in progress instead of starting it over.
   if (action === 'songs' && page.startsWith('voice-') && onboarding) return;
