@@ -18,6 +18,7 @@ import { shouldShowOnboarding, startOnboarding, addPick, applyLookup, setVoiceTy
 import { searchResultsHtml, voicePicksHtml, pickActionsHtml } from './onboarding-views.js';
 import { RANGE_BOUNDS, candidateShift } from './vocal-range.js';
 import { createApi, inviteFromHash } from './api.js';
+import { createBackTrap } from './back.js';
 
 const root = document.querySelector('#app');
 const audio = new AudioEngine();
@@ -37,6 +38,19 @@ const api = createApi({
   },
   onLimit: kind => toast(LIMIT_MESSAGES[kind]),
   onInvite: () => inviteRefused(),
+});
+
+// The phone's back button goes back inside the app (the screen's own back button), not out of it.
+const backTrap = createBackTrap({
+  history: window.history,
+  listen: (type, fn) => window.addEventListener(type, fn),
+  getPage: () => page,
+  getContext: () => ({ panelOpen: Boolean(songUi.panel), hasPicks: Boolean(onboarding?.picks?.length), editingPlaylist: Boolean(playlistDraft?.id) }),
+  run: action => handle(action, action === 'playlist-open' ? playlistDraft?.id : undefined).catch(err => {
+    busy = false;
+    render();
+    toast(err?.message || '작업을 마치지 못했어요. 다시 시도해 주세요.');
+  }),
 });
 
 /** Asks the server to wake up; the notice appears only if it is slow to answer. */
@@ -165,6 +179,7 @@ function navigate(target) {
   if (target === 'song-detail') songUi = { ...defaultSongUi(), lyricsStyle };
   if (target === 'learn') learnColumnId = null;
   render(true);
+  backTrap.sync();
   // The columns start the first time 알아두기 is opened: column 1 that day, the next one each day after.
   if (target === 'learn' && !state.settings.learnStartDay) persist({ ...state, settings: { ...state.settings, learnStartDay: localDay() } });
   if (target === 'song-detail') openSongDetail();
@@ -784,6 +799,7 @@ async function initialize() {
   }
   await checkInvite();
   render();
+  backTrap.sync();
 }
 
 /** The invite link's code is kept on this phone; a friend with a code never waits for the server here. */
