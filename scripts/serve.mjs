@@ -9,6 +9,7 @@ import { createSongSearch } from './song-search.mjs';
 import { createLrclibClient } from './lrclib.mjs';
 import { createYoutubeClient } from './youtube.mjs';
 import { createAccess } from './access.mjs';
+import { createVideoCache } from './video-cache.mjs';
 
 // The OpenAI key lives only in .env on this machine; without it the app runs with AI recommendations off.
 try { process.loadEnvFile(fileURLToPath(new URL('../.env', import.meta.url))); }
@@ -28,7 +29,8 @@ const { lookupRange, recommend, searchSongs, practiceFeedback } = createServices
 const findSections = createLrclibClient({ queue: createQueue() });
 // Video search needs the YouTube Data API key in .env; without it the song screen offers pasting a link only.
 const youtubeKey = process.env.YOUTUBE_API_KEY;
-const findVideos = youtubeKey ? createYoutubeClient({ apiKey: youtubeKey, queue: createQueue({ minIntervalMs: 250 }) }) : null;
+// Found videos are kept for a week in memory, so a song many friends open is searched once.
+const findVideos = youtubeKey ? createVideoCache({ find: createYoutubeClient({ apiKey: youtubeKey, queue: createQueue({ minIntervalMs: 250 }) }) }) : null;
 
 // Who may use the API on a shared server. Without INVITE_CODES (this PC) nothing is checked.
 // Codes use the same characters an invite link can carry (#invite=CODE).
