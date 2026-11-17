@@ -142,3 +142,8 @@ test('final #16: the consent copy names the lowest note it also sends', () => {
 test('consent v3 says search terms go to TJ', () => {
   assert.match(aiConsentView({ state: defaultState(), selectedPlaylistId: 'p' }), /TJ미디어/);
 });
+
+test('the consent screen says what the server itself receives', () => {
+  const html = aiConsentView({ state: defaultState(), selectedPlaylistId: 'p' });
+  assert.match(html, /이 앱의 서버는 하루 사용량을 세려고 기기마다 무작위 번호 하나를 받아요\. 이름이나 연락처와 이어지지 않아요\./);
+});

@@ -138,3 +138,8 @@ test('backing up is out in the open on the history page, not folded away', () =>
   assert.match(html, /id="backup-file"/);
   assert.ok(html.indexOf('모든 기록 삭제') > foldStart, 'deleting stays folded away');
 });
+
+test('the history page says what the server itself receives', () => {
+  const html = renderView({ page: 'history', state: defaultState(), session: null, busy: false, demo: false });
+  assert.match(html, /이 앱의 서버는 하루 사용량을 세려고 기기마다 무작위 번호 하나를 받아요\. 이름이나 연락처와 이어지지 않아요\./);
+});

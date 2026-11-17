@@ -1,6 +1,6 @@
 # SING 시스템 구조
 
-처음 작성: 2026-10-13, 갱신: 2026-11-16. 현재는 **모바일 웹 프로토타입**이며, 아래의 현재 구조와 확장 구조를 구분한다.
+처음 작성: 2026-10-13, 갱신: 2026-11-17. 현재는 **모바일 웹 프로토타입**이며, 아래의 현재 구조와 확장 구조를 구분한다.
 
 ## 현재 구조
 
@@ -48,6 +48,15 @@ flowchart TD
 | 노래 화면 | 원곡(음원 트랙, 없으면 MV)·금영 노래방 영상 재생(플레이어를 지운 채 다시 그리지 않음), 자동 구간과 흐름 막대, 영상별 시작 맞추기, 구간 메모, 영상 바꾸기·링크 붙여넣기 | `src/song-media.js`, `src/song-media-views.js`, `src/song-player.js`, `src/sections.js`, `scripts/youtube.mjs`, `scripts/lrclib.mjs`, `scripts/title-match.mjs` |
 | 저장 | 상태/원음 저장, 백업 검증과 복원 | `src/storage.js` |
 | 개발 서버 | 허용된 정적 파일 제공과 API 전달(입력 한도, 키는 `.env`) | `scripts/serve.mjs`, `scripts/server.mjs` |
+| 접근 관리 (배포) | 초대 코드, 접속 주소별 요청 간격, 기기별·전체 하루 한도, 날짜별 기기 수(메모리) | `scripts/access.mjs` |
+| 영상 찾기 보관 | 찾은 영상을 일주일 동안 메모리에 두어 같은 곡을 다시 검색하지 않음 | `scripts/video-cache.mjs` |
+| 요청 한 곳 | 모든 API 요청에 기기 번호와 초대 코드를 붙이고, 초대 거절·하루 한도·잠든 서버를 앱에 알림 | `src/api.js` |
+| 휴대폰 환경 | 앱 안 브라우저(카카오톡) 알아보기, 플랫폼, 홈 화면 실행 여부, 뒤로 가기 덫, 홈 카드(설문·홈 화면 추가·백업) | `src/environment.js`, `src/back.js`, `src/nudges.js` |
+| 화면 파일 보관 | 앱 파일을 휴대폰에 두고, 서버가 3초 안에 답하면 새 파일로 바꿈(API는 거치지 않음) | `sw.js`, `manifest.webmanifest` |
+
+### 배포했을 때 (2026-11-17)
+
+같은 Node 서버 하나가 Render 무료 웹 서비스(싱가포르)에서 돈다(`render.yaml`). 모든 `/api/` 요청은 경로를 고르기 전에 `access.check()`를 지난다. 열려 있는 것은 `/api/health`(호스트의 상태 확인)와 `/api/config`(초대가 필요한지, 설문 주소)뿐이다. 초대 코드는 `#invite=` 링크로 들어와 `localStorage`의 `sing.invite`에 저장되고, 요청마다 `X-Sing-Invite` 헤더로 간다. 기기 번호(`crypto.randomUUID()`)는 `sing.device`에 저장되어 `X-Sing-Device`로 간다. 서버에는 디스크가 없어서 한도와 기기 수는 메모리에만 있고 재시작하면 0이 된다. 서비스 워커는 HTTPS에서만 등록한다.
 
 ## 화면 보안 설정 (CSP)
 
