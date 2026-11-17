@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { notesOf, findSpots, SPOT_RULES } from '../src/hard-spots.js';
+import { notesOf, findSpots, lineAt, SPOT_RULES } from '../src/hard-spots.js';
 import { koreanNote } from '../src/notes.js';
 import { sing, rest, glide } from './helpers/frames.mjs';
 
@@ -163,6 +163,16 @@ test('each spot names its section and the lyric line it falls in', () => {
   assert.equal(late.lineId, null, 'more than seven seconds after the line began');
   const [bare] = spotsAfter([{ d: 0.5, midi: 60 }, { d: 0.8, midi: 67 }]);
   assert.deepEqual([bare.section, bare.lineId], ['', null]);
+});
+
+test('lineAt is the spots\' lyric-line rule: the line the time falls in, with words, begun at most 7 s before', () => {
+  const lines = [{ t: 0, text: 'word-a' }, { t: 26, text: 'word-b' }, { t: 29, text: '' }, { t: 31, text: 'word-d' }];
+  assert.equal(lineAt(lines, 27), 1);
+  assert.equal(lineAt(lines, 30), null, 'a line with no words');
+  assert.equal(lineAt(lines, 38), 3);
+  assert.equal(lineAt(lines, 38.5), null, 'more than seven seconds after it began');
+  assert.equal(lineAt(lines, -1), null, 'before the first line');
+  assert.equal(lineAt(null, 5), null);
 });
 
 test('fewer than twenty seconds of voice gives no report', () => {

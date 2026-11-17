@@ -317,6 +317,35 @@ test('karaoke report: the summary\'s second half follows the comfortable top', (
   assert.ok(none.includes('이번에는 크게 올라가거나 높이 올라가는 자리를 찾지 못했어요.') && !none.includes('가장 높게'));
 });
 
+test('karaoke report: with lyric times it asks once whether the first voice is the first line, then adds the lines', () => {
+  const withVoice = extra => karaokeDone({ result: { ...karaokeDone().result, firstVoice: 7 }, ...extra });
+  const ask = karaokeReportOf(karaokePage(withVoice()));
+  assert.ok(ask.includes('여기가 노래의 첫 소절이 맞나요?'));
+  assert.match(ask, /data-action="media-karaoke-first-play"[^>]*>들어 보기/);
+  assert.match(ask, /data-action="media-karaoke-first-yes"[^>]*>맞아요/);
+  assert.match(ask, /data-action="media-karaoke-first-no"[^>]*>아니에요, 시간으로만 볼게요/);
+  assert.ok(!ask.includes('word-'), 'times only until it is confirmed');
+  // Confirmed: the take's 7 s is the first line's 17.6 s, so 72.4 s in the take is 83 s in the song (line word-c).
+  const yes = karaokeReportOf(karaokePage(withVoice({ firstLine: 'yes', lineOffset: -10.6 })));
+  assert.ok(!yes.includes('첫 소절이 맞나요'));
+  assert.ok(yes.includes('1분 12초쯤 · “word-c”'), yes);
+  assert.ok(yes.includes('2분 30초쯤') && !yes.includes('2분 30초쯤 · '), 'a spot past the lines keeps its time only');
+  const escaped = karaokeReportOf(karaokePage(withVoice({ firstLine: 'yes', lineOffset: 72.4 - 31 })));
+  assert.ok(escaped.includes('“&lt;i&gt;word-b&lt;/i&gt;”') && !escaped.includes('<i>'), 'lyric text is escaped');
+  const no = karaokeReportOf(karaokePage(withVoice({ firstLine: 'no' })));
+  assert.ok(!no.includes('첫 소절이 맞나요') && !no.includes('word-'));
+});
+
+test('karaoke report: no first-line question without lyric times, a first voice, spots, or the recording itself', () => {
+  const withVoice = karaokeDone({ result: { ...karaokeDone().result, firstVoice: 7 } });
+  const page = (karaoke, lines, extra = {}) => karaokeReportOf(songMediaBelow(songWith({ mv: audioEntry, sections: twoSections }), ui({ consent: true, karaoke, comfortHigh: 69, karaokeAudio: true, ...extra }), lines));
+  assert.ok(!page(withVoice, null).includes('첫 소절'), 'no lyrics');
+  assert.ok(!page(withVoice, [{ t: 3, text: '' }]).includes('첫 소절'), 'no line with words');
+  assert.ok(!page(karaokeDone(), singLines).includes('첫 소절'), 'no first voice');
+  assert.ok(!page({ ...withVoice, result: { ...withVoice.result, spots: [] } }, singLines).includes('첫 소절'), 'no spots to name');
+  assert.ok(!page(withVoice, singLines, { karaokeAudio: false }).includes('첫 소절'), 'nothing to listen to');
+});
+
 test('karaoke mode: recording in the app is offered only when it is switched on, after the file button', () => {
   assert.ok(!karaokePage(null, { panel: 'karaoke' }).includes('media-karaoke-record'));
   const panel = karaokePage(null, { panel: 'karaoke', recordInApp: true });

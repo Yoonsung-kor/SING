@@ -11,7 +11,7 @@ import { AudioEngine, microphoneError } from './audio.js';
 import { noteName, frequencyToMidi } from './pitch.js';
 import { renderView, pageNotice } from './views.js';
 import { songDetailParts } from './song-views.js';
-import { defaultSongUi, currentVideoId } from './song-media-views.js';
+import { defaultSongUi, currentVideoId, firstLyricLine } from './song-media-views.js';
 import { createSongPlayer } from './song-player.js';
 import { readMedia, validateMedia, expireMedia, mediaNeeds, withSections, withNoTiming, withPasted, withCandidates, withProvisionalOriginal, upgradeOriginal, canSearchOriginal, dropCandidate, nextCandidate, setStart, canSetStart, startOf, toVideoTime, pinVideoTime, addPin, removePin, currentSectionIndex, lyricIndex, parseYoutubeLink, sameSongQuery } from './song-media.js';
 import { createSong, updateSong } from './songs.js';
@@ -375,8 +375,9 @@ function discardKaraokeRecording() {
   recorder?.stop();
 }
 
-/** "내 녹음 듣기": eight seconds of the recording from three seconds before the spot; the video pauses meanwhile. */
-function playKaraokeAt(time) {
+/** "내 녹음 듣기": eight seconds of the recording from three seconds before the spot (the first-line check: five
+ * seconds from half a second before); the video pauses meanwhile. */
+function playKaraokeAt(time, { lead = 3, seconds = 8 } = {}) {
   const samples = karaokeTake?.samples;
   if (!samples || !Number.isFinite(time)) return;
   stopKaraokePlayback();
@@ -385,8 +386,8 @@ function playKaraokeAt(time) {
   const Context = globalThis.AudioContext ?? globalThis.webkitAudioContext;
   if (!Context) return;
   const RATE = 16000;
-  const from = Math.max(0, Math.floor((time - 3) * RATE));
-  const to = Math.min(samples.length, from + 8 * RATE);
+  const from = Math.max(0, Math.floor((time - lead) * RATE));
+  const to = Math.min(samples.length, from + seconds * RATE);
   if (to <= from) return;
   const context = new Context();
   const buffer = context.createBuffer(1, to - from, RATE);
@@ -714,6 +715,17 @@ async function handleMedia(action, id) {
   if (action === 'media-karaoke-record') return RECORD_IN_APP ? startKaraokeRecording() : undefined;
   if (action === 'media-karaoke-record-stop') return finishKaraokeRecording();
   if (action === 'media-karaoke-play') return playKaraokeAt(Number(id));
+  // The first-line check: "맞아요" ties the take's first voice to the song's first lyric line (a number, not the words).
+  if (['media-karaoke-first-play', 'media-karaoke-first-yes', 'media-karaoke-first-no'].includes(action)) {
+    const report = songUi.karaoke;
+    const first = firstLyricLine(songLyrics.get(song.id));
+    const voice = report?.result?.firstVoice;
+    if (report?.status !== 'done' || !Number.isFinite(voice)) return;
+    if (action === 'media-karaoke-first-play') return playKaraokeAt(voice, { lead: 0.5, seconds: 5 });
+    if (action === 'media-karaoke-first-yes' && !first) return;
+    songUi = { ...songUi, karaoke: action === 'media-karaoke-first-yes' ? { ...report, firstLine: 'yes', lineOffset: voice - first.t } : { ...report, firstLine: 'no' } };
+    return render();
+  }
   if (action === 'media-karaoke-high-yes' || action === 'media-karaoke-high-no') {
     const report = songUi.karaoke;
     if (report?.status !== 'done') return;

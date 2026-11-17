@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { sungRange, suggestHigh, analyzeKaraoke } from '../src/karaoke-analysis.js';
+import { sungRange, suggestHigh, analyzeKaraoke, firstVoice } from '../src/karaoke-analysis.js';
 import { makeMelody, renderVoice, karaokeEcho, mixAt, renderBacking } from './helpers/synth-voice.mjs';
 
 const note = (midi, length, drop = 0) => ({ start: 0, end: length, midi, first: midi + drop / 2, middle: midi, last: midi - drop / 2 });
@@ -37,5 +37,21 @@ test('a karaoke take is reported by its long high notes only', () => {
   assert.ok(result.spots.every(spot => spot.section === '' && spot.lineId === null));
   assert.ok(Number.isInteger(result.range.topHeld));
   assert.equal(progress.at(-1), 1);
+  assert.ok(result.firstVoice >= notes[0].t - 0.2 && result.firstVoice <= notes[0].t + 2, `first voice ${result.firstVoice}, first note ${notes[0].t}`);
   assert.equal(analyzeKaraoke(mix.subarray(0, 5 * RATE), { comfortableHighMidi: 66 }).status, 'short');
+});
+
+// Tracker frames every 20 ms for 10 s, voiced (2옥 도) inside the given [from, to) runs.
+const framesWith = runs => Array.from({ length: 500 }, (_, i) => {
+  const songTime = i * 0.02;
+  const voiced = runs.some(([from, to]) => songTime >= from - 1e-6 && songTime < to - 1e-6);
+  return { songTime, midi: voiced ? 60 : null, strength: voiced ? 1 : 0 };
+});
+const near = (value, expected) => Number.isFinite(value) && Math.abs(value - expected) < 1e-6;
+
+test('the first voice is the first sound held 0.3 s; a shorter noise before it is skipped', () => {
+  assert.ok(near(firstVoice(framesWith([[1.0, 1.1], [3.0, 5.0]])), 3.0));
+  assert.ok(near(firstVoice(framesWith([[2.0, 2.3]])), 2.0), 'exactly 0.3 s counts');
+  assert.equal(firstVoice(framesWith([[1.0, 1.2], [4.0, 4.1]])), null);
+  assert.equal(firstVoice([]), null);
 });

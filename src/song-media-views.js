@@ -8,6 +8,10 @@ import {
 import { exercisesFor } from './exercises.js';
 import { spotTime } from './karaoke-file.js';
 import { koreanNote } from './notes.js';
+import { lineAt } from './hard-spots.js';
+
+/** The song's first lyric line with words and a time: what "the first line" of a karaoke take is matched to. */
+export const firstLyricLine = lines => (Array.isArray(lines) ? lines.find(line => line?.text && Number.isFinite(line.t)) ?? null : null);
 
 const e = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const out = (href, text) => `<a class="source-link" href="${e(href)}" target="_blank" rel="noopener noreferrer">${text}</a>`;
@@ -184,11 +188,21 @@ function exerciseBlock(exercise) {
   return `<div class="spot-exercise"><h4>이렇게 연습해 봐요</h4><p><strong>${e(exercise.title)}</strong> ${e(exercise.steps)}</p>${exercise.caution ? `<p class="subtle">${e(exercise.caution)}</p>` : ''}${exercise.columnId ? `<button class="text-button" data-action="spot-column" data-id="${e(exercise.columnId)}">알아두기에서 읽기</button>` : ''}</div>`;
 }
 
-/** The karaoke report: the top long note against the comfortable top, the limits, the long high notes by time, and a suggestion. */
-function karaokeReportBlock(ui) {
+/** The karaoke report: the top long note against the comfortable top, the limits, the long high notes by time, and a suggestion.
+ * With lyric times, it asks once whether the take's first voice is the song's first line; confirmed, each time gets its
+ * line (on screen only; the karaoke backing is assumed to keep the original's tempo, so it is an extra, not the anchor). */
+function karaokeReportBlock(ui, lines) {
   const report = ui.karaoke;
   if (report?.status !== 'done') return '';
-  const { spots = [], range = {}, suggestion = null } = report.result ?? {};
+  const { spots = [], range = {}, suggestion = null, firstVoice = null } = report.result ?? {};
+  const asking = !report.firstLine && spots.length > 0 && Number.isFinite(firstVoice) && firstLyricLine(lines) && ui.karaokeAudio;
+  const firstLine = asking
+    ? '<div class="suggest-card first-line"><p>여기가 노래의 첫 소절이 맞나요?</p><div class="action-row"><button class="button secondary small" data-action="media-karaoke-first-play">들어 보기</button><button class="button small" data-action="media-karaoke-first-yes">맞아요</button><button class="text-button" data-action="media-karaoke-first-no">아니에요, 시간으로만 볼게요</button></div></div>' : '';
+  const lineOf = spot => {
+    if (report.firstLine !== 'yes' || !Number.isFinite(report.lineOffset)) return '';
+    const text = lines?.[lineAt(lines, spot.time - report.lineOffset)]?.text;
+    return text ? ` · “${e(text)}”` : '';
+  };
   const exercises = exercisesFor(spots, report.answers ?? {});
   let summary = '';
   if (Number.isInteger(range.topHeld)) {
@@ -199,7 +213,7 @@ function karaokeReportBlock(ui) {
   const item = spot => {
     const badge = OUTCOME_BADGES[spot.outcome] ? `<span class="spot-badge spot-${spot.outcome}">${OUTCOME_BADGES[spot.outcome]}</span>` : '';
     const play = ui.karaokeAudio ? `<button class="text-button" data-action="media-karaoke-play" data-id="${e(spot.time)}">내 녹음 듣기</button>` : '';
-    return `<li class="spot"><span class="sing-where">${e(spotTime(spot.time))}</span>${badge}<p>${e(report.words?.[spot.id] ?? '')}</p>${exerciseBlock(exercises[spot.id])}${play}</li>`;
+    return `<li class="spot"><span class="sing-where">${e(spotTime(spot.time))}${lineOf(spot)}</span>${badge}<p>${e(report.words?.[spot.id] ?? '')}</p>${exerciseBlock(exercises[spot.id])}${play}</li>`;
   };
   const polishing = report.polish === 'busy' ? '<p class="media-status" role="status">설명을 다듬고 있어요…</p>' : '';
   const polish = !ui.consent && spots.length && report.polish !== 'busy' ? '<button class="text-button" data-action="media-polish" data-id="karaoke">AI로 설명 다듬기</button>' : '';
@@ -207,7 +221,7 @@ function karaokeReportBlock(ui) {
   const name = Number.isInteger(suggestion) ? e(koreanNote(suggestion)) : '';
   const suggest = name && !report.suggestionDone
     ? `<div class="suggest-card"><p>이 노래에서 ${name}까지 길게 지켰어요. 편한 최고음을 여기(${name})로 바꿀까요?</p><div class="action-row"><button class="button small" data-action="media-karaoke-high-yes">바꾸기</button><button class="text-button" data-action="media-karaoke-high-no">그대로 두기</button></div></div>` : '';
-  return `<section class="surface practice-feedback karaoke-report"><h2>노래방 녹음 리포트</h2>${report.notice === 'left' ? LEFT_NOTICE : ''}${summary}<p class="subtle">노래방 녹음에서는 길게 낸 높은 음을 중심으로 봐요. 반주가 섞여 있어서 짧은 음은 정확하지 않을 수 있어요.</p>${polishing}${polish}<h3>이 노래의 어려운 자리</h3>${list}${suggest}</section>`;
+  return `<section class="surface practice-feedback karaoke-report"><h2>노래방 녹음 리포트</h2>${report.notice === 'left' ? LEFT_NOTICE : ''}${summary}<p class="subtle">노래방 녹음에서는 길게 낸 높은 음을 중심으로 봐요. 반주가 섞여 있어서 짧은 음은 정확하지 않을 수 있어요.</p>${polishing}${polish}<h3>이 노래의 어려운 자리</h3>${firstLine}${list}${suggest}</section>`;
 }
 
 /** The sing-along report, once there is one. */
@@ -220,5 +234,5 @@ export function songMediaBelow(song, ui, lines = null) {
   const media = readMedia(song);
   const videoId = currentVideoId(song, ui.side);
   const tj = `<a class="media-tj" href="${e(tjVideoSearchUrl(song.title, song.artist))}" target="_blank" rel="noopener noreferrer"><strong>TJ 노래방 영상 보기 ↗</strong><span>유튜브에서 열려요${song.tjNumber ? ` · TJ ${e(song.tjNumber)}` : ''}</span></a>`;
-  return `<section class="song-media">${videoStatus(song, media, ui, videoId)}${changePanel(song, media, ui)}${lyricsBlock(media, ui, lines)}${sectionsBlock(media, ui, videoId)}${singBlock(media, ui, videoId)}${karaokeBlock(ui)}${tj}</section>${singReportBlock(ui, lines)}${karaokeReportBlock(ui)}${pinsBlock(media, ui, videoId)}`;
+  return `<section class="song-media">${videoStatus(song, media, ui, videoId)}${changePanel(song, media, ui)}${lyricsBlock(media, ui, lines)}${sectionsBlock(media, ui, videoId)}${singBlock(media, ui, videoId)}${karaokeBlock(ui)}${tj}</section>${singReportBlock(ui, lines)}${karaokeReportBlock(ui, lines)}${pinsBlock(media, ui, videoId)}`;
 }

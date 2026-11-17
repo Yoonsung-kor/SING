@@ -106,8 +106,8 @@ function sectionAt(sections, time) {
   return label;
 }
 
-/** The lyric line the time falls in, if it has words and began at most 7 s before. */
-function lineAt(lines, time) {
+/** The lyric line the time falls in, if it has words and began at most 7 s before (also the karaoke report's rule). */
+export function lineAt(lines, time) {
   const list = Array.isArray(lines) ? lines : [];
   for (let i = list.length - 1; i >= 0; i--) {
     if (list[i].t > time + EPS) continue;
