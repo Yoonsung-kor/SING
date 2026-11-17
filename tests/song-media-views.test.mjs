@@ -173,16 +173,18 @@ test('without consent a playing video still says sections and lyrics need consen
 const reportOf = html => html.match(/<section class="surface practice-feedback sing-report">[\s\S]*?<\/section>/)?.[0] ?? '';
 const singLines = [{ t: 17.6, text: 'word-a' }, { t: 30.9, text: '<i>word-b</i>' }, { t: 81.1, text: 'word-c' }];
 
-test('sing-along: offered only with a video, sections and lyrics; the panel asks for earphones', () => {
+test('sing-along: offered whenever a video is shown (the report needs no lyrics); the panel asks for earphones', () => {
   const ready = songWith({ mv: audioEntry, sections: twoSections });
   assert.ok(songMediaBelow(ready, ui(), singLines).includes('data-action="media-sing-open"'));
-  assert.ok(!songMediaBelow(ready, ui(), null).includes('media-sing-open'));
+  assert.ok(songMediaBelow(ready, ui(), null).includes('media-sing-open'), 'no lyrics loaded (no consent)');
+  assert.ok(songMediaBelow(songWith({ mv: audioEntry }), ui(), null).includes('media-sing-open'), 'no sections either');
   assert.ok(!songMediaBelow(songWith({ sections: twoSections }), ui(), singLines).includes('media-sing-open'));
   const panel = songMediaBelow(ready, ui({ panel: 'sing' }), singLines);
   assert.ok(panel.includes('이어폰을 끼고 불러 주세요. 스피커 소리가 마이크로 들어가면 측정이 틀려져요.'));
   assert.match(panel, /data-action="media-sing-start"[^>]*>부르기 시작/);
   const singing = songMediaBelow(ready, ui({ panel: 'sing', singing: true }), singLines);
-  assert.match(singing, /data-action="media-sing-stop"[^>]*>멈추고 피드백 받기/);
+  assert.match(singing, /data-action="media-sing-stop"[^>]*>멈추고 리포트 받기/);
+  assert.match(songMediaBelow(ready, ui(), singLines), /data-action="media-sing-open"[^>]*>따라 부르고 리포트 받기/);
   assert.ok(!singing.includes('media-sing-start'));
 });
 
@@ -199,7 +201,9 @@ test('sing-along report: section, the line (escaped) or its time, a jump button,
   const noLyrics = reportOf(songMediaBelow(ready, ui({ singReport: report }), null));
   assert.ok(noLyrics.includes('0:30') && !noLyrics.includes('word-b'));
   assert.ok(songMediaBelow(ready, ui({ singReport: { status: 'busy' } }), singLines).includes('피드백을 만들고 있어요…'));
-  assert.ok(songMediaBelow(ready, ui({ singReport: { status: 'short' } }), singLines).includes('조금 더 불러 주세요. 가사 4줄 이상 부르면 피드백을 드릴게요.'));
+  const short = songMediaBelow(ready, ui({ singReport: { status: 'short' } }), singLines);
+  assert.ok(short.includes('조금 더 불러 주세요. 20초 넘게 소리가 잡혀야 리포트를 만들 수 있어요.'));
+  assert.ok(short.includes('소리가 작으면 잘 안 잡혀요. 평소 크기로 불러 주세요.'));
   assert.ok(songMediaBelow(ready, ui({ singReport: { status: 'failed' } }), singLines).includes('지금은 피드백을 만들지 못했어요. 잠시 후 다시 시도해 주세요.'));
   assert.ok(!page.includes('style="'));
 });
@@ -225,4 +229,49 @@ test('sing-along report: AI switched off says so; odd values from the server do 
   const report = { status: 'done', feedback: { good: [{ lineId: '1"><b', text: '좋아요' }], improve: [], practice: [{ text: '허밍해요', link: 'evil' }] }, starts: {} };
   const html = reportOf(songMediaBelow(ready, ui({ singReport: report }), singLines));
   assert.ok(html.includes('허밍해요') && !html.includes('"><b'));
+});
+
+// --- The report of demanding spots ---
+const spotOf = (id, kind, outcome, extra = {}) => ({ id, kind, outcome, time: 40, end: 41, lineId: null, section: '', from: kind === 'leap' ? '1옥 도' : null, to: '2옥 라', over: null, repeated: false, ...extra });
+const spotsReport = (spots, extra = {}) => ({ status: 'spots', result: { status: 'ok', voicedSeconds: 60, spots }, words: Object.fromEntries(spots.map(spot => [spot.id, `${spot.id} 문장`])), polish: 'idle', answers: {}, ...extra });
+const spotsPage = (report, extra = {}) => reportOf(songMediaBelow(songWith({ mv: audioEntry, sections: twoSections }), ui({ consent: true, singReport: report, ...extra }), singLines));
+
+test('spots report: each spot says where, how it went, what to try, and can be heard again', () => {
+  const html = spotsPage(spotsReport([
+    spotOf('s1', 'leap', 'sag', { time: 17.6, lineId: 0, section: '노래 시작 · 1절' }),
+    spotOf('s2', 'high-hold', 'kept', { time: 50 }),
+    spotOf('s3', 'leap', null, { time: 81.1, lineId: 2 }),
+  ]));
+  for (const text of ['따라 부르기 리포트', '이 노래의 어려운 자리', 's1 문장', 's2 문장', 's3 문장', '음이 내려왔어요', '잘 넘겼어요', '노래 시작 · 1절', 'word-a', 'word-c', '빨대로 미끄러지듯 오르내리기', '끊지 말고 미끄러지듯 넘어가기', '알아두기에서 읽기']) assert.ok(html.includes(text), text);
+  assert.equal(count(html, '이렇게 연습해 봐요'), 2, 'no exercise for the spot that went well');
+  assert.ok(!html.includes('립트릴'));
+  assert.equal(count(html, 'data-action="media-spot"'), 3);
+  assert.match(html, /data-action="media-spot" data-id="17.6"[^>]*>이 자리 다시 듣기/);
+  assert.match(html, /data-action="spot-column" data-id="straw"/);
+  assert.ok(html.includes('0:50'), 'a spot with no lyric line shows its time');
+  assert.ok(!html.includes('style="'));
+});
+
+test('spots report: a break is asked about first, and only a yes brings its exercise', () => {
+  const ask = [spotOf('s1', 'high-hold', 'ask')];
+  const before = spotsPage(spotsReport(ask));
+  assert.ok(before.includes('확인해 볼 자리'));
+  assert.match(before, /data-action="media-ask-yes" data-id="s1"[^>]*>네, 그랬어요/);
+  assert.match(before, /data-action="media-ask-no" data-id="s1"[^>]*>아니요/);
+  assert.ok(!before.includes('이렇게 연습해 봐요'));
+  const yes = spotsPage(spotsReport(ask, { answers: { s1: 'yes' } }));
+  assert.ok(yes.includes('이렇게 연습해 봐요') && !yes.includes('media-ask-yes'));
+  const no = spotsPage(spotsReport(ask, { answers: { s1: 'no' } }));
+  assert.ok(!no.includes('s1 문장'));
+});
+
+test('spots report: all went well, nothing found, and the AI touches', () => {
+  assert.ok(spotsPage(spotsReport([spotOf('s1', 'high-hold', 'kept'), spotOf('s2', 'leap', 'kept', { time: 60 })])).includes('어려운 자리를 모두 잘 넘겼어요.'));
+  assert.ok(!spotsPage(spotsReport([spotOf('s1', 'high-hold', 'kept'), spotOf('s2', 'leap', 'sag', { time: 60 })])).includes('모두 잘 넘겼어요'));
+  assert.ok(spotsPage(spotsReport([])).includes('이번에는 크게 올라가거나 높이 올라가는 자리를 찾지 못했어요.'));
+  assert.ok(spotsPage(spotsReport([spotOf('s1', 'leap', 'sag')], { polish: 'busy' })).includes('설명을 다듬고 있어요…'));
+  const noConsent = spotsPage(spotsReport([spotOf('s1', 'leap', 'sag')]), { consent: false });
+  assert.match(noConsent, /data-action="media-polish"[^>]*>AI로 설명 다듬기/);
+  assert.ok(!spotsPage(spotsReport([spotOf('s1', 'leap', 'sag')])).includes('media-polish'), 'with consent the AI is asked by itself');
+  assert.ok(!spotsPage(spotsReport([]), { consent: false }).includes('media-polish'), 'nothing to polish');
 });

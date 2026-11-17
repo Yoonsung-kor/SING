@@ -18,7 +18,7 @@ function fakes() {
   return { lease, FakeContext, closed: () => closed };
 }
 
-test('sing-along: one frame per 50 ms with the song time and the sung note; paused moments are skipped', async () => {
+test('sing-along: one frame per 25 ms with the song time and the sung note; paused moments are skipped', async () => {
   mock.timers.enable({ apis: ['setInterval'] });
   try {
     const { lease, FakeContext, closed } = fakes();
@@ -26,11 +26,11 @@ test('sing-along: one frame per 50 ms with the song time and the sung note; paus
     let songTime = 10;
     assert.equal(await singer.start(() => songTime), true);
     assert.equal(singer.active, true);
-    mock.timers.tick(100);
+    mock.timers.tick(50);
     songTime = null;
-    mock.timers.tick(50);
+    mock.timers.tick(25);
     songTime = 10.2;
-    mock.timers.tick(50);
+    mock.timers.tick(25);
     const frames = singer.stop();
     assert.equal(frames.length, 3);
     assert.deepEqual(frames.map(f => f.time), [10, 10, 10.2]);

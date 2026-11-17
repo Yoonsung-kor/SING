@@ -1,5 +1,7 @@
 import { hummingPayload, lineMetrics, sungLines, chorusDiffs, songPayload, songFrames, cleanFeedback } from './practice-feedback.js';
 import { createSingAlong } from './sing-along.js';
+import { findSpots } from './hard-spots.js';
+import { spotsPayload, defaultSentence, cleanSpotWords } from './spot-words.js';
 import { createLesson, recordAttempt, nextTarget, finishLesson, summarizeLesson, recommendedNote, localDay, addActivity, needsDailyCheck } from './lesson.js';
 import { defaultState, openStore } from './storage.js';
 import { AudioEngine, microphoneError } from './audio.js';
@@ -99,6 +101,8 @@ let feedbackFor = null;
 let feedbackFailed = null;
 // Bumped by each sing-along take, so an answer for an older take is dropped.
 let singRequest = 0;
+// A report whose words wait for consent ("AI로 설명 다듬기"): kept through the consent screen, then shown again.
+let reportBeforeConsent = null;
 let pendingPickList = null;
 // Pages that own the shared pick state: onboarding and '곡 찾아 담기'.
 const isPickerPage = target => target.startsWith('voice-') || target === 'song-pick';
@@ -190,7 +194,8 @@ function navigate(target) {
   feedbackFailed = null;
   error = '';
   page = target;
-  if (target === 'song-detail') songUi = { ...defaultSongUi(), lyricsStyle };
+  if (target === 'song-detail') songUi = { ...defaultSongUi(), lyricsStyle, singReport: reportBeforeConsent?.songId === selectedSongId ? reportBeforeConsent.report : null };
+  if (target !== 'ai-consent') reportBeforeConsent = null;
   if (target === 'learn') learnColumnId = null;
   render(true);
   backTrap.sync();
@@ -215,7 +220,8 @@ function dropSinging() {
   songUi = { ...songUi, singing: false };
 }
 
-/** Sing-along stopped: per-line numbers (no lyric text, no recording) go to the AI; the card stays on this screen only. */
+/** Sing-along stopped: the app finds the demanding spots and shows the report at once, in its own words.
+ * With consent the AI then rephrases them (spot kinds and note names only; no recording, no lyrics, no times). */
 async function finishSinging() {
   const song = selectedSong();
   if (!singAlong || !song) return;
@@ -223,18 +229,34 @@ async function finishSinging() {
   // Frames carry the video's time; the start difference is read now, so aligning during the take still counts.
   const frames = songFrames(singAlong.stop(), startOf(media, singVideoId));
   singAlong = singVideoId = null;
-  const items = media.sections?.items ?? [];
   const comfortableHighMidi = state.settings.voice?.comfortableHighMidi ?? null;
-  const stats = lineMetrics(frames, songLyrics.get(song.id) ?? [], { comfortableHighMidi });
-  if (sungLines(stats) < 4) { songUi = { ...songUi, singing: false, singReport: { status: 'short' } }; return render(); }
-  const payload = songPayload(song, items, stats, chorusDiffs(stats, items), comfortableHighMidi);
-  songUi = { ...songUi, singing: false, panel: null, singReport: { status: 'busy' } };
+  const result = findSpots(frames, { comfortableHighMidi, sections: media.sections?.items ?? [], lines: songLyrics.get(song.id) ?? [] });
+  singRequest++;
+  if (result.status === 'short') { songUi = { ...songUi, singing: false, singReport: { status: 'short' } }; return render(); }
+  const payload = spotsPayload(song, result, comfortableHighMidi);
+  const words = Object.fromEntries(payload.items.map(item => [item.id, defaultSentence(item)]));
+  songUi = { ...songUi, singing: false, panel: null, singReport: { status: 'spots', result, words, polish: 'idle', answers: {}, payload } };
   render();
-  const token = ++singRequest;
-  const result = await askFeedback(payload, { kind: 'song', lineIds: stats.map(line => line.id) });
-  if (token !== singRequest || !onSongScreen(song.id)) return;
-  const starts = Object.fromEntries(stats.map(line => [line.id, line.start]));
-  songUi = { ...songUi, singReport: result.feedback ? { status: 'done', feedback: result.feedback, starts } : { status: result.error } };
+  if (payload.items.length && hasCurrentConsent(state.settings)) await polishWords();
+}
+
+/** Asks the AI to rephrase the report; the answer is checked here again. Any failure keeps the app's own sentences. */
+async function polishWords() {
+  const song = selectedSong();
+  const report = songUi.singReport;
+  if (!song || report?.status !== 'spots' || report.polish === 'busy' || !report.payload?.items.length) return;
+  const token = singRequest;
+  songUi = { ...songUi, singReport: { ...report, polish: 'busy' } };
+  render();
+  let words = null;
+  try {
+    const response = await api.request('/api/practice-feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(report.payload) });
+    const body = response.ok ? await response.json().catch(() => null) : null;
+    if (Array.isArray(body?.words)) words = cleanSpotWords({ items: body.words }, report.payload);
+  } catch { /* offline or refused: the app's own sentences stay */ }
+  if (token !== singRequest || !onSongScreen(song.id) || songUi.singReport?.status !== 'spots') return;
+  const current = songUi.singReport;
+  songUi = { ...songUi, singReport: { ...current, polish: words ? 'done' : 'off', words: words ? Object.fromEntries(words.map(entry => [entry.id, entry.text])) : current.words } };
   render();
 }
 
@@ -508,12 +530,34 @@ async function handleMedia(action, id) {
     return showCurrentVideo();
   }
   if (action === 'media-consent') { consentReturn = 'song-detail'; return navigate('ai-consent'); }
+  // Measuring and the report stay on the phone, so singing along needs no consent; only polishing the words does.
   if (action === 'media-sing-open') {
-    if (!hasCurrentConsent(state.settings)) { consentReturn = 'song-detail'; return navigate('ai-consent'); }
-    songUi = { ...songUi, panel: 'sing', pasteError: '', pinError: '', singReport: songUi.singReport?.status === 'done' ? songUi.singReport : null };
+    songUi = { ...songUi, panel: 'sing', pasteError: '', pinError: '', singReport: ['done', 'spots'].includes(songUi.singReport?.status) ? songUi.singReport : null };
     return render();
   }
   if (action === 'media-sing-stop') return finishSinging();
+  if (action === 'media-spot') {
+    // Three seconds before the spot, on whichever video is shown (song time to that video's time).
+    const t = Number(id);
+    if (videoId && songPlayer.currentTime() === null) return toast('영상이 준비되면 다시 눌러 주세요.');
+    if (Number.isFinite(t) && videoId) songPlayer.seekTo(toVideoTime(media, videoId, Math.max(0, t - 3)));
+    return;
+  }
+  if (action === 'media-ask-yes' || action === 'media-ask-no') {
+    const report = songUi.singReport;
+    if (report?.status !== 'spots' || !report.result.spots.some(spot => spot.id === id)) return;
+    songUi = { ...songUi, singReport: { ...report, answers: { ...report.answers, [id]: action === 'media-ask-yes' ? 'yes' : 'no' } } };
+    return render();
+  }
+  if (action === 'media-polish') {
+    if (!hasCurrentConsent(state.settings)) {
+      // The report waits through the consent screen and comes back with the song.
+      reportBeforeConsent = { songId: song.id, report: songUi.singReport };
+      consentReturn = 'song-detail';
+      return navigate('ai-consent');
+    }
+    return polishWords();
+  }
   if (action === 'media-sing-start') {
     if (!videoId || singAlong) return;
     if (songPlayer.currentTime() === null) return toast('영상이 준비되면 다시 눌러 주세요.');
@@ -551,7 +595,7 @@ async function handleMedia(action, id) {
     if (!canSetStart({ videoId, shownId: songPlayer.currentVideoId(), time: t, playerState: songPlayer.playbackState() })) return toast('영상을 먼저 틀어 주세요.');
     return saveMedia(song.id, current => setStart(current, videoId, t));
   }
-  if (['media-section', 'media-seek', 'media-pin-go', 'media-lyric'].includes(action) && videoId && songPlayer.currentTime() === null) return toast('영상이 준비되면 다시 눌러 주세요.');
+  if (['media-section', 'media-seek', 'media-pin-go', 'media-lyric', 'media-spot'].includes(action) && videoId && songPlayer.currentTime() === null) return toast('영상이 준비되면 다시 눌러 주세요.');
   if (action === 'media-section') {
     const item = media.sections?.items?.[Number(id)];
     if (item && videoId) songPlayer.seekTo(toVideoTime(media, videoId, item.t));
@@ -1506,7 +1550,13 @@ async function handle(action, id) {
     if (consentReturn === 'result' || consentReturn === 'detail') { navigate(consentReturn); return requestHummingFeedback(); }
     if (consentReturn === 'song-form') { navigate('song-form'); return lookupSongRange(); }
     if (consentReturn === 'song-pick') return beginPicker(pendingPickList);
-    if (consentReturn === 'song-detail') return navigate('song-detail');
+    if (consentReturn === 'song-detail') {
+      // Back to the song; a report that was waiting for consent now gets its words polished.
+      const polish = reportBeforeConsent?.songId === selectedSongId;
+      navigate('song-detail');
+      if (polish) polishWords();
+      return;
+    }
     navigate('playlist');
     return requestRecommendations(selectedPlaylistId);
   }
@@ -1562,6 +1612,8 @@ async function handle(action, id) {
   if (action === 'save-and-learn') return saveSession('learn');
   if (action === 'learn-complete') return recordActivity('learn');
   if (action === 'learn-column') { learnColumnId = id; return render(true); }
+  // The report's exercise links to the column it was shortened from.
+  if (action === 'spot-column') { navigate('learn'); learnColumnId = id; return render(true); }
   if (action === 'rest-complete') return recordActivity('rest');
   if (action === 'detail') { session = state.sessions.find(s => s.id === id); if (session) navigate('detail'); return; }
   if (action === 'feedback-humming') return requestHummingFeedback();
