@@ -19,7 +19,8 @@ import { searchResultsHtml, voicePicksHtml, pickActionsHtml } from './onboarding
 import { RANGE_BOUNDS, candidateShift } from './vocal-range.js';
 import { createApi, inviteFromHash } from './api.js';
 import { createBackTrap } from './back.js';
-import { inAppBrowser, externalUrl } from './environment.js';
+import { inAppBrowser, externalUrl, platform, isStandalone } from './environment.js';
+import { nextNudge, usageSummary, feedbackLink } from './nudges.js';
 
 const root = document.querySelector('#app');
 const audio = new AudioEngine();
@@ -31,6 +32,12 @@ let appConfig = { inviteRequired: false, feedbackUrl: null };
 let inviteError = '';
 // Inside KakaoTalk's own browser: the link that asks KakaoTalk to open the page in the default browser.
 let outsideUrl = null;
+// Adding to the home screen: Android Chrome offers its own prompt (kept until the friend taps); elsewhere we explain.
+let installPrompt = null;
+let installHelp = null;
+const INSTALL_HELP = { ios: '아래 공유 버튼을 누르고 ‘홈 화면에 추가’를 골라 주세요.', other: '브라우저 메뉴(⋮)에서 ‘홈 화면에 추가’를 골라 주세요.' };
+window.addEventListener('beforeinstallprompt', event => { event.preventDefault(); installPrompt = event; });
+window.addEventListener('appinstalled', () => { installPrompt = null; markNow('installNudgeAt'); });
 const WAKE_AGAIN_MS = 10 * 60 * 1000;
 const LIMIT_MESSAGES = { 'daily-limit': '오늘 쓸 수 있는 횟수를 다 썼어요. 내일 다시 쓸 수 있어요.', 'slow-down': '잠시 후 다시 시도해 주세요.' };
 const api = createApi({
@@ -134,7 +141,11 @@ function toast(message) {
 }
 
 function render(focus = false) {
-  const v = { page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, recLoading, recError, onboarding, loading: !initialized && !demo, songUi: { ...songUi, consent: hasCurrentConsent(state.settings) }, lyricsLines: songLyrics.get(selectedSongId) ?? null, feedbackBusy: Boolean(session) && feedbackFor === session.id, feedbackError: feedbackFailed && feedbackFailed.id === session?.id ? feedbackFailed.error : false, learnColumnId, serverWaking, inviteError, outsideUrl };
+  // Home shows one reminder (survey, home screen, backup), never in the demo.
+  const nudge = initialized && !demo && page === 'home'
+    ? nextNudge(state, { today: localDay(), now: Date.now(), standalone: isStandalone({ matchMedia: query => window.matchMedia(query), standalone: navigator.standalone }), hasFeedbackUrl: Boolean(appConfig.feedbackUrl) })
+    : null;
+  const v = { page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, recLoading, recError, onboarding, loading: !initialized && !demo, songUi: { ...songUi, consent: hasCurrentConsent(state.settings) }, lyricsLines: songLyrics.get(selectedSongId) ?? null, feedbackBusy: Boolean(session) && feedbackFor === session.id, feedbackError: feedbackFailed && feedbackFailed.id === session?.id ? feedbackFailed.error : false, learnColumnId, serverWaking, inviteError, outsideUrl, nudge, feedbackUrl: appConfig.feedbackUrl, installHelp };
   // While a song's player is mounted, only the parts around it are redrawn: moving an iframe would reload the video.
   if (!focus && page === 'song-detail' && playerFor === selectedSongId && document.querySelector('#song-player-slot')) {
     const parts = songDetailParts(v);
@@ -795,6 +806,10 @@ async function initialize() {
     if (demo) { liveState = loadedState; liveStorageError = ''; }
     else { state = loadedState; storageError = ''; }
     initialized = true;
+    // The days the app was opened (the last 60) decide when to ask for feedback.
+    const today = localDay();
+    const days = state.settings.openDays ?? [];
+    if (!demo && !days.includes(today)) await persist({ ...state, settings: { ...state.settings, openDays: [...days, today].slice(-60) } });
   } catch {
     const message = '기록 저장소를 열지 못했어요. 브라우저의 사이트 저장 공간을 허용하고 새로고침해 주세요. 체험 모드는 사용할 수 있어요.';
     if (demo) liveStorageError = message;
@@ -830,7 +845,8 @@ async function checkInvite() {
     history.replaceState(null, '', location.pathname + location.search);
   }
   if (api.invite.get()) {
-    loadConfig();
+    // The survey link arrives with the config; home is drawn again to show it.
+    loadConfig().then(() => { if (page === 'home') render(); });
     // Counts today's visit; a code the server no longer takes brings the invite screen back (onInvite).
     api.request('/api/hello').catch(() => {});
     return;
@@ -1320,6 +1336,38 @@ async function exportBackup() {
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   toast('백업 파일에 녹음이 포함될 수 있어요. 개인 보관해 주세요.');
+  await markNow('lastBackupAt');
+}
+
+/** Records "now" in one of the reminder settings and redraws (home's card changes). */
+async function markNow(key) {
+  if (!initialized || demo) return;
+  await persist({ ...state, settings: { ...state.settings, [key]: new Date().toISOString() } });
+  render();
+}
+
+async function openFeedback() {
+  const link = feedbackLink(appConfig.feedbackUrl, usageSummary(demo && liveState ? liveState : state));
+  if (!link) return;
+  // Opened before anything is awaited, so the browser counts it as the tap's own window.
+  window.open(link, '_blank', 'noopener');
+  await markNow('feedbackAt');
+}
+
+async function addToHomeScreen() {
+  const prompt = installPrompt;
+  installPrompt = null;
+  if (prompt) {
+    try {
+      // Chrome's own dialog; it can be refused (no tap behind it, already shown), then the words below explain instead.
+      await prompt.prompt();
+      const choice = await prompt.userChoice;
+      if (choice?.outcome === 'accepted') return markNow('installNudgeAt');
+      return render();
+    } catch { /* fall through to the explanation */ }
+  }
+  installHelp = platform(navigator.userAgent, { maxTouchPoints: navigator.maxTouchPoints }) === 'ios' ? INSTALL_HELP.ios : INSTALL_HELP.other;
+  render();
 }
 
 async function importBackup(file) {
@@ -1520,6 +1568,9 @@ async function handle(action, id) {
   if (action === 'delete-session') return deleteSession(id);
   if (action === 'play-saved') return playSaved(id);
   if (action === 'export') return exportBackup();
+  if (action === 'nudge-later' && ['feedback', 'install', 'backup'].includes(id)) return markNow(`${id}NudgeAt`);
+  if (action === 'feedback-open') return openFeedback();
+  if (action === 'install') return addToHomeScreen();
   if (action === 'import') return document.querySelector('#backup-file').click();
   if (action === 'clear') {
     if (!confirm('이 기기의 모든 연습 기록, 녹음, 곡과 플레이리스트를 지울까요? 이 작업은 되돌릴 수 없어요.')) return;

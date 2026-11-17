@@ -102,3 +102,39 @@ test('the invite screen asks for the code and shows no menu', () => {
   assert.doesNotMatch(html, /role="alert"/);
   assert.match(gate({ page: 'invite', inviteError: '초대 코드가 맞지 않아요. 다시 확인해 주세요.' }), /role="alert"[^>]*>초대 코드가 맞지 않아요\. 다시 확인해 주세요\.</);
 });
+
+const homeWith = extra => renderView({ page: 'home', state: defaultState(), session: null, busy: false, demo: false, ...extra });
+
+test('home shows at most one reminder card, each with a way to put it off', () => {
+  const install = homeWith({ nudge: 'install' });
+  assert.match(install, /홈 화면에 추가해 두세요/);
+  assert.match(install, /앱처럼 바로 열리고, 기록이 더 오래 남아요\./);
+  assert.match(install, /data-action="install"[^>]*>홈 화면에 추가</);
+  assert.match(install, /data-action="nudge-later" data-id="install"[^>]*>나중에</);
+  assert.match(homeWith({ nudge: 'install', installHelp: '아래 공유 버튼을 누르고 ‘홈 화면에 추가’를 골라 주세요.' }), /아래 공유 버튼을 누르고 ‘홈 화면에 추가’를 골라 주세요\./);
+  const backup = homeWith({ nudge: 'backup' });
+  assert.match(backup, /기록은 이 폰에만 있어요\. 백업 파일을 받아 두면 폰을 바꿔도 이어서 쓸 수 있어요\./);
+  assert.match(backup, /data-action="export"[^>]*>백업 내려받기</);
+  assert.match(backup, /data-id="backup"[^>]*>나중에</);
+  const survey = homeWith({ nudge: 'feedback', feedbackUrl: 'https://forms.gle/x' });
+  assert.match(survey, /써 보니 어땠나요\? 1분이면 돼요\./);
+  assert.match(survey, /data-action="feedback-open"[^>]*>의견 남기기</);
+  assert.doesNotMatch(homeWith({}), /나중에/);
+});
+
+test('the feedback link sits at the bottom of home only when there is a survey', () => {
+  assert.match(homeWith({ feedbackUrl: 'https://forms.gle/x' }), /data-action="feedback-open"[^>]*>의견 남기기</);
+  assert.doesNotMatch(homeWith({}), /의견 남기기/);
+});
+
+test('backing up is out in the open on the history page, not folded away', () => {
+  const html = renderView({ page: 'history', state: defaultState(), session: null, busy: false, demo: false });
+  const backupAt = html.indexOf('백업 내려받기');
+  const foldStart = html.indexOf('<details');
+  const foldEnd = html.indexOf('</details>');
+  assert.ok(backupAt > 0, 'backup button exists');
+  assert.ok(backupAt < foldStart || backupAt > foldEnd, 'backup button is outside the folded settings');
+  assert.match(html, /기록은 이 폰에만 있어요\. 백업 파일을 받아 두면 폰을 바꿔도 이어서 쓸 수 있어요\./);
+  assert.match(html, /id="backup-file"/);
+  assert.ok(html.indexOf('모든 기록 삭제') > foldStart, 'deleting stays folded away');
+});
