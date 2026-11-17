@@ -20,3 +20,9 @@ test('the karaoke analysis path never sends or stores the recording', async () =
   }
   assert.ok(existsSync(new URL('../src/karaoke-analysis.js', import.meta.url)), 'the analysis exists');
 });
+
+test('the karaoke recording is never saved: it never reaches persist() or the store', () => {
+  const calls = app.split('\n').filter(line => /persist\(|store\./.test(line));
+  assert.ok(calls.length > 5);
+  for (const line of calls) assert.ok(!/karaokeTake|decoded/.test(line), line.trim());
+});

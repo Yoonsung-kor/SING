@@ -257,3 +257,62 @@ test('spots report: words and lyric lines are escaped; odd values do not break t
   assert.ok(!html.includes('<b>') && !html.includes('<img') && !html.includes('<i>'));
   assert.equal(spotsPage({ status: 'spots', result: { status: 'ok', spots: [] }, words: {}, polish: 'idle' }).includes('찾지 못했어요'), true);
 });
+
+// --- Karaoke recording mode ---
+const karaokePage = (karaoke, extra = {}) => songMediaBelow(songWith({ mv: audioEntry, sections: twoSections }), ui({ consent: true, karaoke, comfortHigh: 69, karaokeAudio: true, ...extra }), singLines);
+const karaokeReportOf = html => html.match(/<section class="surface practice-feedback karaoke-report">[\s\S]*?<\/section>/)?.[0] ?? '';
+const karaokeDone = (extra = {}) => ({
+  status: 'done', polish: 'idle', answers: {}, suggestionDone: false,
+  result: { status: 'ok', voicedSeconds: 120, range: { topHeld: 72, keptHigh: 71 }, suggestion: 71, spots: [
+    { id: 's1', kind: 'high-hold', outcome: 'kept', time: 72.4, end: 73.4, lineId: null, section: '', from: null, to: '2옥 라', over: null, repeated: false },
+    { id: 's2', kind: 'high-hold', outcome: 'sag', time: 150, end: 151.2, lineId: null, section: '', from: null, to: '2옥 시', over: 2, repeated: false },
+  ] },
+  words: { s1: 's1 문장', s2: 's2 문장' },
+  ...extra,
+});
+
+test('karaoke mode: the panel explains that the recording stays on the phone and asks for a file', () => {
+  assert.match(karaokePage(null), /data-action="media-karaoke-open"[^>]*>노래방 녹음 분석하기/);
+  const panel = karaokePage(null, { panel: 'karaoke' });
+  for (const text of ['노래방에서 부른 녹음을 이 폰 안에서 분석해요. 녹음은 어디로도 보내지 않고, 이 화면을 떠나면 지워져요.', '노래방에서 폰의 녹음 앱으로 녹음한 파일을 골라 주세요.']) assert.ok(panel.includes(text), text);
+  assert.match(panel, /data-action="media-karaoke-file"[^>]*>녹음 파일 고르기/);
+  assert.match(panel, /<input class="file-input" type="file" id="karaoke-file" accept="audio\/\*,\.m4a,\.mp3,\.wav,\.aac,\.ogg,\.3gp">/);
+  assert.ok(karaokePage({ status: 'analyzing', progress: 0.4 }, { panel: 'karaoke' }).includes('녹음을 분석하고 있어요… 40%'));
+});
+
+test('karaoke mode: each problem has its own words, and a take with too little voice says so', () => {
+  const words = {
+    'too-big': '파일이 너무 커요. 50MB까지 분석할 수 있어요.',
+    'too-long': '10분보다 긴 녹음은 분석하지 못해요.',
+    unreadable: '이 파일은 읽지 못했어요. 다른 녹음 파일로 해 보세요.',
+    unsupported: '이 브라우저에서는 노래방 녹음 분석을 쓸 수 없어요.',
+    error: '이 파일은 읽지 못했어요. 다른 녹음 파일로 해 보세요.',
+  };
+  for (const [problem, text] of Object.entries(words)) assert.ok(karaokePage({ status: 'problem', problem }, { panel: 'karaoke' }).includes(text), problem);
+  assert.ok(karaokePage({ status: 'short' }, { panel: 'karaoke' }).includes('목소리가 충분히 잡히지 않았어요. 다른 녹음으로 다시 해 보세요.'));
+});
+
+test('karaoke report: the top long note, the limits, each spot by time with a way to hear it, and the range suggestion', () => {
+  const html = karaokeReportOf(karaokePage(karaokeDone()));
+  for (const text of ['노래방 녹음 리포트', '가장 높게 길게 낸 음은 3옥 도예요.', '편한 최고음보다 반음 3개 높아요.', '노래방 녹음에서는 길게 낸 높은 음을 중심으로 봐요. 반주가 섞여 있어서 짧은 음은 정확하지 않을 수 있어요.', '이 노래의 어려운 자리', '1분 12초쯤', '2분 30초쯤', 's1 문장', 's2 문장', '잘 넘겼어요', '음이 내려왔어요', '노래방 키 낮추기', '이 노래에서 2옥 시까지 길게 지켰어요. 편한 최고음을 여기(2옥 시)로 바꿀까요?']) assert.ok(html.includes(text), text);
+  assert.equal(count(html, 'data-action="media-karaoke-play"'), 2);
+  assert.match(html, /data-action="media-karaoke-play" data-id="72.4"[^>]*>내 녹음 듣기/);
+  assert.match(html, /data-action="media-karaoke-high-yes"[^>]*>바꾸기/);
+  assert.match(html, /data-action="media-karaoke-high-no"[^>]*>그대로 두기/);
+  assert.ok(!html.includes('style="'));
+  assert.ok(!karaokeReportOf(karaokePage(karaokeDone({ suggestionDone: true }))).includes('바꿀까요'));
+  assert.ok(!karaokeReportOf(karaokePage(karaokeDone(), { karaokeAudio: false })).includes('내 녹음 듣기'), 'the recording is gone');
+});
+
+test('karaoke report: the summary\'s second half follows the comfortable top', () => {
+  const summary = comfortHigh => karaokeReportOf(karaokePage(karaokeDone(), { comfortHigh }));
+  assert.ok(summary(72).includes('편한 최고음과 같아요.'));
+  assert.ok(summary(74).includes('편한 최고음 안쪽이에요.'));
+  // Without a comfortable top there is nothing to compare with, and no suggestion either (suggestHigh needs one).
+  const unknown = karaokeReportOf(karaokePage(karaokeDone({ result: { ...karaokeDone().result, suggestion: null } }), { comfortHigh: null }));
+  assert.ok(unknown.includes('가장 높게 길게 낸 음은 3옥 도예요.') && !unknown.includes('편한 최고음'));
+  const sol = karaokeReportOf(karaokePage(karaokeDone({ result: { ...karaokeDone().result, range: { topHeld: 67, keptHigh: null }, suggestion: null } })));
+  assert.ok(sol.includes('가장 높게 길게 낸 음은 2옥 솔이에요.'), 'a note ending in a consonant takes 이에요');
+  const none = karaokeReportOf(karaokePage(karaokeDone({ result: { ...karaokeDone().result, spots: [], range: { topHeld: null, keptHigh: null }, suggestion: null } })));
+  assert.ok(none.includes('이번에는 크게 올라가거나 높이 올라가는 자리를 찾지 못했어요.') && !none.includes('가장 높게'));
+});

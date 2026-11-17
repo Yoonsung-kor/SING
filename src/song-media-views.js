@@ -6,6 +6,8 @@ import {
   youtubeWatchUrl, youtubeSearchUrl, videoSearchQuery, tjVideoSearchUrl,
 } from './song-media.js';
 import { exercisesFor } from './exercises.js';
+import { spotTime } from './karaoke-file.js';
+import { koreanNote } from './notes.js';
 
 const e = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const out = (href, text) => `<a class="source-link" href="${e(href)}" target="_blank" rel="noopener noreferrer">${text}</a>`;
@@ -18,7 +20,7 @@ const VIDEO_STATUS = {
   failed: '영상을 찾지 못했어요. 잠시 후 다시 열어 주세요.',
 };
 
-export const defaultSongUi = () => ({ side: 'mv', consent: false, videos: { mv: 'idle', karaoke: 'idle' }, sections: 'idle', lyrics: 'idle', lyricsStyle: 'karaoke', panel: null, pasteError: '', pinError: '', playerError: null, singing: false, singReport: null });
+export const defaultSongUi = () => ({ side: 'mv', consent: false, videos: { mv: 'idle', karaoke: 'idle' }, sections: 'idle', lyrics: 'idle', lyricsStyle: 'karaoke', panel: null, pasteError: '', pinError: '', playerError: null, singing: false, singReport: null, karaoke: null });
 
 export function currentVideoId(song, side) {
   const entry = readMedia(song)[side];
@@ -138,16 +140,65 @@ function spotsReportBlock(ui, lines) {
     const badge = OUTCOME_BADGES[spot.outcome] ? `<span class="spot-badge spot-${spot.outcome}">${OUTCOME_BADGES[spot.outcome]}</span>` : '';
     const ask = spot.outcome === 'ask' && !answers[spot.id]
       ? `<div class="action-row"><button class="button secondary small" data-action="media-ask-yes" data-id="${e(spot.id)}">네, 그랬어요</button><button class="text-button" data-action="media-ask-no" data-id="${e(spot.id)}">아니요</button></div>` : '';
-    const exercise = exercises[spot.id];
-    const practice = exercise
-      ? `<div class="spot-exercise"><h4>이렇게 연습해 봐요</h4><p><strong>${e(exercise.title)}</strong> ${e(exercise.steps)}</p>${exercise.caution ? `<p class="subtle">${e(exercise.caution)}</p>` : ''}${exercise.columnId ? `<button class="text-button" data-action="spot-column" data-id="${e(exercise.columnId)}">알아두기에서 읽기</button>` : ''}</div>` : '';
-    return `<li class="spot"><span class="sing-where">${where}</span>${badge}<p>${e(report.words?.[spot.id] ?? '')}</p>${ask}${practice}<button class="text-button" data-action="media-spot" data-id="${e(spot.time)}">이 자리 다시 듣기</button></li>`;
+    return `<li class="spot"><span class="sing-where">${where}</span>${badge}<p>${e(report.words?.[spot.id] ?? '')}</p>${ask}${exerciseBlock(exercises[spot.id])}<button class="text-button" data-action="media-spot" data-id="${e(spot.time)}">이 자리 다시 듣기</button></li>`;
   };
   const allKept = spots.length > 0 && spots.every(spot => spot.outcome === 'kept');
   const polishing = report.polish === 'busy' ? '<p class="media-status" role="status">설명을 다듬고 있어요…</p>' : '';
   const polish = !ui.consent && spots.length && report.polish !== 'busy' ? '<button class="text-button" data-action="media-polish">AI로 설명 다듬기</button>' : '';
   const list = spots.length ? `<ol class="spot-list">${spots.map(item).join('')}</ol>` : '<p class="subtle">이번에는 크게 올라가거나 높이 올라가는 자리를 찾지 못했어요.</p>';
   return `<section class="surface practice-feedback sing-report"><h2>따라 부르기 리포트</h2>${allKept ? '<p class="spot-summary">어려운 자리를 모두 잘 넘겼어요.</p>' : ''}${polishing}${polish}<h3>이 노래의 어려운 자리</h3>${list}</section>`;
+}
+
+// --- Karaoke recording mode: a recording picked from the phone, analysed on the phone, never stored or sent. ---
+const KARAOKE_PROBLEMS = {
+  'too-big': '파일이 너무 커요. 50MB까지 분석할 수 있어요.',
+  'too-long': '10분보다 긴 녹음은 분석하지 못해요.',
+  unreadable: '이 파일은 읽지 못했어요. 다른 녹음 파일로 해 보세요.',
+  unsupported: '이 브라우저에서는 노래방 녹음 분석을 쓸 수 없어요.',
+  error: '이 파일은 읽지 못했어요. 다른 녹음 파일로 해 보세요.',
+};
+// "2옥 라예요" but "2옥 솔이에요" / "2옥 도♯이에요" (솔 and ♯ end in a consonant).
+const isWhat = name => `${name}${/[솔♯]$/.test(name) ? '이에요' : '예요'}`;
+
+function karaokeBlock(ui) {
+  const state = ui.karaoke;
+  const status = state?.status === 'analyzing' ? `<p class="media-status" role="status">녹음을 분석하고 있어요… ${Math.round((state.progress ?? 0) * 100)}%</p>`
+    : state?.status === 'problem' ? `<div class="error-box" role="alert">${KARAOKE_PROBLEMS[state.problem] ?? KARAOKE_PROBLEMS.error}</div>`
+    : state?.status === 'short' ? '<p class="media-status" role="status">목소리가 충분히 잡히지 않았어요. 다른 녹음으로 다시 해 보세요.</p>' : '';
+  if (ui.panel !== 'karaoke') return `<div class="media-karaoke"><button class="button secondary small" data-action="media-karaoke-open">노래방 녹음 분석하기</button>${status}</div>`;
+  const busy = state?.status === 'analyzing';
+  return `<div class="media-karaoke open"><p>노래방에서 부른 녹음을 이 폰 안에서 분석해요. 녹음은 어디로도 보내지 않고, 이 화면을 떠나면 지워져요.</p><button class="button small" data-action="media-karaoke-file" ${busy ? 'disabled' : ''}>녹음 파일 고르기</button><p class="subtle">노래방에서 폰의 녹음 앱으로 녹음한 파일을 골라 주세요.</p><input class="file-input" type="file" id="karaoke-file" accept="audio/*,.m4a,.mp3,.wav,.aac,.ogg,.3gp"><button class="text-button" data-action="media-karaoke-close">닫기</button>${status}</div>`;
+}
+
+function exerciseBlock(exercise) {
+  if (!exercise) return '';
+  return `<div class="spot-exercise"><h4>이렇게 연습해 봐요</h4><p><strong>${e(exercise.title)}</strong> ${e(exercise.steps)}</p>${exercise.caution ? `<p class="subtle">${e(exercise.caution)}</p>` : ''}${exercise.columnId ? `<button class="text-button" data-action="spot-column" data-id="${e(exercise.columnId)}">알아두기에서 읽기</button>` : ''}</div>`;
+}
+
+/** The karaoke report: the top long note against the comfortable top, the limits, the long high notes by time, and a suggestion. */
+function karaokeReportBlock(ui) {
+  const report = ui.karaoke;
+  if (report?.status !== 'done') return '';
+  const { spots = [], range = {}, suggestion = null } = report.result ?? {};
+  const exercises = exercisesFor(spots, report.answers ?? {});
+  let summary = '';
+  if (Number.isInteger(range.topHeld)) {
+    const diff = Number.isFinite(ui.comfortHigh) ? range.topHeld - ui.comfortHigh : null;
+    const tail = diff === null ? '' : diff > 0 ? ` 편한 최고음보다 반음 ${diff}개 높아요.` : diff === 0 ? ' 편한 최고음과 같아요.' : ' 편한 최고음 안쪽이에요.';
+    summary = `<p class="spot-summary">가장 높게 길게 낸 음은 ${e(isWhat(koreanNote(range.topHeld)))}.${tail}</p>`;
+  }
+  const item = spot => {
+    const badge = OUTCOME_BADGES[spot.outcome] ? `<span class="spot-badge spot-${spot.outcome}">${OUTCOME_BADGES[spot.outcome]}</span>` : '';
+    const play = ui.karaokeAudio ? `<button class="text-button" data-action="media-karaoke-play" data-id="${e(spot.time)}">내 녹음 듣기</button>` : '';
+    return `<li class="spot"><span class="sing-where">${e(spotTime(spot.time))}</span>${badge}<p>${e(report.words?.[spot.id] ?? '')}</p>${exerciseBlock(exercises[spot.id])}${play}</li>`;
+  };
+  const polishing = report.polish === 'busy' ? '<p class="media-status" role="status">설명을 다듬고 있어요…</p>' : '';
+  const polish = !ui.consent && spots.length && report.polish !== 'busy' ? '<button class="text-button" data-action="media-polish" data-id="karaoke">AI로 설명 다듬기</button>' : '';
+  const list = spots.length ? `<ol class="spot-list">${spots.map(item).join('')}</ol>` : '<p class="subtle">이번에는 크게 올라가거나 높이 올라가는 자리를 찾지 못했어요.</p>';
+  const name = Number.isInteger(suggestion) ? e(koreanNote(suggestion)) : '';
+  const suggest = name && !report.suggestionDone
+    ? `<div class="suggest-card"><p>이 노래에서 ${name}까지 길게 지켰어요. 편한 최고음을 여기(${name})로 바꿀까요?</p><div class="action-row"><button class="button small" data-action="media-karaoke-high-yes">바꾸기</button><button class="text-button" data-action="media-karaoke-high-no">그대로 두기</button></div></div>` : '';
+  return `<section class="surface practice-feedback karaoke-report"><h2>노래방 녹음 리포트</h2>${summary}<p class="subtle">노래방 녹음에서는 길게 낸 높은 음을 중심으로 봐요. 반주가 섞여 있어서 짧은 음은 정확하지 않을 수 있어요.</p>${polishing}${polish}<h3>이 노래의 어려운 자리</h3>${list}${suggest}</section>`;
 }
 
 /** The sing-along report, once there is one. */
@@ -160,5 +211,5 @@ export function songMediaBelow(song, ui, lines = null) {
   const media = readMedia(song);
   const videoId = currentVideoId(song, ui.side);
   const tj = `<a class="media-tj" href="${e(tjVideoSearchUrl(song.title, song.artist))}" target="_blank" rel="noopener noreferrer"><strong>TJ 노래방 영상 보기 ↗</strong><span>유튜브에서 열려요${song.tjNumber ? ` · TJ ${e(song.tjNumber)}` : ''}</span></a>`;
-  return `<section class="song-media">${videoStatus(song, media, ui, videoId)}${changePanel(song, media, ui)}${lyricsBlock(media, ui, lines)}${sectionsBlock(media, ui, videoId)}${singBlock(media, ui, videoId)}${tj}</section>${singReportBlock(ui, lines)}${pinsBlock(media, ui, videoId)}`;
+  return `<section class="song-media">${videoStatus(song, media, ui, videoId)}${changePanel(song, media, ui)}${lyricsBlock(media, ui, lines)}${sectionsBlock(media, ui, videoId)}${singBlock(media, ui, videoId)}${karaokeBlock(ui)}${tj}</section>${singReportBlock(ui, lines)}${karaokeReportBlock(ui)}${pinsBlock(media, ui, videoId)}`;
 }

@@ -76,6 +76,8 @@ export function createSongPlayer({ onState = () => {}, onError = () => {}, onLoa
       player.seekTo(Math.max(0, seconds), true);
       player.playVideo();
     },
+    /** Pauses the shown video (the karaoke recording plays instead). */
+    pause() { if (ready && shown) player.pauseVideo(); },
     currentTime() { return ready && shown ? player.getCurrentTime() : null; },
     currentVideoId() { return shown; },
     /** The last IFrame API state of the shown video (1 playing, 2 paused, 5 cued…), null before any. */

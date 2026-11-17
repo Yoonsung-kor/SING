@@ -2,6 +2,8 @@ import { hummingPayload, songFrames, cleanFeedback } from './practice-feedback.j
 import { createSingAlong } from './sing-along.js';
 import { findSpots } from './hard-spots.js';
 import { spotsPayload, defaultSentence, cleanSpotWords } from './spot-words.js';
+import { fileProblem, decodeToMono } from './karaoke-file.js';
+import { runAnalysis } from './analysis-client.js';
 import { createLesson, recordAttempt, nextTarget, finishLesson, summarizeLesson, recommendedNote, localDay, addActivity, needsDailyCheck } from './lesson.js';
 import { defaultState, openStore } from './storage.js';
 import { AudioEngine, microphoneError } from './audio.js';
@@ -103,6 +105,9 @@ let feedbackFailed = null;
 let singRequest = 0;
 // A report whose words wait for consent ("AI로 설명 다듬기"): kept through the consent screen, then shown again.
 let reportBeforeConsent = null;
+// The karaoke recording being analysed or reported on ({ samples, cancel }), in memory only; and its playback.
+let karaokeTake = null;
+let karaokePlayback = null;
 let pendingPickList = null;
 // Pages that own the shared pick state: onboarding and '곡 찾아 담기'.
 const isPickerPage = target => target.startsWith('voice-') || target === 'song-pick';
@@ -149,7 +154,7 @@ function render(focus = false) {
   const nudge = initialized && !demo && page === 'home'
     ? nextNudge(state, { today: localDay(), now: Date.now(), standalone: isStandalone({ matchMedia: query => window.matchMedia(query), standalone: navigator.standalone }), hasFeedbackUrl: Boolean(appConfig.feedbackUrl) })
     : null;
-  const v = { page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, recLoading, recError, onboarding, loading: !initialized && !demo, songUi: { ...songUi, consent: hasCurrentConsent(state.settings) }, lyricsLines: songLyrics.get(selectedSongId) ?? null, feedbackBusy: Boolean(session) && feedbackFor === session.id, feedbackError: feedbackFailed && feedbackFailed.id === session?.id ? feedbackFailed.error : false, learnColumnId, serverWaking, inviteError, outsideUrl, nudge, feedbackUrl: appConfig.feedbackUrl, installHelp };
+  const v = { page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, recLoading, recError, onboarding, loading: !initialized && !demo, songUi: { ...songUi, consent: hasCurrentConsent(state.settings), comfortHigh: state.settings.voice?.comfortableHighMidi ?? null, karaokeAudio: Boolean(karaokeTake?.samples) }, lyricsLines: songLyrics.get(selectedSongId) ?? null, feedbackBusy: Boolean(session) && feedbackFor === session.id, feedbackError: feedbackFailed && feedbackFailed.id === session?.id ? feedbackFailed.error : false, learnColumnId, serverWaking, inviteError, outsideUrl, nudge, feedbackUrl: appConfig.feedbackUrl, installHelp };
   // While a song's player is mounted, only the parts around it are redrawn: moving an iframe would reload the video.
   if (!focus && page === 'song-detail' && playerFor === selectedSongId && document.querySelector('#song-player-slot')) {
     const parts = songDetailParts(v);
@@ -194,7 +199,7 @@ function navigate(target) {
   feedbackFailed = null;
   error = '';
   page = target;
-  if (target === 'song-detail') songUi = { ...defaultSongUi(), lyricsStyle, singReport: reportBeforeConsent?.songId === selectedSongId ? reportBeforeConsent.report : null };
+  if (target === 'song-detail') songUi = { ...defaultSongUi(), lyricsStyle, ...(reportBeforeConsent?.songId === selectedSongId ? { [reportBeforeConsent.key]: reportBeforeConsent.report } : {}) };
   if (target !== 'ai-consent') reportBeforeConsent = null;
   if (target === 'learn') learnColumnId = null;
   render(true);
@@ -206,6 +211,10 @@ function navigate(target) {
 
 function stopSongPlayer() {
   dropSinging();
+  // Leaving the song screen drops the karaoke recording and stops its analysis and playback.
+  karaokeTake?.cancel?.();
+  karaokeTake = null;
+  stopKaraokePlayback();
   clearInterval(mediaTicker);
   mediaTicker = null;
   if (playerFor !== null) songPlayer.destroy();
@@ -241,12 +250,11 @@ async function finishSinging() {
 }
 
 /** Asks the AI to rephrase the report; the answer is checked here again. Any failure keeps the app's own sentences. */
-async function polishWords() {
+async function polishWords(key = 'singReport') {
   const song = selectedSong();
-  const report = songUi.singReport;
-  if (!song || report?.status !== 'spots' || report.polish === 'busy' || !report.payload?.items.length) return;
-  const token = singRequest;
-  songUi = { ...songUi, singReport: { ...report, polish: 'busy' } };
+  const report = songUi[key];
+  if (!song || !['spots', 'done'].includes(report?.status) || report.polish === 'busy' || !report.payload?.items.length) return;
+  songUi = { ...songUi, [key]: { ...report, polish: 'busy' } };
   render();
   let words = null;
   try {
@@ -254,10 +262,78 @@ async function polishWords() {
     const body = response.ok ? await response.json().catch(() => null) : null;
     if (Array.isArray(body?.words)) words = cleanSpotWords({ items: body.words }, report.payload);
   } catch { /* offline or refused: the app's own sentences stay */ }
-  if (token !== singRequest || !onSongScreen(song.id) || songUi.singReport?.status !== 'spots') return;
-  const current = songUi.singReport;
-  songUi = { ...songUi, singReport: { ...current, polish: words ? 'done' : 'off', words: words ? Object.fromEntries(words.map(entry => [entry.id, entry.text])) : current.words } };
+  // Another take or another song meanwhile: this answer belongs to a report that is gone.
+  const current = songUi[key];
+  if (!onSongScreen(song.id) || current?.payload !== report.payload) return;
+  songUi = { ...songUi, [key]: { ...current, polish: words ? 'done' : 'off', words: words ? Object.fromEntries(words.map(entry => [entry.id, entry.text])) : current.words } };
   render();
+}
+
+/** A karaoke recording picked from the phone: checked, decoded, analysed in a worker; the report shows its long high notes.
+ * The samples stay in memory for "내 녹음 듣기" and are dropped when the song screen closes. Nothing is stored or sent. */
+async function analyzeKaraokeFile(file) {
+  const song = selectedSong();
+  if (!file || !song) return;
+  karaokeTake?.cancel?.();
+  karaokeTake = null;
+  stopKaraokePlayback();
+  const show = karaoke => { songUi = { ...songUi, karaoke }; render(); };
+  const problem = fileProblem(file);
+  if (problem) return show({ status: 'problem', problem });
+  const take = { samples: null, cancel: () => {} };
+  karaokeTake = take;
+  show({ status: 'analyzing', progress: 0 });
+  const decoded = await decodeToMono(file);
+  if (karaokeTake !== take || !onSongScreen(song.id)) return;
+  if (decoded.problem) { karaokeTake = null; return show({ status: 'problem', problem: decoded.problem }); }
+  const comfortableHighMidi = state.settings.voice?.comfortableHighMidi ?? null;
+  const run = runAnalysis(decoded.samples, { comfortableHighMidi }, {
+    onProgress: progress => { if (karaokeTake === take && onSongScreen(song.id)) show({ status: 'analyzing', progress }); },
+  });
+  take.samples = decoded.samples;
+  take.cancel = run.cancel;
+  const result = await run.promise;
+  if (karaokeTake !== take || !onSongScreen(song.id) || result.status === 'cancelled') return;
+  if (result.status === 'unsupported' || result.status === 'error') { karaokeTake = null; return show({ status: 'problem', problem: result.status }); }
+  if (result.status === 'short') { karaokeTake = null; return show({ status: 'short' }); }
+  const payload = spotsPayload(song, result, comfortableHighMidi);
+  const words = Object.fromEntries(payload.items.map(item => [item.id, defaultSentence(item)]));
+  songUi = { ...songUi, panel: null, karaoke: { status: 'done', result, words, polish: 'idle', answers: {}, suggestionDone: false, payload } };
+  render();
+  if (payload.items.length && hasCurrentConsent(state.settings)) await polishWords('karaoke');
+}
+
+/** "내 녹음 듣기": eight seconds of the recording from three seconds before the spot; the video pauses meanwhile. */
+function playKaraokeAt(time) {
+  const samples = karaokeTake?.samples;
+  if (!samples || !Number.isFinite(time)) return;
+  stopKaraokePlayback();
+  releasePlayback();
+  songPlayer.pause();
+  const Context = globalThis.AudioContext ?? globalThis.webkitAudioContext;
+  if (!Context) return;
+  const RATE = 16000;
+  const from = Math.max(0, Math.floor((time - 3) * RATE));
+  const to = Math.min(samples.length, from + 8 * RATE);
+  if (to <= from) return;
+  const context = new Context();
+  const buffer = context.createBuffer(1, to - from, RATE);
+  buffer.copyToChannel(samples.subarray(from, to), 0);
+  const source = context.createBufferSource();
+  source.buffer = buffer;
+  source.connect(context.destination);
+  source.onended = () => { if (karaokePlayback?.source === source) stopKaraokePlayback(); };
+  karaokePlayback = { context, source };
+  context.resume().catch(() => {});
+  source.start();
+}
+
+function stopKaraokePlayback() {
+  const playing = karaokePlayback;
+  karaokePlayback = null;
+  if (!playing) return;
+  try { playing.source.stop(); } catch { /* already ended */ }
+  playing.context.close().catch(() => {});
 }
 
 const selectedSong = () => state.songs.find(s => s.id === selectedSongId);
@@ -552,11 +628,30 @@ async function handleMedia(action, id) {
   if (action === 'media-polish') {
     if (!hasCurrentConsent(state.settings)) {
       // The report waits through the consent screen and comes back with the song.
-      reportBeforeConsent = { songId: song.id, report: songUi.singReport };
+      const key = id === 'karaoke' ? 'karaoke' : 'singReport';
+      reportBeforeConsent = { songId: song.id, key, report: songUi[key] };
       consentReturn = 'song-detail';
       return navigate('ai-consent');
     }
-    return polishWords();
+    return polishWords(id === 'karaoke' ? 'karaoke' : 'singReport');
+  }
+  // Karaoke recording mode: the recording is analysed on the phone, kept in memory only while this song is open.
+  if (action === 'media-karaoke-open') { songUi = { ...songUi, panel: 'karaoke', pasteError: '', pinError: '' }; return render(); }
+  if (action === 'media-karaoke-close') { songUi = { ...songUi, panel: null }; return render(); }
+  if (action === 'media-karaoke-file') return document.querySelector('#karaoke-file')?.click();
+  if (action === 'media-karaoke-play') return playKaraokeAt(Number(id));
+  if (action === 'media-karaoke-high-yes' || action === 'media-karaoke-high-no') {
+    const report = songUi.karaoke;
+    if (report?.status !== 'done') return;
+    if (action === 'media-karaoke-high-yes') {
+      const suggestion = report.result.suggestion;
+      if (!Number.isInteger(suggestion) || !state.settings.voice) return;
+      const voice = { ...state.settings.voice, comfortableHighMidi: suggestion, method: 'manual', updatedAt: new Date().toISOString() };
+      if (!(await persist({ ...state, settings: { ...state.settings, voice } }))) return;
+      toast('편한 최고음을 바꿨어요.');
+    }
+    songUi = { ...songUi, karaoke: { ...songUi.karaoke, suggestionDone: true } };
+    return render();
   }
   if (action === 'media-sing-start') {
     if (!videoId || singAlong) return;
@@ -1551,9 +1646,9 @@ async function handle(action, id) {
     if (consentReturn === 'song-pick') return beginPicker(pendingPickList);
     if (consentReturn === 'song-detail') {
       // Back to the song; a report that was waiting for consent now gets its words polished.
-      const polish = reportBeforeConsent?.songId === selectedSongId;
+      const waiting = reportBeforeConsent?.songId === selectedSongId ? reportBeforeConsent.key : null;
       navigate('song-detail');
-      if (polish) polishWords();
+      if (waiting) polishWords(waiting);
       return;
     }
     navigate('playlist');
@@ -1659,6 +1754,11 @@ root.addEventListener('change', async event => {
     }
     if (event.target.id === 'keep-audio') await persist({ ...state, settings: { ...state.settings, keepAudio: event.target.checked } });
     if (event.target.id === 'backup-file') await importBackup(event.target.files[0]);
+    if (event.target.id === 'karaoke-file') {
+      const picked = event.target.files[0];
+      event.target.value = '';
+      await analyzeKaraokeFile(picked).catch(() => { songUi = { ...songUi, karaoke: { status: 'problem', problem: 'error' } }; render(); });
+    }
   } catch {
     toast('백업을 가져오지 못했어요. 파일 형식을 확인해 주세요. 기존 기록은 유지했어요.');
   }
