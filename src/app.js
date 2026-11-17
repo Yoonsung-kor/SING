@@ -17,9 +17,28 @@ import { hasCurrentConsent, withConsent, withoutConsent } from './consent.js';
 import { shouldShowOnboarding, startOnboarding, addPick, applyLookup, setVoiceType, setPickKey, toggleOctave, removePick, onboardingResult, commitOnboarding, commitManual, dismissOnboarding, emptySearch, markSlow, startPicker, commitPicks } from './onboarding.js';
 import { searchResultsHtml, voicePicksHtml, pickActionsHtml } from './onboarding-views.js';
 import { RANGE_BOUNDS, candidateShift } from './vocal-range.js';
+import { createApi } from './api.js';
 
 const root = document.querySelector('#app');
 const audio = new AudioEngine();
+// A free server sleeps when nobody uses it; the notice shows while it wakes (stays under any storage notice).
+let serverWaking = false;
+let lastAwake = 0;
+const WAKE_AGAIN_MS = 10 * 60 * 1000;
+const LIMIT_MESSAGES = { 'daily-limit': '오늘 쓸 수 있는 횟수를 다 썼어요. 내일 다시 쓸 수 있어요.', 'slow-down': '잠시 후 다시 시도해 주세요.' };
+const api = createApi({
+  onWaking: waking => {
+    serverWaking = waking;
+    const box = document.querySelector('#page-notice');
+    if (box) box.innerHTML = pageNotice({ storageError, serverWaking });
+  },
+  onLimit: kind => toast(LIMIT_MESSAGES[kind]),
+});
+
+/** Asks the server to wake up; the notice appears only if it is slow to answer. */
+async function wakeServer() {
+  if (await api.wake()) lastAwake = Date.now();
+}
 let store = null;
 let state = defaultState();
 let liveState = null;
@@ -94,7 +113,7 @@ function toast(message) {
 }
 
 function render(focus = false) {
-  const v = { page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, recLoading, recError, onboarding, loading: !initialized && !demo, songUi: { ...songUi, consent: hasCurrentConsent(state.settings) }, lyricsLines: songLyrics.get(selectedSongId) ?? null, feedbackBusy: Boolean(session) && feedbackFor === session.id, feedbackError: feedbackFailed && feedbackFailed.id === session?.id ? feedbackFailed.error : false, learnColumnId };
+  const v = { page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, recLoading, recError, onboarding, loading: !initialized && !demo, songUi: { ...songUi, consent: hasCurrentConsent(state.settings) }, lyricsLines: songLyrics.get(selectedSongId) ?? null, feedbackBusy: Boolean(session) && feedbackFor === session.id, feedbackError: feedbackFailed && feedbackFailed.id === session?.id ? feedbackFailed.error : false, learnColumnId, serverWaking };
   // While a song's player is mounted, only the parts around it are redrawn: moving an iframe would reload the video.
   if (!focus && page === 'song-detail' && playerFor === selectedSongId && document.querySelector('#song-player-slot')) {
     const parts = songDetailParts(v);
@@ -257,7 +276,7 @@ async function searchVideos(song, side, provisional) {
   try {
     // The song's length lets the server tell this song's audio track from other versions.
     const duration = side === 'mv' ? readMedia(song).sections?.duration : undefined;
-    const response = await fetch(`/api/song-videos?${new URLSearchParams({ side, ...query, ...(Number.isFinite(duration) ? { duration: String(duration) } : {}) })}`);
+    const response = await api.request(`/api/song-videos?${new URLSearchParams({ side, ...query, ...(Number.isFinite(duration) ? { duration: String(duration) } : {}) })}`);
     status = response.status;
     body = await response.json().catch(() => null);
   } catch { status = 0; }
@@ -295,7 +314,7 @@ async function lookupSections(song) {
   let status = 0;
   let body = null;
   try {
-    const response = await fetch(`/api/song-sections?${new URLSearchParams(query)}`);
+    const response = await api.request(`/api/song-sections?${new URLSearchParams(query)}`);
     status = response.status;
     if (status === 200) body = await response.json();
   } catch { status = 0; }
@@ -598,7 +617,7 @@ async function runSearch({ term, mode = 'search', page = 1, append = false, arti
   }, SEARCH_SLOW_MS);
   let body = null;
   try {
-    const response = await fetch(`/api/song-search?q=${encodeURIComponent(term)}&scope=${onboarding.scope}&mode=${mode}&page=${page}`);
+    const response = await api.request(`/api/song-search?q=${encodeURIComponent(term)}&scope=${onboarding.scope}&mode=${mode}&page=${page}`);
     if (response.ok) body = await response.json();
   } catch { /* network failure: body stays null */ }
   clearTimeout(slow);
@@ -662,7 +681,7 @@ async function lookup(job, pick) {
   if (known) result = { highestMidi: known.highestMidi, falsettoHighestMidi: known.falsettoHighestMidi, lowestMidi: known.lowestMidi, sourceUrl: known.rangeSourceUrl, sourceQuote: known.rangeQuote, vocal: known.vocal };
   else {
     try {
-      const response = await fetch('/api/song-range', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: pick.title, artist: pick.artist }) });
+      const response = await api.request('/api/song-range', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: pick.title, artist: pick.artist }) });
       if (response.status === 503) {
         if (!aiOffToastShown) { aiOffToastShown = true; toast('아직 AI가 설정되지 않았어요. 직접 입력을 써 주세요.'); }
       } else if (response.ok) result = (await response.json()).range ?? null;
@@ -759,6 +778,7 @@ async function initialize() {
     else storageError = message;
   }
   render();
+  wakeServer();
 }
 
 async function resumeOrCreate() {
@@ -879,7 +899,7 @@ async function respond(comfort, practice = false) {
 /** Asks for practice feedback and checks the answer again here. Returns { feedback } or { error: 'off' | 'failed' }. */
 async function askFeedback(payload, check) {
   try {
-    const response = await fetch('/api/practice-feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const response = await api.request('/api/practice-feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     const body = await response.json().catch(() => ({}));
     if (response.status === 503 && body.error === 'not-configured') return { error: 'off' };
     const feedback = response.ok ? cleanFeedback(body.feedback, check) : null;
@@ -1084,7 +1104,7 @@ async function requestRecommendations(id) {
   let payload = null;
   let message = RECOMMEND_FAILED;
   try {
-    const response = await fetch('/api/recommend', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request) });
+    const response = await api.request('/api/recommend', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request) });
     if (response.ok) payload = await response.json();
     else if (response.status === 503) message = '아직 AI 추천이 설정되지 않았어요.';
   } catch { /* network failure keeps the generic message */ }
@@ -1114,7 +1134,7 @@ async function lookupSongRange() {
   busy = 'range'; render();
   let message = '지금은 최고음을 찾지 못했어요.';
   try {
-    const response = await fetch('/api/song-range', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, artist: String(songDraft.artist ?? '').trim() }) });
+    const response = await api.request('/api/song-range', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, artist: String(songDraft.artist ?? '').trim() }) });
     if (response.status === 503) message = '아직 AI 추천이 설정되지 않았어요.';
     else if (response.ok) {
       const { range } = await response.json();
@@ -1485,6 +1505,10 @@ document.addEventListener('visibilitychange', () => {
 });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && singAlong) { dropSinging(); render(); toast('화면을 벗어나 따라 부르기를 멈췄어요.'); }
+});
+// Coming back after a while: the server may have fallen asleep meanwhile.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && Date.now() - lastAwake > WAKE_AGAIN_MS) wakeServer();
 });
 window.addEventListener('pagehide', () => { audio.cancel(); dropSinging(); });
 

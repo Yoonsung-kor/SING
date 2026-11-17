@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { renderView } from '../src/views.js';
+import { renderView, pageNotice } from '../src/views.js';
 import { defaultState } from '../src/storage.js';
 
 const historyWith = settings => renderView({ page: 'history', state: { ...defaultState(), settings: { ...defaultState().settings, ...settings } }, session: null, busy: false, demo: false });
@@ -79,4 +79,11 @@ test('the humming screens say the three seconds start once the hum is heard', as
   const intro = renderView({ page: 'intro', state: defaultState(), session, busy: false });
   assert.ok(intro.includes('소리가 들리면 그때부터 3초 들어요.'));
   assert.ok(!intro.includes('녹음은 3초예요.'));
+});
+
+test('the page notice says the practice room is opening, unless a storage problem needs saying first', () => {
+  assert.match(pageNotice({ serverWaking: true }), /연습실을 여는 중이에요\. 1분쯤 걸릴 수 있어요\./);
+  assert.match(pageNotice({ storageError: '저장하지 못했어요', serverWaking: true }), /저장하지 못했어요/);
+  assert.doesNotMatch(pageNotice({ storageError: '저장하지 못했어요', serverWaking: true }), /연습실을 여는 중/);
+  assert.equal(pageNotice({}), '');
 });

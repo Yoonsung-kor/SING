@@ -171,7 +171,9 @@ function done(v) {
 }
 
 // The storage notice sits in its own box so the song screen can refresh it without redrawing a playing video.
-export const pageNotice = v => v.storageError ? `<div class="notice" role="alert">${e(v.storageError)} <button class="text-button" data-action="retry-storage">다시 저장</button></div>` : '';
+// A sleeping server's notice uses the same box; a storage problem comes first.
+export const pageNotice = v => v.storageError ? `<div class="notice" role="alert">${e(v.storageError)} <button class="text-button" data-action="retry-storage">다시 저장</button></div>`
+  : v.serverWaking ? '<div class="notice" role="status">연습실을 여는 중이에요. 1분쯤 걸릴 수 있어요.</div>' : '';
 
 export function renderView(v) {
   const renderers = { home, check, intro, explore: x => capture(x), result, practice: x => capture(x, true), done, history, detail: x => result(x, true), learn, rest, songs: playlistHomeView, playlist: playlistView, 'playlist-form': playlistFormView, 'all-songs': allSongsView, 'ai-consent': aiConsentView, 'song-form': songFormView, 'song-detail': songDetailView, 'voice-intro': withOnboarding(voiceIntroView), 'voice-pick': withOnboarding(voicePickView), 'voice-result': withOnboarding(voiceResultView), 'voice-manual': withOnboarding(voiceManualView), 'song-pick': withOnboarding(songPickView) };
