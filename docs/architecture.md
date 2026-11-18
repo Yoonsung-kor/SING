@@ -51,11 +51,11 @@ flowchart TD
 | 노래방 녹음 분석 | 녹음 파일 읽기(50MB·10분 한도, 16kHz 모노), 반주 속 가수의 음 따라가기(실험에서 고른 값, 20ms마다), 길게 낸 높은 음과 부른 음역·편한 최고음 제안, 첫 소리 시간, 화면과 따로 도는 워커와 진행률, 앱 안 녹음(AudioWorklet, 화면 켜 두기, `?record`일 때만) | `src/karaoke-file.js`, `src/resample.js`, `src/melody-tracker.js`, `src/karaoke-analysis.js`, `src/analysis-worker.js`, `src/analysis-client.js`, `src/karaoke-recorder.js`, `src/pcm-worklet.js` |
 | 저장 | 상태/원음 저장, 백업 검증과 복원 | `src/storage.js` |
 | 개발 서버 | 허용된 정적 파일 제공과 API 전달(입력 한도, 키는 `.env`) | `scripts/serve.mjs`, `scripts/server.mjs` |
-| 접근 관리 (배포) | 초대 코드, 접속 주소별 요청 간격, 기기별·전체 하루 한도, 날짜별 기기 수(메모리) | `scripts/access.mjs` |
+| 접근 관리 (배포) | 초대 코드, 기기별 요청 간격(코드가 없는 요청은 접속 주소별, 틀린 코드 잠금도 주소별), 기기별·전체 하루 한도, 날짜별 기기 수(메모리), 초대 코드 없이 바깥에 열리면 켜지지 않기 | `scripts/access.mjs` |
 | 영상 찾기 보관 | 찾은 영상을 일주일 동안 메모리에 두어 같은 곡을 다시 검색하지 않음 | `scripts/video-cache.mjs` |
 | 요청 한 곳 | 모든 API 요청에 기기 번호와 초대 코드를 붙이고, 초대 거절·하루 한도·잠든 서버를 앱에 알림 | `src/api.js` |
 | 휴대폰 환경 | 앱 안 브라우저(카카오톡) 알아보기, 플랫폼, 홈 화면 실행 여부, 뒤로 가기 덫, 홈 카드(설문·홈 화면 추가·백업) | `src/environment.js`, `src/back.js`, `src/nudges.js` |
-| 화면 파일 보관 | 앱 파일을 휴대폰에 두고, 서버가 3초 안에 답하면 새 파일로 바꿈(API는 거치지 않음) | `sw.js`, `manifest.webmanifest` |
+| 화면 파일 보관 | 앱 파일을 휴대폰에 두고, 서버가 3초 안에 답하면 새 파일로 바꿈(API는 거치지 않음). 서버가 화면과 스크립트의 모듈 주소에 내용 해시(`?v=`)를 붙이고 다른 버전 주소는 거절해서, 배포 직후에도 한 번 여는 동안 옛 파일과 새 파일이 섞이지 않음. 새 화면을 쓰기 시작하면 다른 버전 파일을 지움 | `sw.js`, `manifest.webmanifest`, `scripts/server.mjs` |
 
 ### 배포했을 때 (2026-11-17)
 
