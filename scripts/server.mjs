@@ -1,11 +1,13 @@
 import { readFile, stat } from 'node:fs/promises';
+import { readFileSync, readdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { AiError } from './ai.mjs';
 import { YoutubeError } from './youtube.mjs';
 import { validateRecommendationRequest, validateRangeRequest } from '../src/recommend.js';
 import { validatePracticeRequest } from '../src/practice-feedback.js';
 
-const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.json': 'application/json; charset=utf-8', '.mp3': 'audio/mpeg', '.txt': 'text/plain; charset=utf-8' };
+const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.json': 'application/json; charset=utf-8', '.mp3': 'audio/mpeg', '.txt': 'text/plain; charset=utf-8', '.webmanifest': 'application/manifest+json; charset=utf-8', '.png': 'image/png' };
 const staticHeaders = {
   'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
   'Permissions-Policy': 'camera=(), microphone=(self)',
@@ -13,6 +15,22 @@ const staticHeaders = {
   // No Referrer-Policy header: YouTube refuses embedded playback without the page address (error 153).
   'Content-Security-Policy': "default-src 'self'; script-src 'self' https://www.youtube.com; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
 };
+
+// One version per page load: every module address in the page and its scripts gets ?v=<hash of those files>, so the
+// phone's kept copies (sw.js) and fresh files can never mix in one load after a deploy. Another version's address is
+// refused (404), and the phone then uses its own copy of that version.
+const STAMPED = /^(index\.html|src\/[\w.-]+\.js)$/;
+const MODULE_ADDRESS = /(['"])(\.\/[\w.-]+\.js|\/src\/[\w.-]+\.js)\1/g;
+
+/** A hash of the page and its scripts, or null when the root has none (then nothing is stamped). */
+function scriptsVersion(root) {
+  try {
+    const hash = createHash('sha256');
+    const files = ['index.html', ...readdirSync(path.join(root, 'src')).filter(name => name.endsWith('.js')).sort().map(name => `src/${name}`)];
+    for (const file of files) hash.update(file).update(readFileSync(path.join(root, file)));
+    return hash.digest('hex').slice(0, 10);
+  } catch { return null; }
+}
 
 function sendJson(res, status, body) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
@@ -110,31 +128,58 @@ async function handleVideos(req, res, findVideos) {
   }
 }
 
-export function createHandler({ root, recommend, lookupRange = null, searchSongs = null, findSections = null, findVideos = null, practiceFeedback = null }) {
-  const practiceRun = practiceFeedback && (async body => { const feedback = await practiceFeedback(body); return feedback ? { feedback } : null; });
+/** access: scripts/access.mjs (invite code, pace, daily caps), or null for no checks. config.feedbackUrl: the survey link. */
+export function createHandler({ root, recommend, lookupRange = null, searchSongs = null, findSections = null, findVideos = null, practiceFeedback = null, access = null, config = {} }) {
+  // The report's spots come back as { words }; humming feedback as { feedback }.
+  const practiceRun = practiceFeedback && (async body => {
+    const result = await practiceFeedback(body);
+    if (!result) return null;
+    return body.kind === 'spots' ? { words: result.words } : { feedback: result };
+  });
   // An empty list is a real answer ("no song fits"); only a missing result counts as an upstream failure.
   const recommendRun = recommend && (async body => {
     const result = await recommend(body);
     return result && Array.isArray(result.items) ? { items: result.items, intent: result.intent, fallback: result.fallback } : null;
   });
   const rangeRun = lookupRange && (async body => ({ range: await lookupRange(body) ?? null }));
+  const version = scriptsVersion(root);
   return async (req, res) => {
     try {
-      const pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+      const url = new URL(req.url, 'http://localhost');
+      const pathname = decodeURIComponent(url.pathname);
+      // Open to everyone: the host's health check, and what the page needs to know before it has a code.
+      if (req.method === 'GET' && pathname === '/api/health') return sendJson(res, 200, { ok: true });
+      if (req.method === 'GET' && pathname === '/api/config') return sendJson(res, 200, { inviteRequired: Boolean(access?.inviteRequired), feedbackUrl: config.feedbackUrl ?? null });
+      if (req.method === 'GET' && pathname === '/api/admin/stats') {
+        const stats = access?.stats(url.searchParams.get('key') ?? '') ?? null;
+        return stats ? sendJson(res, 200, stats) : sendJson(res, 404, { error: 'not-found' });
+      }
+      // Every other API path passes the guard before it is even looked up.
+      if (pathname.startsWith('/api/')) {
+        const refused = access?.check(req, pathname);
+        if (refused) return sendJson(res, refused.status, refused.body);
+      }
+      if (req.method === 'GET' && pathname === '/api/hello') return sendJson(res, 200, { ok: true });
       if (req.method === 'POST' && pathname === '/api/recommend') return await handleJson(req, res, { maxBody: RECOMMEND_MAX_BODY, validate: validateRecommendationRequest, run: recommendRun });
       if (req.method === 'POST' && pathname === '/api/practice-feedback') return await handleJson(req, res, { maxBody: 32 * 1024, validate: validatePracticeRequest, run: practiceRun });
       if (req.method === 'POST' && pathname === '/api/song-range') return await handleJson(req, res, { maxBody: RANGE_MAX_BODY, validate: validateRangeRequest, run: rangeRun });
       if (req.method === 'GET' && pathname === '/api/song-search') return await handleSearch(req, res, searchSongs);
       if (req.method === 'GET' && pathname === '/api/song-sections') return await handleSections(req, res, findSections);
       if (req.method === 'GET' && pathname === '/api/song-videos') return await handleVideos(req, res, findVideos);
+      if (pathname.startsWith('/api/')) return sendJson(res, 404, { error: 'not-found' });
       if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405).end(); return; }
       const relative = pathname === '/' ? 'index.html' : pathname.slice(1);
-      if (!/^(index\.html|src\/[\w.-]+|assets\/[\w.-]+|tests\/browser[\w.-]*)$/.test(relative)) { res.writeHead(404).end('Not found'); return; }
+      // The page, its scripts and assets, and the home-screen files (service worker at the root so it covers every page).
+      if (!/^(index\.html|sw\.js|manifest\.webmanifest|src\/[\w.-]+|assets\/[\w.-]+|tests\/browser[\w.-]*)$/.test(relative)) { res.writeHead(404).end('Not found'); return; }
       const filename = path.resolve(root, relative);
       if (!filename.startsWith(root) || !(await stat(filename)).isFile()) { res.writeHead(404).end('Not found'); return; }
+      const stamped = Boolean(version) && STAMPED.test(relative);
+      const asked = url.searchParams.get('v');
+      if (stamped && asked && asked !== version) { res.writeHead(404).end('Not found'); return; }
       const data = await readFile(filename);
-      res.writeHead(200, { 'Content-Type': types[path.extname(filename)] || 'application/octet-stream', ...staticHeaders });
-      res.end(req.method === 'HEAD' ? undefined : data);
+      const body = stamped ? Buffer.from(data.toString('utf8').replace(MODULE_ADDRESS, `$1$2?v=${version}$1`)) : data;
+      res.writeHead(200, { 'Content-Type': types[path.extname(filename)] || 'application/octet-stream', ...staticHeaders, ...(version ? { 'X-Sing-Version': version } : {}) });
+      res.end(req.method === 'HEAD' ? undefined : body);
     } catch { if (!res.headersSent) res.writeHead(404).end('Not found'); }
   };
 }

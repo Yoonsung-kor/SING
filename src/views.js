@@ -51,13 +51,23 @@ function week(state) {
 
 const noteArt = `<svg class="note-art" viewBox="0 0 300 250" fill="none" aria-hidden="true"><g stroke="#aecaba" stroke-width="1"><path d="M12 171h277M12 142h277M12 113h277M12 84h277M12 55h277"/></g><g stroke="#769c86" stroke-dasharray="3 5"><path d="M47 201V157M105 201v-74M165 201V95M226 201V63"/></g><path d="m48 157 58-29 59-30 61-32" stroke="#246c62" stroke-width="1.5" stroke-dasharray="4 5"/><g fill="#246c62"><ellipse cx="47" cy="157" rx="14" ry="10" transform="rotate(-20 47 157)"/><ellipse cx="105" cy="128" rx="14" ry="10" transform="rotate(-20 105 128)"/><ellipse cx="165" cy="98" rx="14" ry="10" transform="rotate(-20 165 98)"/></g><g stroke="#246c62" stroke-width="2.5"><path d="M60 154v-47M118 125V78M178 95V48"/></g><circle cx="226" cy="66" r="23" fill="#f2d3b4"/><path d="m216 66 7 7 13-15" stroke="#183e3b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><text x="120" y="230" fill="#5d7d69" font-size="12" font-family="sans-serif" letter-spacing="2">나의 속도로</text></svg>`;
 
+const later = kind => `<button class="text-button" data-action="nudge-later" data-id="${kind}">나중에</button>`;
+
+/** The one reminder home shows (src/nudges.js picks it). */
+function nudgeCard(v) {
+  if (v.nudge === 'feedback') return `<section class="surface nudge-card"><p class="nudge-title">써 보니 어땠나요? 1분이면 돼요.</p><div class="action-row">${button('의견 남기기', 'feedback-open', { class: 'small' })}${later('feedback')}</div></section>`;
+  if (v.nudge === 'install') return `<section class="surface nudge-card"><p class="nudge-title">홈 화면에 추가해 두세요</p><p>앱처럼 바로 열리고, 기록이 더 오래 남아요.</p>${v.installHelp ? `<p class="subtle" role="status">${e(v.installHelp)}</p>` : ''}<div class="action-row">${button('홈 화면에 추가', 'install', { class: 'small' })}${later('install')}</div></section>`;
+  if (v.nudge === 'backup') return `<section class="surface nudge-card"><p>기록은 이 폰에만 있어요. 백업 파일을 받아 두면 폰을 바꿔도 이어서 쓸 수 있어요.</p><div class="action-row">${button('백업 내려받기', 'export', { class: 'small', disabled: v.demo || Boolean(v.busy) })}${later('backup')}</div></section>`;
+  return '';
+}
+
 function home(v) {
   const hasDraft = Boolean(v.state.draft);
   const today = v.state.activities.some(a => a.day === localDay() && a.type === 'practice');
-  return `<div class="greeting"><h1>${today ? '오늘도 수고했어요.' : '반가워요.'}<br><strong>${today ? '차곡차곡, 나의 목소리 기록.' : '오늘의 목소리를 만나볼까요?'}</strong></h1><div class="date-label">${icon('sun')}${dateText(new Date())}</div></div>
+  return `<div class="greeting"><h1>${today ? '오늘도 수고했어요.' : '반가워요.'}<br><strong>${today ? '차곡차곡, 나의 목소리 기록.' : '오늘의 목소리를 만나볼까요?'}</strong></h1><div class="date-label">${icon('sun')}${dateText(new Date())}</div></div>${nudgeCard(v)}
   <div class="home-grid"><section class="lesson-cover"><div class="cover-top"><span class="lesson-tag">${icon('note')}${hasDraft ? '이어지는 나의 레슨' : '나에게 맞는 첫 레슨'}</span><span class="mini-pill">허밍으로 시작</span></div>${noteArt}<div class="cover-copy"><h2>편한 음부터,<br>한 걸음씩.</h2><p>${hasDraft ? '잠시 멈췄던 연습이 기다리고 있어요.<br>오늘의 상태를 확인하고 이어가요.' : '내가 편하게 낼 수 있는 음을 찾고,<br>그 높이에서 짧게 연습해요.'}</p></div><div class="cover-bottom">${button(hasDraft ? '이어서 연습하기' : today ? '새 레슨 시작하기' : '첫 레슨 시작하기', 'begin', { icon: 'arrow', disabled: v.loading })}<button class="text-button" data-action="demo">마이크 없이 둘러보기</button></div></section>
   <aside class="side-column"><section>${week(v.state)}</section><hr class="side-divider"><section><h2 class="section-label">오늘은 이렇게 연습해요</h2><ol class="next-steps"><li><span class="step-number">01</span><div><strong>편한 음 찾기</strong><small>내 목소리의 시작점</small></div></li><li><span class="step-number">02</span><div><strong>나에게 맞춰 연습</strong><small>확인한 음에서 한 번 더</small></div></li><li><span class="step-number">03</span><div><strong>오늘의 느낌 남기기</strong><small>다음 연습으로 이어지는 기록</small></div></li></ol></section></aside></div>
-  <div class="home-lower"><button class="learn-teaser" data-action="learn"><span class="learn-symbol">${icon('book')}</span><span><strong>연습 전, 이것만 알아두세요</strong><p>음높이와 편안함은 어떻게 다를까요?</p></span>${icon('arrow')}</button><div class="rest-note">${icon('leaf')}<p>목소리가 피곤한 날에는 쉬어가도 괜찮아요.<br>오늘의 휴식도 나를 알아가는 기록이에요.</p></div></div>`;
+  <div class="home-lower"><button class="learn-teaser" data-action="learn"><span class="learn-symbol">${icon('book')}</span><span><strong>연습 전, 이것만 알아두세요</strong><p>음높이와 편안함은 어떻게 다를까요?</p></span>${icon('arrow')}</button><div class="rest-note">${icon('leaf')}<p>목소리가 피곤한 날에는 쉬어가도 괜찮아요.<br>오늘의 휴식도 나를 알아가는 기록이에요.</p></div></div>${v.feedbackUrl ? '<p class="feedback-link"><button class="text-button" data-action="feedback-open">의견 남기기</button></p>' : ''}`;
 }
 
 function check(v) {
@@ -134,7 +144,8 @@ function history(v) {
     return `<article class="record-item"><div class="record-head"><div><h2>${e(dateStringText(s.day))} · 편한 음 찾기</h2><p>${s.completedAt ? '탐색 마침' : '중간 기록'}${s.practice ? ' + 짧은 허밍' : ''}</p></div><span class="badge">허밍</span></div><div class="record-note">${summary.notes.length ? summary.notes.map(note).map(e).join(' / ') : '음높이 미확인 · 느낌 기록'}</div><div class="record-actions">${button('자세히 보기', 'detail', { class: 'secondary small', id: s.id })}${button('삭제', 'delete-session', { class: 'quiet small', id: s.id })}</div></article>`;
   }).join('') : `<div class="empty">${icon('history')}<h2>첫 기록을 기다리고 있어요</h2><p>편한 음을 찾아보고 오늘의 느낌을 남겨보세요.</p>${button('첫 레슨 시작하기', 'begin', { icon: 'arrow' })}</div>`}</section>
   ${v.state.activities.filter(a => a.type !== 'practice').length ? `<section class="surface"><h2>배움과 휴식</h2>${v.state.activities.filter(a => a.type !== 'practice').slice(-14).reverse().map(a => `<p>${e(dateStringText(a.day))} · ${a.type === 'learn' ? '연습 전 알아두기' : '목소리 쉬어가기'}</p>`).join('')}</section>` : ''}
-  <details class="settings"><summary>기록과 개인정보 관리</summary><p>이 브라우저에만 저장돼요. 사이트 데이터를 지우거나 저장 공간이 정리되면 기록이 없어질 수 있어요. 소중한 기록은 백업해 두세요.</p><label class="checkbox-label"><input id="keep-audio" type="checkbox" ${v.state.settings.keepAudio ? 'checked' : ''}><span>앞으로의 원음도 보관하기 (기존 녹음은 유지돼요)</span></label>${consentRow(v.state.settings)}<div class="action-row">${button('백업 내려받기', 'export', { class: 'secondary small', disabled: v.demo || Boolean(v.busy) })}${button('백업 가져오기', 'import', { class: 'secondary small', disabled: v.demo || Boolean(v.busy) })}</div><input class="file-input" type="file" id="backup-file" accept="application/json,.json"><p>곡과 플레이리스트도 함께 백업해요. 가져오면 현재 기록과 플레이리스트가 백업 내용으로 바뀝니다. 먼저 현재 기록을 백업해 주세요.</p>${button('모든 기록 삭제', 'clear', { class: 'quiet', disabled: v.demo || Boolean(v.busy) })}</details></div>`;
+  <section class="surface backup-area"><h2>기록 백업</h2><p>기록은 이 폰에만 있어요. 백업 파일을 받아 두면 폰을 바꿔도 이어서 쓸 수 있어요.</p><div class="action-row">${button('백업 내려받기', 'export', { class: 'secondary small', disabled: v.demo || Boolean(v.busy) })}${button('백업 가져오기', 'import', { class: 'secondary small', disabled: v.demo || Boolean(v.busy) })}</div><input class="file-input" type="file" id="backup-file" accept="application/json,.json"><p class="subtle">곡과 플레이리스트도 함께 백업해요. 가져오면 현재 기록과 플레이리스트가 백업 내용으로 바뀝니다. 먼저 현재 기록을 백업해 주세요.</p></section>
+  <details class="settings"><summary>기록과 개인정보 관리</summary><p>이 브라우저에만 저장돼요. 사이트 데이터를 지우거나 저장 공간이 정리되면 기록이 없어질 수 있어요. 소중한 기록은 백업해 두세요.</p><label class="checkbox-label"><input id="keep-audio" type="checkbox" ${v.state.settings.keepAudio ? 'checked' : ''}><span>앞으로의 원음도 보관하기 (기존 녹음은 유지돼요)</span></label>${consentRow(v.state.settings)}<p class="subtle">이 앱의 서버는 하루 사용량을 세려고 기기마다 무작위 번호 하나를 받아요. 이름이나 연락처와 이어지지 않아요.</p>${button('모든 기록 삭제', 'clear', { class: 'quiet', disabled: v.demo || Boolean(v.busy) })}</details></div>`;
 }
 
 /** 알아두기: today's column (or a past one chosen from the list), the same article layout for every column. */
@@ -171,9 +182,26 @@ function done(v) {
 }
 
 // The storage notice sits in its own box so the song screen can refresh it without redrawing a playing video.
-export const pageNotice = v => v.storageError ? `<div class="notice" role="alert">${e(v.storageError)} <button class="text-button" data-action="retry-storage">다시 저장</button></div>` : '';
+// A sleeping server's notice uses the same box; a storage problem comes first.
+export const pageNotice = v => v.storageError ? `<div class="notice" role="alert">${e(v.storageError)} <button class="text-button" data-action="retry-storage">다시 저장</button></div>`
+  : v.serverWaking ? '<div class="notice" role="status">연습실을 여는 중이에요. 1분쯤 걸릴 수 있어요.</div>' : '';
+
+/** Before the app: the invite code. */
+function inviteView(v) {
+  return `<div class="narrow"><div class="lesson-header"><h1>초대받은 분만 쓸 수 있어요</h1><p>받은 초대 링크로 다시 열거나, 초대 코드나 받은 링크를 그대로 붙여 넣어 주세요.</p></div><form id="invite-form" class="surface gate-form"><label for="invite-code">초대 코드</label><input id="invite-code" name="code" type="text" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" maxlength="300" required ${v.busy ? 'disabled' : ''}>${v.inviteError ? `<p class="error-box" role="alert">${e(v.inviteError)}</p>` : ''}<button class="button" type="submit" ${v.busy ? 'disabled' : ''}>들어가기</button></form></div>`;
+}
+
+/** Before the app, inside KakaoTalk (or another app's browser): the microphone and storage may not work there. */
+function outsideView(v) {
+  const open = v.outsideUrl ? button('기본 브라우저로 열기', 'open-outside') : '';
+  return `<div class="narrow"><div class="lesson-header"><h1>다른 브라우저에서 열어 주세요</h1><p>카카오톡 같은 앱 안에서는 마이크와 저장이 잘 안 될 수 있어요.</p></div><section class="surface gate-form">${open}<p class="subtle">안 열리면 화면 구석의 ⋮(또는 공유) 버튼에서 ‘다른 브라우저로 열기’를 눌러 주세요.</p>${button('그냥 여기서 쓸게요', 'stay-inside', { class: 'secondary' })}</section></div>`;
+}
+
+// Screens shown before the app itself: no menu, nothing else to tap.
+const GATES = { invite: inviteView, 'open-outside': outsideView };
 
 export function renderView(v) {
+  if (GATES[v.page]) return `<div class="wrap gate"><header class="site-header"><span class="brand"><span class="wordmark">sing<span>•</span></span><span class="brand-caption">나의 작은<br>보컬 연습실</span></span></header><main id="main" class="page" tabindex="-1"><div id="page-notice">${pageNotice(v)}</div>${GATES[v.page](v)}</main></div>`;
   const renderers = { home, check, intro, explore: x => capture(x), result, practice: x => capture(x, true), done, history, detail: x => result(x, true), learn, rest, songs: playlistHomeView, playlist: playlistView, 'playlist-form': playlistFormView, 'all-songs': allSongsView, 'ai-consent': aiConsentView, 'song-form': songFormView, 'song-detail': songDetailView, 'voice-intro': withOnboarding(voiceIntroView), 'voice-pick': withOnboarding(voicePickView), 'voice-result': withOnboarding(voiceResultView), 'voice-manual': withOnboarding(voiceManualView), 'song-pick': withOnboarding(songPickView) };
   const nav = ['songs', 'playlist', 'playlist-form', 'all-songs', 'ai-consent', 'song-form', 'song-detail', 'voice-intro', 'voice-pick', 'voice-result', 'voice-manual', 'song-pick'].includes(v.page) ? 'songs' : v.page === 'learn' ? 'learn' : ['history', 'detail'].includes(v.page) ? 'history' : 'home';
   return `${v.demo ? '<div class="demo-banner">체험 모드 · 연습과 플레이리스트는 기기에 저장되지 않아요.<button data-action="exit-demo">체험 마치기</button></div>' : ''}<div class="wrap"><header class="site-header"><button class="brand" data-action="home" aria-label="SING 오늘의 연습"><span class="wordmark">sing<span>•</span></span><span class="brand-caption">나의 작은<br>보컬 연습실</span></button><nav class="navigation" aria-label="주요 메뉴">${[['home', '오늘의 연습', 'home'], ['songs', '뭐 부르지?', 'note'], ['learn', '알아두기', 'book'], ['history', '나의 기록', 'history']].map(([page, title, glyph]) => `<button class="nav-button ${nav === page ? 'active' : ''}" data-action="${page}" ${nav === page ? 'aria-current="page"' : ''}>${icon(glyph)}${title}</button>`).join('')}</nav></header><main id="main" class="page" tabindex="-1"><div id="page-notice">${pageNotice(v)}</div>${renderers[v.page]?.(v) || home(v)}</main><footer class="site-footer"><span>차근차근, 내 목소리의 속도로.<span class="prototype-label">개발 버전 0.1</span></span><span class="footer-lock">${icon('lock')}기록은 이 기기에만 · AI는 동의할 때만</span></footer></div>`;

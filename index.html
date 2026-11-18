@@ -6,6 +6,11 @@
     <meta name="theme-color" content="#183e3b">
     <meta name="description" content="오늘 편안한 음을 찾고, 내 목소리에 맞춰 연습하는 작은 보컬 연습실.">
     <link rel="icon" type="image/svg+xml" href="/assets/icon.svg">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="SING">
     <link rel="stylesheet" href="/src/styles.css">
     <title>SING — 나의 작은 보컬 연습실</title>
   </head>
@@ -13,6 +18,7 @@
     <a class="skip-link" href="#main">본문으로 이동</a>
     <div id="app"><main class="loading"><span class="wordmark">sing<span>•</span></span><p>연습실을 열고 있어요.</p></main></div>
     <div id="toast" role="status" aria-live="polite"></div>
+    <input class="file-input" type="file" id="karaoke-file" accept="audio/*,.m4a,.mp3,.wav,.aac,.ogg,.3gp" tabindex="-1" aria-hidden="true">
     <script type="module" src="/src/app.js"></script>
   </body>
 </html>

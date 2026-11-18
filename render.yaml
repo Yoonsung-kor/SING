@@ -1,0 +1,30 @@
+# Render Blueprint: one free web service in Singapore. Keys and codes are entered in the Render dashboard
+# (sync: false), never in this file. Guide: docs/deploy.md
+services:
+  - type: web
+    name: sing
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm install
+    startCommand: node scripts/serve.mjs
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: HOST
+        value: 0.0.0.0
+      - key: TRUST_PROXY
+        value: "1"
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL
+        sync: false
+      - key: YOUTUBE_API_KEY
+        sync: false
+      - key: INVITE_CODES
+        sync: false
+      - key: ADMIN_KEY
+        sync: false
+      - key: FEEDBACK_FORM_URL
+        sync: false

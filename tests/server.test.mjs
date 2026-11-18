@@ -178,3 +178,106 @@ test('practice-feedback endpoint checks the request and maps the answers', async
     assert.equal((await send(off.port, humming)).status, 503);
   } finally { s.close(); off.close(); }
 });
+
+test('health, config and hello answer without an access guard; usage stays hidden', async () => {
+  const s = await start({ recommend: null });
+  try {
+    const health = await fetch(`http://127.0.0.1:${s.port}/api/health`);
+    assert.deepEqual([health.status, await health.json()], [200, { ok: true }]);
+    const config = await fetch(`http://127.0.0.1:${s.port}/api/config`);
+    assert.deepEqual([config.status, await config.json()], [200, { inviteRequired: false, feedbackUrl: null }]);
+    assert.equal((await fetch(`http://127.0.0.1:${s.port}/api/hello`)).status, 200);
+    const stats = await fetch(`http://127.0.0.1:${s.port}/api/admin/stats?key=anything`);
+    assert.deepEqual([stats.status, await stats.json()], [404, { error: 'not-found' }]);
+    const unknown = await fetch(`http://127.0.0.1:${s.port}/api/nothing`);
+    assert.deepEqual([unknown.status, await unknown.json()], [404, { error: 'not-found' }]);
+  } finally { s.close(); }
+  const withForm = await start({ recommend: null, config: { feedbackUrl: 'https://forms.gle/x' } });
+  try { assert.equal((await (await fetch(`http://127.0.0.1:${withForm.port}/api/config`)).json()).feedbackUrl, 'https://forms.gle/x'); }
+  finally { withForm.close(); }
+});
+
+test('every API path but health and config needs the invite code', async () => {
+  const { createAccess } = await import('../scripts/access.mjs');
+  const access = createAccess({ inviteCodes: ['abc12345'], adminKey: 'k'.repeat(16) });
+  const s = await start({ recommend: async () => ({ items: [], intent: 'any', fallback: false }), lookupRange: async () => null, searchSongs: async () => ({}), findSections: async () => null, findVideos: async () => ({ candidates: [] }), practiceFeedback: async () => null, access });
+  const url = path => `http://127.0.0.1:${s.port}${path}`;
+  const json = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' };
+  try {
+    for (const [path, init] of [['/api/hello'], ['/api/song-search?q=a'], ['/api/song-sections?title=a'], ['/api/song-videos?title=a&side=mv'], ['/api/recommend', json], ['/api/song-range', json], ['/api/practice-feedback', json], ['/api/nothing']]) {
+      const response = await fetch(url(path), init);
+      assert.deepEqual([response.status, await response.json()], [401, { error: 'invite' }], path);
+    }
+    const headers = { 'X-Sing-Invite': 'abc12345', 'X-Sing-Device': '00000000-0000-4000-8000-000000000001' };
+    assert.equal((await fetch(url('/api/hello'), { headers })).status, 200);
+    assert.equal((await fetch(url('/api/health'))).status, 200);
+    assert.deepEqual(await (await fetch(url('/api/config'))).json(), { inviteRequired: true, feedbackUrl: null });
+    assert.equal((await fetch(url('/api/admin/stats?key=wrong'))).status, 404);
+    const stats = await fetch(url(`/api/admin/stats?key=${'k'.repeat(16)}`));
+    assert.equal(stats.status, 200);
+    assert.equal((await stats.json()).days[0].devices, 1);
+    assert.equal((await fetch(url('/'))).status, 200, 'pages need no code');
+  } finally { s.close(); }
+});
+
+test('the home-screen files are served with their types, and nothing else new is', async () => {
+  const s = await start({ recommend: null });
+  const get = path => fetch(`http://127.0.0.1:${s.port}${path}`);
+  try {
+    for (const [path, type] of [['/sw.js', 'text/javascript'], ['/manifest.webmanifest', 'application/manifest+json'], ['/assets/icon-192.png', 'image/png'], ['/assets/icon-512.png', 'image/png'], ['/assets/apple-touch-icon.png', 'image/png']]) {
+      const response = await get(path);
+      assert.equal(response.status, 200, path);
+      assert.ok(response.headers.get('content-type').startsWith(type), `${path}: ${response.headers.get('content-type')}`);
+    }
+    assert.equal((await get('/package.json')).status, 404);
+    assert.equal((await get('/render.yaml')).status, 404);
+  } finally { s.close(); }
+});
+
+test('practice-feedback takes spot requests and answers with words', async () => {
+  const send = (port, body) => fetch(`http://127.0.0.1:${port}/api/practice-feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const item = id => ({ id, kind: 'high-hold', outcome: 'kept', section: '', from: null, to: '2옥 라', over: null, repeated: false });
+  const spots = { kind: 'spots', song: { title: '곡', artist: '' }, comfortableHigh: null, items: [item('s1')] };
+  const words = [{ id: 's1', text: '높은 음을 끝까지 지켰어요.' }];
+  const s = await start({ recommend: null, practiceFeedback: async body => (body.kind === 'spots' ? { words } : null) });
+  const slow = await start({ recommend: null, practiceFeedback: async () => { throw new AiError('timeout', 't'); } });
+  const off = await start({ recommend: null });
+  try {
+    const ok = await send(s.port, spots);
+    assert.deepEqual([ok.status, await ok.json()], [200, { words }]);
+    assert.equal((await send(s.port, { ...spots, items: ['s1', 's2', 's3', 's1'].map(item) })).status, 400);
+    assert.equal((await send(off.port, spots)).status, 503);
+    assert.equal((await send(slow.port, spots)).status, 504);
+  } finally { s.close(); slow.close(); off.close(); }
+});
+
+test('the old per-line song feedback is no longer taken', async () => {
+  const s = await start({ recommend: null, practiceFeedback: async () => ({ good: ['x'], improve: [], practice: [] }) });
+  const song = { kind: 'song', song: { title: '곡', artist: '' }, comfortableHigh: null, lines: [{ id: 0, section: '', voiced: 1, top: null, overComfort: 0, wobble: 0, gaps: 0 }], chorusDiffs: [] };
+  try {
+    const response = await fetch(`http://127.0.0.1:${s.port}/api/practice-feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(song) });
+    assert.deepEqual([response.status, await response.json()], [400, { error: 'bad-request' }]);
+  } finally { s.close(); }
+});
+
+test('one page load uses one version: module addresses carry a hash of the scripts, and another version is not served', async () => {
+  const s = await start({ recommend: null });
+  const get = path => fetch(`http://127.0.0.1:${s.port}${path}`);
+  try {
+    const home = await get('/');
+    const page = await home.text();
+    const v = /"\/src\/app\.js\?v=([0-9a-f]{10})"/.exec(page)?.[1];
+    assert.ok(v, 'the page loads the stamped app');
+    assert.equal(home.headers.get('x-sing-version'), v);
+    const app = await get(`/src/app.js?v=${v}`);
+    assert.equal(app.status, 200);
+    assert.equal(app.headers.get('x-sing-version'), v);
+    const text = await app.text();
+    assert.ok(text.includes(`from './views.js?v=${v}'`), 'relative imports are stamped');
+    assert.doesNotMatch(text, /from '\.\/[\w.-]+\.js'/, 'no unstamped import is left');
+    assert.ok((await (await get(`/src/analysis-client.js?v=${v}`)).text()).includes(`'/src/analysis-worker.js?v=${v}'`), 'the worker too');
+    assert.ok((await (await get(`/src/karaoke-recorder.js?v=${v}`)).text()).includes(`'/src/pcm-worklet.js?v=${v}'`), 'and the worklet');
+    assert.equal((await get('/src/app.js?v=0123456789')).status, 404, 'an old version is refused, so the phone uses its own copy of it');
+    assert.equal((await get('/src/app.js')).status, 200, 'unstamped addresses still work (test pages)');
+  } finally { s.close(); }
+});

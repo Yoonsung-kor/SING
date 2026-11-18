@@ -1,0 +1,18 @@
+# Wakes the free Render server every 10 minutes during the evaluation weeks (09:00-01:50 in Korea).
+# Set the repository variable SING_URL (Settings > Secrets and variables > Actions > Variables) to the server's address.
+# Remove this file after the evaluation. Never fails: a missing address or a sleeping server is only logged.
+name: keep-awake
+on:
+  schedule:
+    - cron: "*/10 0-16 * * *"
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - env:
+          SING_URL: ${{ vars.SING_URL }}
+        run: |
+          if [ -z "$SING_URL" ]; then echo "SING_URL is not set yet"; exit 0; fi
+          curl -fsS --max-time 100 "$SING_URL/api/health" || echo "the server did not answer"
