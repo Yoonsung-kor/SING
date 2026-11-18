@@ -51,3 +51,12 @@ test('the karaoke file input lives outside the redrawn page, so a redraw while t
   const rootChange = app.slice(from, app.indexOf('\n});', from));
   assert.doesNotMatch(rootChange, /karaoke-file/);
 });
+
+// docs/superpowers/ holds private notes (git-ignored): public docs must not link into it.
+const privateLinks = text => [...text.matchAll(/\]\((?:\.\.\/|\.\/)?(?:docs\/)?superpowers\/[^)]*\)/g)].map(match => match[0]);
+
+test('public docs do not link to the private notes', () => {
+  for (const name of ['README.md', 'docs/ai-plan.md', 'docs/architecture.md', 'docs/ui-flows.md', 'docs/roadmap.md', 'docs/deploy.md']) {
+    assert.deepEqual(privateLinks(readFileSync(new URL(`../${name}`, import.meta.url), 'utf8')), [], name);
+  }
+});
