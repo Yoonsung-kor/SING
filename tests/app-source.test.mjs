@@ -34,3 +34,20 @@ test('recording in the app stays behind ?record until it is checked at a karaoke
   assert.match(app.slice(app.indexOf('function stopSongPlayer'), app.indexOf('function dropSinging')), /discardKaraokeRecording\(\)/);
   assert.match(app, /addEventListener\('pagehide'[^\n]*discardKaraokeRecording\(\)/);
 });
+
+test('the invite field goes through inviteFromInput, so a pasted link works too', () => {
+  const submit = app.slice(app.indexOf('async function submitInvite'), app.indexOf('async function resumeOrCreate'));
+  assert.match(submit, /inviteFromInput\(new FormData\(form\)\.get\('code'\)\)/);
+  assert.doesNotMatch(submit, /\{8,64\}/, 'no second copy of the code rule');
+});
+
+test('the karaoke file input lives outside the redrawn page, so a redraw while the picker is open cannot lose the file', () => {
+  const index = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const input = index.indexOf('<input class="file-input" type="file" id="karaoke-file" accept="audio/*,.m4a,.mp3,.wav,.aac,.ogg,.3gp"');
+  assert.ok(input > 0, 'index.html has the input');
+  assert.ok(input > index.indexOf('<div id="app">') && input > index.indexOf('</div>', index.indexOf('<div id="app">')), 'after the app element');
+  assert.match(app, /document\.querySelector\('#karaoke-file'\)\?\.addEventListener\('change'/);
+  const from = app.indexOf("root.addEventListener('change'");
+  const rootChange = app.slice(from, app.indexOf('\n});', from));
+  assert.doesNotMatch(rootChange, /karaoke-file/);
+});

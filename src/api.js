@@ -6,8 +6,13 @@ const DEVICE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const KEYS = Object.freeze({ invite: 'sing.invite', device: 'sing.device' });
 const LIMITS = ['daily-limit', 'slow-down'];
 
+/** The browser's localStorage, or null: with site data blocked even reading the property throws. */
+function browserStorage() {
+  try { return globalThis.localStorage ?? null; } catch { return null; }
+}
+
 /** localStorage when it works; memory when it is missing or blocked (private windows, in-app browsers). Never throws. */
-export function safeStorage(local = globalThis.localStorage) {
+export function safeStorage(local = browserStorage()) {
   const memory = new Map();
   return {
     get(key) {
@@ -32,6 +37,15 @@ export function inviteFromHash(hash) {
   let code;
   try { code = decodeURIComponent(match[1]); } catch { return null; }
   return INVITE.test(code) ? code : null;
+}
+
+/** What a friend typed or pasted into the invite field: the code itself, or the whole invite link (an iPhone's
+ * home-screen app keeps its own storage, so it asks once more, and the link is what the friend has at hand). */
+export function inviteFromInput(text) {
+  const value = String(text ?? '').trim();
+  if (INVITE.test(value)) return value;
+  const link = /#invite=[^\s&]+/.exec(value);
+  return link ? inviteFromHash(link[0]) : null;
 }
 
 export function createApi({ fetchImpl = (...args) => fetch(...args), storage = safeStorage(), newId = () => crypto.randomUUID(), onWaking = () => {}, onInvite = () => {}, onLimit = () => {}, wakeAfterMs = 2500, timer = setTimeout } = {}) {

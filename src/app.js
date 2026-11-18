@@ -22,10 +22,10 @@ import { hasCurrentConsent, withConsent, withoutConsent } from './consent.js';
 import { shouldShowOnboarding, startOnboarding, addPick, applyLookup, setVoiceType, setPickKey, toggleOctave, removePick, onboardingResult, commitOnboarding, commitManual, dismissOnboarding, emptySearch, markSlow, startPicker, commitPicks } from './onboarding.js';
 import { searchResultsHtml, voicePicksHtml, pickActionsHtml } from './onboarding-views.js';
 import { RANGE_BOUNDS, candidateShift } from './vocal-range.js';
-import { createApi, inviteFromHash } from './api.js';
+import { createApi, inviteFromHash, inviteFromInput } from './api.js';
 import { createBackTrap } from './back.js';
 import { inAppBrowser, externalUrl, platform, isStandalone } from './environment.js';
-import { nextNudge, usageSummary, feedbackLink } from './nudges.js';
+import { nextNudge, usageSummary, feedbackLink, installHelp as installHelpFor } from './nudges.js';
 
 const root = document.querySelector('#app');
 const audio = new AudioEngine();
@@ -40,7 +40,6 @@ let outsideUrl = null;
 // Adding to the home screen: Android Chrome offers its own prompt (kept until the friend taps); elsewhere we explain.
 let installPrompt = null;
 let installHelp = null;
-const INSTALL_HELP = { ios: '아래 공유 버튼을 누르고 ‘홈 화면에 추가’를 골라 주세요.', other: '브라우저 메뉴(⋮)에서 ‘홈 화면에 추가’를 골라 주세요.' };
 window.addEventListener('beforeinstallprompt', event => { event.preventDefault(); installPrompt = event; });
 window.addEventListener('appinstalled', () => { installPrompt = null; markNow('installNudgeAt'); });
 const WAKE_AGAIN_MS = 10 * 60 * 1000;
@@ -280,7 +279,7 @@ async function polishWords(key = 'singReport') {
  * The samples stay in memory for "내 녹음 듣기" and are dropped when the song screen closes. Nothing is stored or sent. */
 async function analyzeKaraokeFile(file) {
   const song = selectedSong();
-  if (!file || !song) return;
+  if (!file || !song || !onSongScreen(song.id)) return;
   dropKaraokeTake();
   const problem = fileProblem(file);
   if (problem) return showKaraoke({ status: 'problem', problem });
@@ -1097,9 +1096,9 @@ function inviteRefused() {
 
 async function submitInvite(form) {
   if (busy) return;
-  const code = String(new FormData(form).get('code') ?? '').trim();
+  const code = inviteFromInput(new FormData(form).get('code'));
   const wrong = '초대 코드가 맞지 않아요. 다시 확인해 주세요.';
-  if (!/^[A-Za-z0-9_-]{8,64}$/.test(code)) { inviteError = wrong; return render(); }
+  if (!code) { inviteError = wrong; return render(); }
   api.invite.set(code);
   busy = 'invite';
   inviteError = '';
@@ -1591,7 +1590,7 @@ async function addToHomeScreen() {
       return render();
     } catch { /* fall through to the explanation */ }
   }
-  installHelp = platform(navigator.userAgent, { maxTouchPoints: navigator.maxTouchPoints }) === 'ios' ? INSTALL_HELP.ios : INSTALL_HELP.other;
+  installHelp = installHelpFor(platform(navigator.userAgent, { maxTouchPoints: navigator.maxTouchPoints }));
   render();
 }
 
@@ -1841,14 +1840,17 @@ root.addEventListener('change', async event => {
     }
     if (event.target.id === 'keep-audio') await persist({ ...state, settings: { ...state.settings, keepAudio: event.target.checked } });
     if (event.target.id === 'backup-file') await importBackup(event.target.files[0]);
-    if (event.target.id === 'karaoke-file') {
-      const picked = event.target.files[0];
-      event.target.value = '';
-      await analyzeKaraokeFile(picked).catch(() => { songUi = { ...songUi, karaoke: { status: 'problem', problem: 'error' } }; render(); });
-    }
   } catch {
     toast('백업을 가져오지 못했어요. 파일 형식을 확인해 주세요. 기존 기록은 유지했어요.');
   }
+});
+
+// The karaoke file input sits outside the redrawn page (index.html): the song screen redraws whenever a lookup
+// finishes, and a redraw while the phone's file picker is open would leave the chosen file on a detached input.
+document.querySelector('#karaoke-file')?.addEventListener('change', async event => {
+  const picked = event.target.files[0];
+  event.target.value = '';
+  await analyzeKaraokeFile(picked).catch(() => { songUi = { ...songUi, karaoke: { status: 'problem', problem: 'error' } }; render(); });
 });
 
 // Scrolling the full lyrics by hand pauses its follow-along for a moment.

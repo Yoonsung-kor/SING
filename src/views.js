@@ -188,7 +188,7 @@ export const pageNotice = v => v.storageError ? `<div class="notice" role="alert
 
 /** Before the app: the invite code. */
 function inviteView(v) {
-  return `<div class="narrow"><div class="lesson-header"><h1>초대받은 분만 쓸 수 있어요</h1><p>받은 초대 링크로 다시 열거나, 초대 코드를 적어 주세요.</p></div><form id="invite-form" class="surface gate-form"><label for="invite-code">초대 코드</label><input id="invite-code" name="code" type="text" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" maxlength="64" required ${v.busy ? 'disabled' : ''}>${v.inviteError ? `<p class="error-box" role="alert">${e(v.inviteError)}</p>` : ''}<button class="button" type="submit" ${v.busy ? 'disabled' : ''}>들어가기</button></form></div>`;
+  return `<div class="narrow"><div class="lesson-header"><h1>초대받은 분만 쓸 수 있어요</h1><p>받은 초대 링크로 다시 열거나, 초대 코드나 받은 링크를 그대로 붙여 넣어 주세요.</p></div><form id="invite-form" class="surface gate-form"><label for="invite-code">초대 코드</label><input id="invite-code" name="code" type="text" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" maxlength="300" required ${v.busy ? 'disabled' : ''}>${v.inviteError ? `<p class="error-box" role="alert">${e(v.inviteError)}</p>` : ''}<button class="button" type="submit" ${v.busy ? 'disabled' : ''}>들어가기</button></form></div>`;
 }
 
 /** Before the app, inside KakaoTalk (or another app's browser): the microphone and storage may not work there. */

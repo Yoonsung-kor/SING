@@ -54,3 +54,16 @@ test('a spot\'s time reads like speech', () => {
   assert.equal(spotTime(42), '42초쯤');
   assert.equal(spotTime(125.9), '2분 5초쯤');
 });
+
+test('a whole karaoke session in one file is refused by its length before it is decoded (no memory spent)', async () => {
+  const { Context, made } = fakeContext({ duration: 3600 });
+  let decoded = 0;
+  class Counting extends Context { async decodeAudioData(...args) { decoded++; return super.decodeAudioData(...args); } }
+  assert.deepEqual(await decodeToMono(file(29 * 1024 * 1024), { AudioContextImpl: Counting, durationOf: async () => 3600 }), { problem: 'too-long' });
+  assert.equal(decoded, 0, 'never decoded');
+  assert.equal(made.length, 0, 'no decoder made');
+  // Unknown length up front (no metadata): decoded, then judged by the decoded length as before.
+  const { Context: Plain } = fakeContext({ duration: 2 });
+  assert.ok((await decodeToMono(file(), { AudioContextImpl: Plain, durationOf: async () => null })).samples);
+  assert.ok((await decodeToMono(file(), { AudioContextImpl: Plain, durationOf: async () => Number.POSITIVE_INFINITY })).samples, 'a streaming length is no answer');
+});

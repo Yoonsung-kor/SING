@@ -1,4 +1,4 @@
-// Who may use the API on a shared server: an invite code, a per-address pace, and daily caps per device.
+// Who may use the API on a shared server: an invite code, a pace per phone (per address without the code), and daily caps per device.
 // Everything lives in memory (a free server has no disk), so a restart starts the counts again.
 // Nothing here logs a code, an address or a device id; only counts per day.
 import { timingSafeEqual } from 'node:crypto';
@@ -16,6 +16,17 @@ const KST_MS = 9 * 3600000;
 
 /** The date in Korea (UTC+9) as YYYY-MM-DD. */
 export const kstDay = ms => new Date(ms + KST_MS).toISOString().slice(0, 10);
+
+// Codes use the same characters an invite link can carry (#invite=CODE).
+const INVITE_CODE = /^[A-Za-z0-9_-]{8,64}$/;
+const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1']);
+
+/** Why the server must not start, or null. Open to the outside without invite codes, anyone could spend the AI key. */
+export function startupProblem({ host, inviteCodes }) {
+  if (inviteCodes.some(code => !INVITE_CODE.test(code))) return 'INVITE_CODES: 초대 코드는 영문자·숫자·-·_로 8~64자여야 해요. 서버를 켜지 않았어요.';
+  if (!inviteCodes.length && !LOOPBACK.has(host)) return '초대 코드 없이 바깥에서 열 수는 없어요. INVITE_CODES를 정하거나, 이 PC에서만 쓰려면 HOST를 127.0.0.1로 두세요. 서버를 켜지 않았어요.';
+  return null;
+}
 
 /** Constant-time comparison; a different length is simply "not equal". */
 function same(a, b) {
@@ -96,15 +107,19 @@ export function createAccess({ inviteCodes = [], adminKey = '', trustProxy = fal
       if (validDevice) see(record, device, at);
       return null;
     }
-    const address = addressOf(req);
-    if (bump(minute, address, MINUTE_MS, at) > limit.perMinute) return refuse(429, 'slow-down');
-    if (current(failures, address, limit.inviteWindowMs, at) >= limit.inviteFailures) return refuse(429, 'slow-down');
     const given = header(req, 'x-sing-invite');
     if (!given || !codes.some(code => same(code, given))) {
+      // Without the code: the pace and the wrong-code lockout go by address (there is nothing else to go by).
+      const address = addressOf(req);
+      if (bump(minute, address, MINUTE_MS, at) > limit.perMinute) return refuse(429, 'slow-down');
+      if (current(failures, address, limit.inviteWindowMs, at) >= limit.inviteFailures) return refuse(429, 'slow-down');
       bump(failures, address, limit.inviteWindowMs, at);
       return refuse(401, 'invite');
     }
     if (!validDevice) return refuse(400, 'device');
+    // With the code: each phone has its own pace, so friends behind one school or karaoke Wi-Fi do not share it,
+    // and someone else's wrong codes on that network hold nobody up.
+    if (bump(minute, `device:${device}`, MINUTE_MS, at) > limit.perMinute) return refuse(429, 'slow-down');
     see(record, device, at);
     if (AI.has(pathname)) {
       const mine = aiByDevice.get(device) ?? 0;

@@ -259,3 +259,25 @@ test('the old per-line song feedback is no longer taken', async () => {
     assert.deepEqual([response.status, await response.json()], [400, { error: 'bad-request' }]);
   } finally { s.close(); }
 });
+
+test('one page load uses one version: module addresses carry a hash of the scripts, and another version is not served', async () => {
+  const s = await start({ recommend: null });
+  const get = path => fetch(`http://127.0.0.1:${s.port}${path}`);
+  try {
+    const home = await get('/');
+    const page = await home.text();
+    const v = /"\/src\/app\.js\?v=([0-9a-f]{10})"/.exec(page)?.[1];
+    assert.ok(v, 'the page loads the stamped app');
+    assert.equal(home.headers.get('x-sing-version'), v);
+    const app = await get(`/src/app.js?v=${v}`);
+    assert.equal(app.status, 200);
+    assert.equal(app.headers.get('x-sing-version'), v);
+    const text = await app.text();
+    assert.ok(text.includes(`from './views.js?v=${v}'`), 'relative imports are stamped');
+    assert.doesNotMatch(text, /from '\.\/[\w.-]+\.js'/, 'no unstamped import is left');
+    assert.ok((await (await get(`/src/analysis-client.js?v=${v}`)).text()).includes(`'/src/analysis-worker.js?v=${v}'`), 'the worker too');
+    assert.ok((await (await get(`/src/karaoke-recorder.js?v=${v}`)).text()).includes(`'/src/pcm-worklet.js?v=${v}'`), 'and the worklet');
+    assert.equal((await get('/src/app.js?v=0123456789')).status, 404, 'an old version is refused, so the phone uses its own copy of it');
+    assert.equal((await get('/src/app.js')).status, 200, 'unstamped addresses still work (test pages)');
+  } finally { s.close(); }
+});

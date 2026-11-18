@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createApi, safeStorage, inviteFromHash } from '../src/api.js';
+import { createApi, safeStorage, inviteFromHash, inviteFromInput } from '../src/api.js';
 
 const DEVICE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const memory = () => { const map = new Map(); return { get: key => map.get(key) ?? null, set: (key, value) => map.set(key, value), remove: key => map.delete(key), map }; };
@@ -47,6 +47,31 @@ test('a blocked browser store falls back to memory', () => {
   const none = safeStorage(undefined);
   none.set('a', 'b');
   assert.equal(none.get('a'), 'b');
+});
+
+test('a browser that refuses even to hand over its store (site data blocked) still gets the app, in memory', () => {
+  const before = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, get() { throw new Error('SecurityError: access denied'); } });
+  try {
+    const storage = safeStorage();
+    storage.set('sing.invite', 'abc12345');
+    assert.equal(storage.get('sing.invite'), 'abc12345');
+    const api = createApi({ newId: () => id });
+    assert.equal(api.deviceId(), id);
+  } finally {
+    if (before) Object.defineProperty(globalThis, 'localStorage', before);
+    else delete globalThis.localStorage;
+  }
+});
+
+test('the invite field takes the code itself or the whole invite link pasted from KakaoTalk', () => {
+  assert.equal(inviteFromInput('  abc12345 '), 'abc12345');
+  assert.equal(inviteFromInput('https://sing.onrender.com/#invite=abc12345'), 'abc12345');
+  assert.equal(inviteFromInput('초대 링크: https://sing.onrender.com/#invite=Code_2026-x 꼭 열어 줘'), 'Code_2026-x');
+  assert.equal(inviteFromInput('https://sing.onrender.com/'), null);
+  assert.equal(inviteFromInput('abc'), null, 'too short');
+  assert.equal(inviteFromInput('abc 12345'), null);
+  assert.equal(inviteFromInput(null), null);
 });
 
 test('the invite code is read from the link', () => {

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { usageSummary, feedbackLink, nextNudge } from '../src/nudges.js';
+import { usageSummary, feedbackLink, nextNudge, installHelp } from '../src/nudges.js';
 import { defaultState } from '../src/storage.js';
 
 const DAY = 86400000;
@@ -59,4 +59,12 @@ test('the backup card comes with something worth keeping, then every two weeks',
 test('one card at a time, the survey first', () => {
   assert.equal(at(withState({ finished: 2, songs: 3, settings: { openDays: ['2026-11-18', '2026-11-19'] } })), 'feedback');
   assert.equal(at(withState({ finished: 2, songs: 3, settings: { feedbackAt: ago(1) } })), 'install');
+});
+
+test('adding to the home screen: the iPhone words say its home-screen app asks for the invite once more', () => {
+  const ios = installHelp('ios');
+  assert.ok(ios.startsWith('아래 공유 버튼을 누르고 ‘홈 화면에 추가’를 골라 주세요.'));
+  for (const words of ['초대 코드를 한 번 더', '받은 초대 링크를 그대로 붙여 넣으면 돼요', '기록 백업']) assert.ok(ios.includes(words), words);
+  assert.equal(installHelp('android'), '브라우저 메뉴(⋮)에서 ‘홈 화면에 추가’를 골라 주세요.');
+  assert.equal(installHelp('other'), installHelp('android'));
 });

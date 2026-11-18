@@ -93,8 +93,9 @@ const gate = extra => renderView({ state: defaultState(), session: null, busy: f
 test('the invite screen asks for the code and shows no menu', () => {
   const html = gate({ page: 'invite' });
   assert.match(html, /초대받은 분만 쓸 수 있어요/);
-  assert.match(html, /받은 초대 링크로 다시 열거나, 초대 코드를 적어 주세요\./);
+  assert.match(html, /받은 초대 링크로 다시 열거나, 초대 코드나 받은 링크를 그대로 붙여 넣어 주세요\./);
   assert.match(html, /<form id="invite-form"/);
+  assert.match(html, /name="code"[^>]*maxlength="300"/, 'a whole pasted link fits');
   assert.match(html, /name="code"[^>]*autocapitalize="off"/);
   assert.match(html, /autocomplete="off"/);
   assert.match(html, />들어가기</);

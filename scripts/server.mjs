@@ -1,4 +1,6 @@
 import { readFile, stat } from 'node:fs/promises';
+import { readFileSync, readdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { AiError } from './ai.mjs';
 import { YoutubeError } from './youtube.mjs';
@@ -13,6 +15,22 @@ const staticHeaders = {
   // No Referrer-Policy header: YouTube refuses embedded playback without the page address (error 153).
   'Content-Security-Policy': "default-src 'self'; script-src 'self' https://www.youtube.com; style-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; frame-src https://www.youtube-nocookie.com; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
 };
+
+// One version per page load: every module address in the page and its scripts gets ?v=<hash of those files>, so the
+// phone's kept copies (sw.js) and fresh files can never mix in one load after a deploy. Another version's address is
+// refused (404), and the phone then uses its own copy of that version.
+const STAMPED = /^(index\.html|src\/[\w.-]+\.js)$/;
+const MODULE_ADDRESS = /(['"])(\.\/[\w.-]+\.js|\/src\/[\w.-]+\.js)\1/g;
+
+/** A hash of the page and its scripts, or null when the root has none (then nothing is stamped). */
+function scriptsVersion(root) {
+  try {
+    const hash = createHash('sha256');
+    const files = ['index.html', ...readdirSync(path.join(root, 'src')).filter(name => name.endsWith('.js')).sort().map(name => `src/${name}`)];
+    for (const file of files) hash.update(file).update(readFileSync(path.join(root, file)));
+    return hash.digest('hex').slice(0, 10);
+  } catch { return null; }
+}
 
 function sendJson(res, status, body) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
@@ -124,6 +142,7 @@ export function createHandler({ root, recommend, lookupRange = null, searchSongs
     return result && Array.isArray(result.items) ? { items: result.items, intent: result.intent, fallback: result.fallback } : null;
   });
   const rangeRun = lookupRange && (async body => ({ range: await lookupRange(body) ?? null }));
+  const version = scriptsVersion(root);
   return async (req, res) => {
     try {
       const url = new URL(req.url, 'http://localhost');
@@ -154,9 +173,13 @@ export function createHandler({ root, recommend, lookupRange = null, searchSongs
       if (!/^(index\.html|sw\.js|manifest\.webmanifest|src\/[\w.-]+|assets\/[\w.-]+|tests\/browser[\w.-]*)$/.test(relative)) { res.writeHead(404).end('Not found'); return; }
       const filename = path.resolve(root, relative);
       if (!filename.startsWith(root) || !(await stat(filename)).isFile()) { res.writeHead(404).end('Not found'); return; }
+      const stamped = Boolean(version) && STAMPED.test(relative);
+      const asked = url.searchParams.get('v');
+      if (stamped && asked && asked !== version) { res.writeHead(404).end('Not found'); return; }
       const data = await readFile(filename);
-      res.writeHead(200, { 'Content-Type': types[path.extname(filename)] || 'application/octet-stream', ...staticHeaders });
-      res.end(req.method === 'HEAD' ? undefined : data);
+      const body = stamped ? Buffer.from(data.toString('utf8').replace(MODULE_ADDRESS, `$1$2?v=${version}$1`)) : data;
+      res.writeHead(200, { 'Content-Type': types[path.extname(filename)] || 'application/octet-stream', ...staticHeaders, ...(version ? { 'X-Sing-Version': version } : {}) });
+      res.end(req.method === 'HEAD' ? undefined : body);
     } catch { if (!res.headersSent) res.writeHead(404).end('Not found'); }
   };
 }

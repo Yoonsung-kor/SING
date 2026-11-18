@@ -180,7 +180,7 @@ function karaokeBlock(ui) {
   const busy = state?.status === 'analyzing';
   // Recording in the app comes second, and only where it is switched on (plan N Task 7: until checked at a karaoke room).
   const record = ui.recordInApp ? `<button class="button secondary small" data-action="media-karaoke-record" ${busy ? 'disabled' : ''}>여기서 녹음하기</button>` : '';
-  return `<div class="media-karaoke open"><p>노래방에서 부른 녹음을 이 폰 안에서 분석해요. 녹음은 어디로도 보내지 않고, 이 화면을 떠나면 지워져요.</p><button class="button small" data-action="media-karaoke-file" ${busy ? 'disabled' : ''}>녹음 파일 고르기</button><p class="subtle">노래방에서 폰의 녹음 앱으로 녹음한 파일을 골라 주세요.</p><input class="file-input" type="file" id="karaoke-file" accept="audio/*,.m4a,.mp3,.wav,.aac,.ogg,.3gp">${record}<button class="text-button" data-action="media-karaoke-close">닫기</button>${status}</div>`;
+  return `<div class="media-karaoke open"><p>노래방에서 부른 녹음을 이 폰 안에서 분석해요. 녹음은 어디로도 보내지 않고, 이 화면을 떠나면 지워져요.</p><button class="button small" data-action="media-karaoke-file" ${busy ? 'disabled' : ''}>녹음 파일 고르기</button><p class="subtle">노래방에서 폰의 녹음 앱으로 녹음한 파일을 골라 주세요.</p>${record}<button class="text-button" data-action="media-karaoke-close">닫기</button>${status}</div>`;
 }
 
 function exerciseBlock(exercise) {

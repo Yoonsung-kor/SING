@@ -17,7 +17,12 @@ function worker({ network = async () => new Response('fresh', { status: 200 }) }
     async open(name) {
       if (!stores.has(name)) stores.set(name, new Map());
       const store = stores.get(name);
-      return { match: async request => store.get(key(request))?.clone(), put: async (request, response) => { store.set(key(request), response); } };
+      return {
+        match: async request => store.get(key(request))?.clone(),
+        put: async (request, response) => { store.set(key(request), response); },
+        keys: async () => [...store.keys()].map(url => new Request(url)),
+        delete: async request => store.delete(key(request)),
+      };
     },
     keys: async () => [...stores.keys()],
     delete: async name => stores.delete(name),
@@ -102,4 +107,33 @@ test('activation drops old stores and takes over open pages', async () => {
   await done;
   assert.deepEqual(await w.caches.keys(), ['sing-shell-v1']);
   assert.equal(w.claimed.count, 1);
+});
+
+test('once a fresh page is in use, the kept files of other versions are dropped (unversioned files stay)', async () => {
+  const w = worker({ network: async () => new Response('page', { status: 200, headers: { 'X-Sing-Version': 'bbbbbbbbbb' } }) });
+  await w.keep('/src/app.js?v=aaaaaaaaaa', 'old app');
+  await w.keep('/src/app.js?v=bbbbbbbbbb', 'new app');
+  await w.keep('/assets/icon-192.png', 'icon');
+  await (await w.ask('/').responded).text();
+  await flush();
+  await flush();
+  assert.equal(await w.kept('/src/app.js?v=aaaaaaaaaa'), null);
+  assert.equal(await w.kept('/src/app.js?v=bbbbbbbbbb'), 'new app');
+  assert.equal(await w.kept('/assets/icon-192.png'), 'icon');
+});
+
+test('a page served from the kept copy keeps its own version\'s files, even when the newer page arrives late', async () => {
+  const late = deferred();
+  const w = worker({ network: () => late.promise });
+  await w.keep('/', 'old page');
+  await w.keep('/src/app.js?v=aaaaaaaaaa', 'old app');
+  const event = w.ask('/');
+  await flush();
+  w.timers[0]();
+  assert.equal(await (await event.responded).text(), 'old page');
+  late.resolve(new Response('new page', { status: 200, headers: { 'X-Sing-Version': 'bbbbbbbbbb' } }));
+  await flush();
+  await flush();
+  assert.equal(await w.kept('/'), 'new page', 'the next load gets the new page');
+  assert.equal(await w.kept('/src/app.js?v=aaaaaaaaaa'), 'old app', 'the page in use still finds its files');
 });

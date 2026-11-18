@@ -119,8 +119,10 @@ export function lineAt(lines, time) {
 /** Every demanding note before any choosing: its kind, how it went, and what choosing needs (rise, length). */
 export function spotCandidates(notes, { comfortableHighMidi = null, source = 'clean', rules = SPOT_RULES } = {}) {
   const comfort = Number.isFinite(comfortableHighMidi) ? comfortableHighMidi : null;
-  // Without a comfortable top, the top three semitones of what was sung count as high.
-  const highFrom = comfort !== null ? comfort - rules.nearComfort : Math.max(...notes.map(note => note.midi)) - 3;
+  // Without a comfortable top, the top three semitones of what was sung count as high, measured from the long notes:
+  // one short slip (a detector's octave jump, a squeak) must not lift the bar over every real high note.
+  const long = notes.filter(note => note.end - note.start >= rules.held - EPS);
+  const highFrom = comfort !== null ? comfort - rules.nearComfort : Math.max(...(long.length ? long : notes).map(note => note.midi)) - 3;
   const candidates = [];
   notes.forEach((note, i) => {
     const prev = notes[i - 1];

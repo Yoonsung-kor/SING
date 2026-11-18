@@ -191,3 +191,13 @@ test('the answer does not depend on how often the pitch was read', () => {
   assert.deepEqual(shape(0.05), at25);
   assert.deepEqual(shape(0.02), at25);
 });
+
+test('without a comfortable top, one short high slip does not hide the long high notes', () => {
+  const long = { d: 1.2, midi: 70 };
+  const parts = [long, rest(5.6), long, rest(5.6), { d: 0.2, midi: 80 }, rest(5.6), long, rest(5.6), long];
+  for (const source of ['clean', 'karaoke']) {
+    const result = after(parts, { comfortableHighMidi: null, source });
+    assert.equal(result.status, 'ok');
+    assert.ok(result.spots.some(spot => spot.kind === 'high-hold' && spot.to === koreanNote(70)), `${source}: ${JSON.stringify(result.spots.map(spot => [spot.kind, spot.to]))}`);
+  }
+});
