@@ -220,3 +220,18 @@ test('the day the columns started is kept as a plain date; anything else is refu
   assert.equal(parseBackup(JSON.stringify(backup)).state.settings.learnStartDay ?? null, null);
   for (const bad of ['yesterday', '2026-13-01', 20261107]) assert.throws(() => parseBackup(withStart(bad)), undefined, String(bad));
 });
+
+test('backups keep the visit days and the reminders, and old backups without them still load', () => {
+  const withSettings = extra => JSON.stringify({ ...backup, state: { ...backup.state, settings: { ...backup.state.settings, ...extra } } });
+  const kept = parseBackup(withSettings({ openDays: ['2026-11-19', '2026-11-20'], installNudgeAt: '2026-11-19T01:00:00.000Z', feedbackNudgeAt: null, feedbackAt: '2026-11-20T01:00:00.000Z', backupNudgeAt: null, lastBackupAt: '2026-11-20T02:00:00.000Z' })).state.settings;
+  assert.deepEqual(kept.openDays, ['2026-11-19', '2026-11-20']);
+  assert.equal(kept.lastBackupAt, '2026-11-20T02:00:00.000Z');
+  assert.doesNotThrow(() => parseBackup(JSON.stringify(backup)));
+  assert.throws(() => parseBackup(withSettings({ openDays: ['2026-13-01'] })), /openDays/);
+  assert.throws(() => parseBackup(withSettings({ openDays: 'today' })), /openDays/);
+  const many = Array.from({ length: 61 }, (_, i) => new Date(Date.UTC(2026, 8, 1) + i * 86400000).toISOString().slice(0, 10));
+  assert.throws(() => parseBackup(withSettings({ openDays: many })), /openDays/);
+  assert.doesNotThrow(() => parseBackup(withSettings({ openDays: many.slice(1) })));
+  assert.throws(() => parseBackup(withSettings({ lastBackupAt: 'yesterday' })), /lastBackupAt/);
+  assert.throws(() => parseBackup(withSettings({ feedbackAt: 42 })), /feedbackAt/);
+});

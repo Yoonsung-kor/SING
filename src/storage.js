@@ -156,6 +156,14 @@ function validateState(value) {
   if (learnStartDay !== null && !(typeof learnStartDay === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(learnStartDay) && new Date(`${learnStartDay}T00:00:00Z`).toISOString().startsWith(learnStartDay))) invalid('settings.learnStartDay');
   const voiceOnboardingDismissedAt = value.settings.voiceOnboardingDismissedAt ?? null;
   if (voiceOnboardingDismissedAt !== null) timestamp(voiceOnboardingDismissedAt, 'settings.voiceOnboardingDismissedAt');
+  // The days the app was opened (the last 60) and the home reminders' times; older backups have none of them.
+  const openDays = value.settings.openDays ?? [];
+  if (!Array.isArray(openDays) || openDays.length > 60) invalid('settings.openDays');
+  openDays.forEach(entry => day(entry, 'settings.openDays'));
+  for (const key of ['installNudgeAt', 'feedbackNudgeAt', 'feedbackAt', 'backupNudgeAt', 'lastBackupAt']) {
+    const at = value.settings[key] ?? null;
+    if (at !== null) timestamp(at, `settings.${key}`);
+  }
   return { ...value, songs, playlists, settings: { ...value.settings, aiConsentAt, aiConsentVersion, voice, voiceOnboardingDismissedAt } };
 }
 

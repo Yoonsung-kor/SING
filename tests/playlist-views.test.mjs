@@ -76,7 +76,7 @@ test('an item without a range says so and offers no key', () => {
 
 test('consent page names OpenAI, what is sent, and what is not', () => {
   const html = aiConsentView({ state: defaultState(), selectedPlaylistId: 'p' });
-  for (const text of ['OpenAI', '플레이리스트 이름', '녹음은 보내지 않아요. 연습 측정값은 피드백을 받을 때만 보내요.', '연습 피드백을 받을 때 연습 측정값(목표음, 낸 음, 흔들림, 체감)이 OpenAI로 가요. 노래를 따라 부르고 받을 때는 곡 제목·가수와 구간 이름, 가사 줄 번호도 함께 가요. 녹음과 가사 글자는 보내지 않아요.', 'data-action="ai-consent-accept"', '나의 기록']) assert.ok(html.includes(text), text);
+  for (const text of ['OpenAI', '플레이리스트 이름', '녹음은 보내지 않아요. 연습 측정값은 피드백을 받을 때만 보내요.', '연습 피드백을 받을 때 연습 측정값(목표음, 낸 음, 흔들림, 체감)이 OpenAI로 가요. 노래 리포트(따라 부르기·노래방 녹음)의 문장을 다듬을 때는 곡 제목·가수, 구간 이름, 자리의 종류와 결과, 음 이름이 함께 가요. 노래방 녹음은 기기 안에서만 분석해요. 녹음, 시간, 가사는 보내지 않아요.', 'data-action="ai-consent-accept"', '나의 기록']) assert.ok(html.includes(text), text);
 });
 
 test('consent v2 also covers MusicBrainz search and my comfortable high', () => {
@@ -141,4 +141,9 @@ test('final #16: the consent copy names the lowest note it also sends', () => {
 
 test('consent v3 says search terms go to TJ', () => {
   assert.match(aiConsentView({ state: defaultState(), selectedPlaylistId: 'p' }), /TJ미디어/);
+});
+
+test('the consent screen says what the server itself receives', () => {
+  const html = aiConsentView({ state: defaultState(), selectedPlaylistId: 'p' });
+  assert.match(html, /이 앱의 서버는 하루 사용량을 세려고 기기마다 무작위 번호 하나를 받아요\. 이름이나 연락처와 이어지지 않아요\./);
 });

@@ -1,9 +1,9 @@
-// Sing-along measuring: every 50 ms, the note the microphone hears, stamped with the time getTime() gives.
+// Sing-along measuring: every 25 ms (finer leaps and long notes for the report), the note the microphone hears, stamped with the time getTime() gives.
 // Nothing is recorded: stop() hands over the frames and lets go of the microphone.
 import { MicrophoneLease } from './capture.js';
 import { detectPitch, frequencyToMidi } from './pitch.js';
 
-const FRAME_MS = 50;
+const FRAME_MS = 25;
 const CLARITY = 0.85;
 
 /** getTime() returns the playing video's time in seconds, or null while it is not playing (that moment is skipped). */

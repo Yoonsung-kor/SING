@@ -1,12 +1,17 @@
-import { hummingPayload, lineMetrics, sungLines, chorusDiffs, songPayload, songFrames, cleanFeedback } from './practice-feedback.js';
+import { hummingPayload, songFrames, cleanFeedback } from './practice-feedback.js';
 import { createSingAlong } from './sing-along.js';
+import { findSpots } from './hard-spots.js';
+import { spotsPayload, defaultSentence, cleanSpotWords } from './spot-words.js';
+import { fileProblem, decodeToMono } from './karaoke-file.js';
+import { runAnalysis } from './analysis-client.js';
+import { createKaraokeRecorder } from './karaoke-recorder.js';
 import { createLesson, recordAttempt, nextTarget, finishLesson, summarizeLesson, recommendedNote, localDay, addActivity, needsDailyCheck } from './lesson.js';
 import { defaultState, openStore } from './storage.js';
 import { AudioEngine, microphoneError } from './audio.js';
 import { noteName, frequencyToMidi } from './pitch.js';
 import { renderView, pageNotice } from './views.js';
 import { songDetailParts } from './song-views.js';
-import { defaultSongUi, currentVideoId } from './song-media-views.js';
+import { defaultSongUi, currentVideoId, firstLyricLine } from './song-media-views.js';
 import { createSongPlayer } from './song-player.js';
 import { readMedia, validateMedia, expireMedia, mediaNeeds, withSections, withNoTiming, withPasted, withCandidates, withProvisionalOriginal, upgradeOriginal, canSearchOriginal, dropCandidate, nextCandidate, setStart, canSetStart, startOf, toVideoTime, pinVideoTime, addPin, removePin, currentSectionIndex, lyricIndex, parseYoutubeLink, sameSongQuery } from './song-media.js';
 import { createSong, updateSong } from './songs.js';
@@ -17,9 +22,55 @@ import { hasCurrentConsent, withConsent, withoutConsent } from './consent.js';
 import { shouldShowOnboarding, startOnboarding, addPick, applyLookup, setVoiceType, setPickKey, toggleOctave, removePick, onboardingResult, commitOnboarding, commitManual, dismissOnboarding, emptySearch, markSlow, startPicker, commitPicks } from './onboarding.js';
 import { searchResultsHtml, voicePicksHtml, pickActionsHtml } from './onboarding-views.js';
 import { RANGE_BOUNDS, candidateShift } from './vocal-range.js';
+import { createApi, inviteFromHash, inviteFromInput } from './api.js';
+import { createBackTrap } from './back.js';
+import { inAppBrowser, externalUrl, platform, isStandalone } from './environment.js';
+import { nextNudge, usageSummary, feedbackLink, installHelp as installHelpFor } from './nudges.js';
 
 const root = document.querySelector('#app');
 const audio = new AudioEngine();
+// A free server sleeps when nobody uses it; the notice shows while it wakes (stays under any storage notice).
+let serverWaking = false;
+let lastAwake = 0;
+// What the server told us (GET /api/config), and the invite screen's message.
+let appConfig = { inviteRequired: false, feedbackUrl: null };
+let inviteError = '';
+// Inside KakaoTalk's own browser: the link that asks KakaoTalk to open the page in the default browser.
+let outsideUrl = null;
+// Adding to the home screen: Android Chrome offers its own prompt (kept until the friend taps); elsewhere we explain.
+let installPrompt = null;
+let installHelp = null;
+window.addEventListener('beforeinstallprompt', event => { event.preventDefault(); installPrompt = event; });
+window.addEventListener('appinstalled', () => { installPrompt = null; markNow('installNudgeAt'); });
+const WAKE_AGAIN_MS = 10 * 60 * 1000;
+const LIMIT_MESSAGES = { 'daily-limit': '오늘 쓸 수 있는 횟수를 다 썼어요. 내일 다시 쓸 수 있어요.', 'slow-down': '잠시 후 다시 시도해 주세요.' };
+const api = createApi({
+  onWaking: waking => {
+    serverWaking = waking;
+    const box = document.querySelector('#page-notice');
+    if (box) box.innerHTML = pageNotice({ storageError, serverWaking });
+  },
+  onLimit: kind => toast(LIMIT_MESSAGES[kind]),
+  onInvite: () => inviteRefused(),
+});
+
+// The phone's back button goes back inside the app (the screen's own back button), not out of it.
+const backTrap = createBackTrap({
+  history: window.history,
+  listen: (type, fn) => window.addEventListener(type, fn),
+  getPage: () => page,
+  getContext: () => ({ panelOpen: Boolean(songUi.panel), hasPicks: Boolean(onboarding?.picks?.length), editingPlaylist: Boolean(playlistDraft?.id) }),
+  run: action => handle(action, action === 'playlist-open' ? playlistDraft?.id : undefined).catch(err => {
+    busy = false;
+    render();
+    toast(err?.message || '작업을 마치지 못했어요. 다시 시도해 주세요.');
+  }),
+});
+
+/** Asks the server to wake up; the notice appears only if it is slow to answer. */
+async function wakeServer() {
+  if (await api.wake()) lastAwake = Date.now();
+}
 let store = null;
 let state = defaultState();
 let liveState = null;
@@ -52,6 +103,16 @@ let feedbackFor = null;
 let feedbackFailed = null;
 // Bumped by each sing-along take, so an answer for an older take is dropped.
 let singRequest = 0;
+// A report whose words wait for consent ("AI로 설명 다듬기"): kept through the consent screen, then shown again.
+let reportBeforeConsent = null;
+// The karaoke recording being analysed or reported on ({ samples, cancel }), in memory only; and its playback.
+let karaokeTake = null;
+let karaokePlayback = null;
+// Recording at the karaoke room inside the app, while the microphone is open (src/karaoke-recorder.js).
+let karaokeRecorder = null;
+// Recording in the app is shown only on pages opened with ?record until it has been checked at a karaoke room
+// (plan N Task 7): phones may treat the sound differently from their own recorder app, which is what was tested.
+const RECORD_IN_APP = (() => { try { return new URLSearchParams(location.search).has('record'); } catch { return false; } })();
 let pendingPickList = null;
 // Pages that own the shared pick state: onboarding and '곡 찾아 담기'.
 const isPickerPage = target => target.startsWith('voice-') || target === 'song-pick';
@@ -94,7 +155,11 @@ function toast(message) {
 }
 
 function render(focus = false) {
-  const v = { page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, recLoading, recError, onboarding, loading: !initialized && !demo, songUi: { ...songUi, consent: hasCurrentConsent(state.settings) }, lyricsLines: songLyrics.get(selectedSongId) ?? null, feedbackBusy: Boolean(session) && feedbackFor === session.id, feedbackError: feedbackFailed && feedbackFailed.id === session?.id ? feedbackFailed.error : false, learnColumnId };
+  // Home shows one reminder (survey, home screen, backup), never in the demo.
+  const nudge = initialized && !demo && page === 'home'
+    ? nextNudge(state, { today: localDay(), now: Date.now(), standalone: isStandalone({ matchMedia: query => window.matchMedia(query), standalone: navigator.standalone }), hasFeedbackUrl: Boolean(appConfig.feedbackUrl) })
+    : null;
+  const v = { page, state, session, pending, playUrl, busy, demo, error, storageError, songQuery, songDraft, songError, selectedSongId, selectedPlaylistId, playlistDraft, playlistError, recLoading, recError, onboarding, loading: !initialized && !demo, songUi: { ...songUi, consent: hasCurrentConsent(state.settings), comfortHigh: state.settings.voice?.comfortableHighMidi ?? null, karaokeAudio: Boolean(karaokeTake?.samples), recordInApp: RECORD_IN_APP }, lyricsLines: songLyrics.get(selectedSongId) ?? null, feedbackBusy: Boolean(session) && feedbackFor === session.id, feedbackError: feedbackFailed && feedbackFailed.id === session?.id ? feedbackFailed.error : false, learnColumnId, serverWaking, inviteError, outsideUrl, nudge, feedbackUrl: appConfig.feedbackUrl, installHelp };
   // While a song's player is mounted, only the parts around it are redrawn: moving an iframe would reload the video.
   if (!focus && page === 'song-detail' && playerFor === selectedSongId && document.querySelector('#song-player-slot')) {
     const parts = songDetailParts(v);
@@ -139,9 +204,11 @@ function navigate(target) {
   feedbackFailed = null;
   error = '';
   page = target;
-  if (target === 'song-detail') songUi = { ...defaultSongUi(), lyricsStyle };
+  if (target === 'song-detail') songUi = { ...defaultSongUi(), lyricsStyle, ...(reportBeforeConsent?.songId === selectedSongId ? { [reportBeforeConsent.key]: reportBeforeConsent.report } : {}) };
+  if (target !== 'ai-consent') reportBeforeConsent = null;
   if (target === 'learn') learnColumnId = null;
   render(true);
+  backTrap.sync();
   // The columns start the first time 알아두기 is opened: column 1 that day, the next one each day after.
   if (target === 'learn' && !state.settings.learnStartDay) persist({ ...state, settings: { ...state.settings, learnStartDay: localDay() } });
   if (target === 'song-detail') openSongDetail();
@@ -149,6 +216,11 @@ function navigate(target) {
 
 function stopSongPlayer() {
   dropSinging();
+  // Leaving the song screen drops the karaoke recording (or the one being made) and stops its analysis and playback.
+  discardKaraokeRecording();
+  karaokeTake?.cancel?.();
+  karaokeTake = null;
+  stopKaraokePlayback();
   clearInterval(mediaTicker);
   mediaTicker = null;
   if (playerFor !== null) songPlayer.destroy();
@@ -163,7 +235,8 @@ function dropSinging() {
   songUi = { ...songUi, singing: false };
 }
 
-/** Sing-along stopped: per-line numbers (no lyric text, no recording) go to the AI; the card stays on this screen only. */
+/** Sing-along stopped: the app finds the demanding spots and shows the report at once, in its own words.
+ * With consent the AI then rephrases them (spot kinds and note names only; no recording, no lyrics, no times). */
 async function finishSinging() {
   const song = selectedSong();
   if (!singAlong || !song) return;
@@ -171,19 +244,168 @@ async function finishSinging() {
   // Frames carry the video's time; the start difference is read now, so aligning during the take still counts.
   const frames = songFrames(singAlong.stop(), startOf(media, singVideoId));
   singAlong = singVideoId = null;
-  const items = media.sections?.items ?? [];
   const comfortableHighMidi = state.settings.voice?.comfortableHighMidi ?? null;
-  const stats = lineMetrics(frames, songLyrics.get(song.id) ?? [], { comfortableHighMidi });
-  if (sungLines(stats) < 4) { songUi = { ...songUi, singing: false, singReport: { status: 'short' } }; return render(); }
-  const payload = songPayload(song, items, stats, chorusDiffs(stats, items), comfortableHighMidi);
-  songUi = { ...songUi, singing: false, panel: null, singReport: { status: 'busy' } };
+  const result = findSpots(frames, { comfortableHighMidi, sections: media.sections?.items ?? [], lines: songLyrics.get(song.id) ?? [] });
+  singRequest++;
+  if (result.status === 'short') { songUi = { ...songUi, singing: false, singReport: { status: 'short' } }; return render(); }
+  const payload = spotsPayload(song, result, comfortableHighMidi);
+  const words = Object.fromEntries(payload.items.map(item => [item.id, defaultSentence(item)]));
+  songUi = { ...songUi, singing: false, panel: null, singReport: { status: 'spots', result, words, polish: 'idle', answers: {}, payload } };
   render();
-  const token = ++singRequest;
-  const result = await askFeedback(payload, { kind: 'song', lineIds: stats.map(line => line.id) });
-  if (token !== singRequest || !onSongScreen(song.id)) return;
-  const starts = Object.fromEntries(stats.map(line => [line.id, line.start]));
-  songUi = { ...songUi, singReport: result.feedback ? { status: 'done', feedback: result.feedback, starts } : { status: result.error } };
+  if (payload.items.length && hasCurrentConsent(state.settings)) await polishWords();
+}
+
+/** Asks the AI to rephrase the report; the answer is checked here again. Any failure keeps the app's own sentences. */
+async function polishWords(key = 'singReport') {
+  const song = selectedSong();
+  const report = songUi[key];
+  if (!song || !['spots', 'done'].includes(report?.status) || report.polish === 'busy' || !report.payload?.items.length) return;
+  songUi = { ...songUi, [key]: { ...report, polish: 'busy' } };
   render();
+  let words = null;
+  try {
+    const response = await api.request('/api/practice-feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(report.payload) });
+    const body = response.ok ? await response.json().catch(() => null) : null;
+    if (Array.isArray(body?.words)) words = cleanSpotWords({ items: body.words }, report.payload);
+  } catch { /* offline or refused: the app's own sentences stay */ }
+  // Another take or another song meanwhile: this answer belongs to a report that is gone.
+  const current = songUi[key];
+  if (!onSongScreen(song.id) || current?.payload !== report.payload) return;
+  songUi = { ...songUi, [key]: { ...current, polish: words ? 'done' : 'off', words: words ? Object.fromEntries(words.map(entry => [entry.id, entry.text])) : current.words } };
+  render();
+}
+
+/** A karaoke recording picked from the phone: checked, decoded, analysed in a worker; the report shows its long high notes.
+ * The samples stay in memory for "내 녹음 듣기" and are dropped when the song screen closes. Nothing is stored or sent. */
+async function analyzeKaraokeFile(file) {
+  const song = selectedSong();
+  if (!file || !song || !onSongScreen(song.id)) return;
+  dropKaraokeTake();
+  const problem = fileProblem(file);
+  if (problem) return showKaraoke({ status: 'problem', problem });
+  const take = { samples: null, cancel: () => {} };
+  karaokeTake = take;
+  showKaraoke({ status: 'analyzing', progress: 0 });
+  const decoded = await decodeToMono(file);
+  if (karaokeTake !== take || !onSongScreen(song.id)) return;
+  if (decoded.problem) { karaokeTake = null; return showKaraoke({ status: 'problem', problem: decoded.problem }); }
+  return analyzeKaraokeTake(take, song, decoded.samples);
+}
+
+function showKaraoke(karaoke) {
+  songUi = { ...songUi, karaoke };
+  render();
+}
+
+/** Drops whatever karaoke take there is: a recording still being made, the analysis, the playback. */
+function dropKaraokeTake() {
+  discardKaraokeRecording();
+  karaokeTake?.cancel?.();
+  karaokeTake = null;
+  stopKaraokePlayback();
+}
+
+/** A take's 16 kHz samples analysed in the worker, then the report (notice 'left': cut short by leaving the screen). */
+async function analyzeKaraokeTake(take, song, samples, notice = null) {
+  const comfortableHighMidi = state.settings.voice?.comfortableHighMidi ?? null;
+  const run = runAnalysis(samples, { comfortableHighMidi }, {
+    onProgress: progress => { if (karaokeTake === take && onSongScreen(song.id)) showKaraoke({ status: 'analyzing', progress, notice }); },
+  });
+  take.samples = samples;
+  take.cancel = run.cancel;
+  const result = await run.promise;
+  if (karaokeTake !== take || !onSongScreen(song.id) || result.status === 'cancelled') return;
+  if (result.status === 'unsupported' || result.status === 'error') { karaokeTake = null; return showKaraoke({ status: 'problem', problem: result.status }); }
+  if (result.status === 'short') { karaokeTake = null; return showKaraoke({ status: 'short' }); }
+  const payload = spotsPayload(song, result, comfortableHighMidi);
+  const words = Object.fromEntries(payload.items.map(item => [item.id, defaultSentence(item)]));
+  songUi = { ...songUi, panel: null, karaoke: { status: 'done', result, words, polish: 'idle', answers: {}, suggestionDone: false, payload, notice } };
+  render();
+  if (payload.items.length && hasCurrentConsent(state.settings)) await polishWords('karaoke');
+}
+
+const MICROPHONE_FAILURES = ['NotAllowedError', 'SecurityError', 'NotFoundError', 'NotReadableError', 'Error'];
+
+/** "여기서 녹음하기": the video pauses and the microphone records until stopped, ten minutes, or the screen is left. */
+async function startKaraokeRecording() {
+  const song = selectedSong();
+  if (!song || karaokeRecorder) return;
+  dropSinging();
+  dropKaraokeTake();
+  releasePlayback();
+  songPlayer.pause();
+  const recorder = createKaraokeRecorder();
+  karaokeRecorder = recorder;
+  showKaraoke({ status: 'recording', seconds: 0 });
+  let failure = null;
+  const started = await recorder.start(seconds => {
+    if (karaokeRecorder !== recorder) return;
+    // Ten minutes: it stopped by itself, and what it heard is analysed.
+    if (!recorder.active) return finishKaraokeRecording();
+    showKaraoke({ status: 'recording', seconds });
+  }).catch(err => { failure = err; return false; });
+  if (karaokeRecorder !== recorder || started) return;
+  karaokeRecorder = null;
+  recorder.stop();
+  // A refused or missing microphone says why; anything else (no AudioWorklet, its module not loading) cannot record here.
+  if (failure && MICROPHONE_FAILURES.includes(failure.name)) { showKaraoke(null); return toast(microphoneError(failure)); }
+  showKaraoke({ status: 'problem', problem: 'unsupported' });
+}
+
+/** "녹음 멈추고 분석하기", ten minutes, or the screen left ('left'): the microphone goes and the sound is analysed. */
+function finishKaraokeRecording(notice = null) {
+  const recorder = karaokeRecorder;
+  const song = selectedSong();
+  if (!recorder) return;
+  karaokeRecorder = null;
+  const samples = recorder.stop();
+  if (!song || !onSongScreen(song.id)) return;
+  if (!samples) return showKaraoke({ status: 'short' });
+  const take = { samples: null, cancel: () => {} };
+  karaokeTake = take;
+  showKaraoke({ status: 'analyzing', progress: 0, notice });
+  return analyzeKaraokeTake(take, song, samples, notice).catch(() => showKaraoke({ status: 'problem', problem: 'error' }));
+}
+
+/** A recording still being made is thrown away (leaving the song screen or the page). */
+function discardKaraokeRecording() {
+  const recorder = karaokeRecorder;
+  karaokeRecorder = null;
+  recorder?.stop();
+}
+
+/** "내 녹음 듣기": eight seconds of the recording from three seconds before the spot (the first-line check: five
+ * seconds from half a second before); the video pauses meanwhile. */
+function playKaraokeAt(time, { lead = 3, seconds = 8 } = {}) {
+  const samples = karaokeTake?.samples;
+  if (!samples || !Number.isFinite(time)) return;
+  stopKaraokePlayback();
+  releasePlayback();
+  songPlayer.pause();
+  const Context = globalThis.AudioContext ?? globalThis.webkitAudioContext;
+  if (!Context) return;
+  const RATE = 16000;
+  const from = Math.max(0, Math.floor((time - lead) * RATE));
+  const to = Math.min(samples.length, from + seconds * RATE);
+  if (to <= from) return;
+  const context = new Context();
+  const buffer = context.createBuffer(1, to - from, RATE);
+  buffer.copyToChannel(samples.subarray(from, to), 0);
+  const source = context.createBufferSource();
+  source.buffer = buffer;
+  source.connect(context.destination);
+  source.onended = () => { if (karaokePlayback?.source === source) stopKaraokePlayback(); };
+  karaokePlayback = { context, source };
+  context.resume().catch(() => {});
+  source.start();
+}
+
+function stopKaraokePlayback() {
+  const playing = karaokePlayback;
+  karaokePlayback = null;
+  if (!playing) return;
+  try { playing.source.stop(); } catch { /* already ended */ }
+  playing.context.close().catch(() => {});
 }
 
 const selectedSong = () => state.songs.find(s => s.id === selectedSongId);
@@ -257,7 +479,7 @@ async function searchVideos(song, side, provisional) {
   try {
     // The song's length lets the server tell this song's audio track from other versions.
     const duration = side === 'mv' ? readMedia(song).sections?.duration : undefined;
-    const response = await fetch(`/api/song-videos?${new URLSearchParams({ side, ...query, ...(Number.isFinite(duration) ? { duration: String(duration) } : {}) })}`);
+    const response = await api.request(`/api/song-videos?${new URLSearchParams({ side, ...query, ...(Number.isFinite(duration) ? { duration: String(duration) } : {}) })}`);
     status = response.status;
     body = await response.json().catch(() => null);
   } catch { status = 0; }
@@ -295,7 +517,7 @@ async function lookupSections(song) {
   let status = 0;
   let body = null;
   try {
-    const response = await fetch(`/api/song-sections?${new URLSearchParams(query)}`);
+    const response = await api.request(`/api/song-sections?${new URLSearchParams(query)}`);
     status = response.status;
     if (status === 200) body = await response.json();
   } catch { status = 0; }
@@ -456,14 +678,69 @@ async function handleMedia(action, id) {
     return showCurrentVideo();
   }
   if (action === 'media-consent') { consentReturn = 'song-detail'; return navigate('ai-consent'); }
+  // Measuring and the report stay on the phone, so singing along needs no consent; only polishing the words does.
   if (action === 'media-sing-open') {
-    if (!hasCurrentConsent(state.settings)) { consentReturn = 'song-detail'; return navigate('ai-consent'); }
-    songUi = { ...songUi, panel: 'sing', pasteError: '', pinError: '', singReport: songUi.singReport?.status === 'done' ? songUi.singReport : null };
+    songUi = { ...songUi, panel: 'sing', pasteError: '', pinError: '', singReport: songUi.singReport?.status === 'spots' ? songUi.singReport : null };
     return render();
   }
   if (action === 'media-sing-stop') return finishSinging();
+  if (action === 'media-spot') {
+    // Three seconds before the spot, on whichever video is shown (song time to that video's time).
+    const t = Number(id);
+    if (videoId && songPlayer.currentTime() === null) return toast('영상이 준비되면 다시 눌러 주세요.');
+    if (Number.isFinite(t) && videoId) songPlayer.seekTo(toVideoTime(media, videoId, Math.max(0, t - 3)));
+    return;
+  }
+  if (action === 'media-ask-yes' || action === 'media-ask-no') {
+    const report = songUi.singReport;
+    if (report?.status !== 'spots' || !report.result.spots.some(spot => spot.id === id)) return;
+    songUi = { ...songUi, singReport: { ...report, answers: { ...report.answers, [id]: action === 'media-ask-yes' ? 'yes' : 'no' } } };
+    return render();
+  }
+  if (action === 'media-polish') {
+    if (!hasCurrentConsent(state.settings)) {
+      // The report waits through the consent screen and comes back with the song.
+      const key = id === 'karaoke' ? 'karaoke' : 'singReport';
+      reportBeforeConsent = { songId: song.id, key, report: songUi[key] };
+      consentReturn = 'song-detail';
+      return navigate('ai-consent');
+    }
+    return polishWords(id === 'karaoke' ? 'karaoke' : 'singReport');
+  }
+  // Karaoke recording mode: the recording is analysed on the phone, kept in memory only while this song is open.
+  if (action === 'media-karaoke-open') { songUi = { ...songUi, panel: 'karaoke', pasteError: '', pinError: '' }; return render(); }
+  if (action === 'media-karaoke-close') { songUi = { ...songUi, panel: null }; return render(); }
+  if (action === 'media-karaoke-file') return document.querySelector('#karaoke-file')?.click();
+  if (action === 'media-karaoke-record') return RECORD_IN_APP ? startKaraokeRecording() : undefined;
+  if (action === 'media-karaoke-record-stop') return finishKaraokeRecording();
+  if (action === 'media-karaoke-play') return playKaraokeAt(Number(id));
+  // The first-line check: "맞아요" ties the take's first voice to the song's first lyric line (a number, not the words).
+  if (['media-karaoke-first-play', 'media-karaoke-first-yes', 'media-karaoke-first-no'].includes(action)) {
+    const report = songUi.karaoke;
+    const first = firstLyricLine(songLyrics.get(song.id));
+    const voice = report?.result?.firstVoice;
+    if (report?.status !== 'done' || !Number.isFinite(voice)) return;
+    if (action === 'media-karaoke-first-play') return playKaraokeAt(voice, { lead: 0.5, seconds: 5 });
+    if (action === 'media-karaoke-first-yes' && !first) return;
+    songUi = { ...songUi, karaoke: action === 'media-karaoke-first-yes' ? { ...report, firstLine: 'yes', lineOffset: voice - first.t } : { ...report, firstLine: 'no' } };
+    return render();
+  }
+  if (action === 'media-karaoke-high-yes' || action === 'media-karaoke-high-no') {
+    const report = songUi.karaoke;
+    if (report?.status !== 'done') return;
+    if (action === 'media-karaoke-high-yes') {
+      const suggestion = report.result.suggestion;
+      if (!Number.isInteger(suggestion) || !state.settings.voice) return;
+      const voice = { ...state.settings.voice, comfortableHighMidi: suggestion, method: 'manual', updatedAt: new Date().toISOString() };
+      if (!(await persist({ ...state, settings: { ...state.settings, voice } }))) return;
+      toast('편한 최고음을 바꿨어요.');
+    }
+    songUi = { ...songUi, karaoke: { ...songUi.karaoke, suggestionDone: true } };
+    return render();
+  }
   if (action === 'media-sing-start') {
     if (!videoId || singAlong) return;
+    if (karaokeRecorder) return toast('노래방 녹음을 먼저 멈춰 주세요.');
     if (songPlayer.currentTime() === null) return toast('영상이 준비되면 다시 눌러 주세요.');
     const singer = createSingAlong();
     singAlong = singer;
@@ -499,7 +776,7 @@ async function handleMedia(action, id) {
     if (!canSetStart({ videoId, shownId: songPlayer.currentVideoId(), time: t, playerState: songPlayer.playbackState() })) return toast('영상을 먼저 틀어 주세요.');
     return saveMedia(song.id, current => setStart(current, videoId, t));
   }
-  if (['media-section', 'media-seek', 'media-pin-go', 'media-lyric'].includes(action) && videoId && songPlayer.currentTime() === null) return toast('영상이 준비되면 다시 눌러 주세요.');
+  if (['media-section', 'media-seek', 'media-pin-go', 'media-lyric', 'media-spot'].includes(action) && videoId && songPlayer.currentTime() === null) return toast('영상이 준비되면 다시 눌러 주세요.');
   if (action === 'media-section') {
     const item = media.sections?.items?.[Number(id)];
     if (item && videoId) songPlayer.seekTo(toVideoTime(media, videoId, item.t));
@@ -531,8 +808,7 @@ async function handleMedia(action, id) {
     return tickMedia();
   }
   if (action === 'media-lyric') {
-    // A feedback card can point at a line by its start even if the lyrics are gone meanwhile.
-    const t = songLyrics.get(song.id)?.[Number(id)]?.t ?? songUi.singReport?.starts?.[id];
+    const t = songLyrics.get(song.id)?.[Number(id)]?.t;
     if (Number.isFinite(t) && videoId) songPlayer.seekTo(toVideoTime(media, videoId, Math.max(0, t - 0.3)));
     return;
   }
@@ -598,7 +874,7 @@ async function runSearch({ term, mode = 'search', page = 1, append = false, arti
   }, SEARCH_SLOW_MS);
   let body = null;
   try {
-    const response = await fetch(`/api/song-search?q=${encodeURIComponent(term)}&scope=${onboarding.scope}&mode=${mode}&page=${page}`);
+    const response = await api.request(`/api/song-search?q=${encodeURIComponent(term)}&scope=${onboarding.scope}&mode=${mode}&page=${page}`);
     if (response.ok) body = await response.json();
   } catch { /* network failure: body stays null */ }
   clearTimeout(slow);
@@ -662,7 +938,7 @@ async function lookup(job, pick) {
   if (known) result = { highestMidi: known.highestMidi, falsettoHighestMidi: known.falsettoHighestMidi, lowestMidi: known.lowestMidi, sourceUrl: known.rangeSourceUrl, sourceQuote: known.rangeQuote, vocal: known.vocal };
   else {
     try {
-      const response = await fetch('/api/song-range', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: pick.title, artist: pick.artist }) });
+      const response = await api.request('/api/song-range', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: pick.title, artist: pick.artist }) });
       if (response.status === 503) {
         if (!aiOffToastShown) { aiOffToastShown = true; toast('아직 AI가 설정되지 않았어요. 직접 입력을 써 주세요.'); }
       } else if (response.ok) result = (await response.json()).range ?? null;
@@ -745,6 +1021,7 @@ async function saveDraft() {
 }
 
 async function initialize() {
+  wakeServer();
   try {
     store = await openStore();
     const loadedState = await store.getState();
@@ -753,11 +1030,85 @@ async function initialize() {
     if (demo) { liveState = loadedState; liveStorageError = ''; }
     else { state = loadedState; storageError = ''; }
     initialized = true;
+    // The days the app was opened (the last 60) decide when to ask for feedback.
+    const today = localDay();
+    const days = state.settings.openDays ?? [];
+    if (!demo && !days.includes(today)) await persist({ ...state, settings: { ...state.settings, openDays: [...days, today].slice(-60) } });
   } catch {
     const message = '기록 저장소를 열지 못했어요. 브라우저의 사이트 저장 공간을 허용하고 새로고침해 주세요. 체험 모드는 사용할 수 있어요.';
     if (demo) liveStorageError = message;
     else storageError = message;
   }
+  const app = inAppBrowser(navigator.userAgent);
+  if (app) {
+    // Stop before the invite code leaves the address: the default browser needs the whole link.
+    outsideUrl = externalUrl(app, location.href);
+    page = 'open-outside';
+    render();
+    return;
+  }
+  await checkInvite();
+  render();
+  backTrap.sync();
+}
+
+/** "그냥 여기서 쓸게요": carry on in the app's own browser. */
+async function stayInside() {
+  outsideUrl = null;
+  page = 'home';
+  await checkInvite();
+  render(true);
+  backTrap.sync();
+}
+
+/** The invite link's code is kept on this phone; a friend with a code never waits for the server here. */
+async function checkInvite() {
+  const linked = inviteFromHash(location.hash);
+  if (linked) {
+    api.invite.set(linked);
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+  if (api.invite.get()) {
+    // The survey link arrives with the config; home is drawn again to show it.
+    loadConfig().then(() => { if (page === 'home') render(); });
+    // Counts today's visit; a code the server no longer takes brings the invite screen back (onInvite).
+    api.request('/api/hello').catch(() => {});
+    return;
+  }
+  const config = await loadConfig();
+  if (config.inviteRequired && !demo) page = 'invite';
+}
+
+async function loadConfig() {
+  try {
+    const response = await api.request('/api/config');
+    const body = response.ok ? await response.json() : null;
+    if (body) appConfig = { inviteRequired: body.inviteRequired === true, feedbackUrl: typeof body.feedbackUrl === 'string' ? body.feedbackUrl : null };
+  } catch { /* the server is out of reach: keep what we know */ }
+  return appConfig;
+}
+
+function inviteRefused() {
+  if (page === 'invite') return;
+  inviteError = '';
+  navigate('invite');
+}
+
+async function submitInvite(form) {
+  if (busy) return;
+  const code = inviteFromInput(new FormData(form).get('code'));
+  const wrong = '초대 코드가 맞지 않아요. 다시 확인해 주세요.';
+  if (!code) { inviteError = wrong; return render(); }
+  api.invite.set(code);
+  busy = 'invite';
+  inviteError = '';
+  render();
+  const response = await api.request('/api/hello').catch(() => null);
+  busy = false;
+  if (response?.ok) { inviteError = ''; return navigate('home'); }
+  if (response?.status === 401) inviteError = wrong;
+  else { api.invite.clear(); inviteError = '잠시 후 다시 시도해 주세요.'; }
+  page = 'invite';
   render();
 }
 
@@ -879,7 +1230,7 @@ async function respond(comfort, practice = false) {
 /** Asks for practice feedback and checks the answer again here. Returns { feedback } or { error: 'off' | 'failed' }. */
 async function askFeedback(payload, check) {
   try {
-    const response = await fetch('/api/practice-feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const response = await api.request('/api/practice-feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     const body = await response.json().catch(() => ({}));
     if (response.status === 503 && body.error === 'not-configured') return { error: 'off' };
     const feedback = response.ok ? cleanFeedback(body.feedback, check) : null;
@@ -1084,7 +1435,7 @@ async function requestRecommendations(id) {
   let payload = null;
   let message = RECOMMEND_FAILED;
   try {
-    const response = await fetch('/api/recommend', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request) });
+    const response = await api.request('/api/recommend', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request) });
     if (response.ok) payload = await response.json();
     else if (response.status === 503) message = '아직 AI 추천이 설정되지 않았어요.';
   } catch { /* network failure keeps the generic message */ }
@@ -1114,7 +1465,7 @@ async function lookupSongRange() {
   busy = 'range'; render();
   let message = '지금은 최고음을 찾지 못했어요.';
   try {
-    const response = await fetch('/api/song-range', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, artist: String(songDraft.artist ?? '').trim() }) });
+    const response = await api.request('/api/song-range', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, artist: String(songDraft.artist ?? '').trim() }) });
     if (response.status === 503) message = '아직 AI 추천이 설정되지 않았어요.';
     else if (response.ok) {
       const { range } = await response.json();
@@ -1209,6 +1560,38 @@ async function exportBackup() {
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   toast('백업 파일에 녹음이 포함될 수 있어요. 개인 보관해 주세요.');
+  await markNow('lastBackupAt');
+}
+
+/** Records "now" in one of the reminder settings and redraws (home's card changes). */
+async function markNow(key) {
+  if (!initialized || demo) return;
+  await persist({ ...state, settings: { ...state.settings, [key]: new Date().toISOString() } });
+  render();
+}
+
+async function openFeedback() {
+  const link = feedbackLink(appConfig.feedbackUrl, usageSummary(demo && liveState ? liveState : state));
+  if (!link) return;
+  // Opened before anything is awaited, so the browser counts it as the tap's own window.
+  window.open(link, '_blank', 'noopener');
+  await markNow('feedbackAt');
+}
+
+async function addToHomeScreen() {
+  const prompt = installPrompt;
+  installPrompt = null;
+  if (prompt) {
+    try {
+      // Chrome's own dialog; it can be refused (no tap behind it, already shown), then the words below explain instead.
+      await prompt.prompt();
+      const choice = await prompt.userChoice;
+      if (choice?.outcome === 'accepted') return markNow('installNudgeAt');
+      return render();
+    } catch { /* fall through to the explanation */ }
+  }
+  installHelp = installHelpFor(platform(navigator.userAgent, { maxTouchPoints: navigator.maxTouchPoints }));
+  render();
 }
 
 async function importBackup(file) {
@@ -1309,6 +1692,13 @@ async function handleVoice(action, id) {
 async function handle(action, id) {
   // Persistence writes must finish before navigating or changing their source state.
   if (busy === 'saving') return;
+  // The invite screen has only its form; the open-outside screen only its two buttons.
+  if (page === 'invite') return;
+  if (page === 'open-outside') {
+    if (action === 'open-outside' && outsideUrl) location.href = outsideUrl;
+    if (action === 'stay-inside') await stayInside();
+    return;
+  }
   if (action === 'songs') selectedPlaylistId = null;
   // Tapping the tab you are already on keeps an onboarding in progress instead of starting it over.
   if (action === 'songs' && page.startsWith('voice-') && onboarding) return;
@@ -1340,7 +1730,13 @@ async function handle(action, id) {
     if (consentReturn === 'result' || consentReturn === 'detail') { navigate(consentReturn); return requestHummingFeedback(); }
     if (consentReturn === 'song-form') { navigate('song-form'); return lookupSongRange(); }
     if (consentReturn === 'song-pick') return beginPicker(pendingPickList);
-    if (consentReturn === 'song-detail') return navigate('song-detail');
+    if (consentReturn === 'song-detail') {
+      // Back to the song; a report that was waiting for consent now gets its words polished.
+      const waiting = reportBeforeConsent?.songId === selectedSongId ? reportBeforeConsent.key : null;
+      navigate('song-detail');
+      if (waiting) polishWords(waiting);
+      return;
+    }
     navigate('playlist');
     return requestRecommendations(selectedPlaylistId);
   }
@@ -1396,12 +1792,17 @@ async function handle(action, id) {
   if (action === 'save-and-learn') return saveSession('learn');
   if (action === 'learn-complete') return recordActivity('learn');
   if (action === 'learn-column') { learnColumnId = id; return render(true); }
+  // The report's exercise links to the column it was shortened from.
+  if (action === 'spot-column') { navigate('learn'); learnColumnId = id; return render(true); }
   if (action === 'rest-complete') return recordActivity('rest');
   if (action === 'detail') { session = state.sessions.find(s => s.id === id); if (session) navigate('detail'); return; }
   if (action === 'feedback-humming') return requestHummingFeedback();
   if (action === 'delete-session') return deleteSession(id);
   if (action === 'play-saved') return playSaved(id);
   if (action === 'export') return exportBackup();
+  if (action === 'nudge-later' && ['feedback', 'install', 'backup'].includes(id)) return markNow(`${id}NudgeAt`);
+  if (action === 'feedback-open') return openFeedback();
+  if (action === 'install') return addToHomeScreen();
   if (action === 'import') return document.querySelector('#backup-file').click();
   if (action === 'clear') {
     if (!confirm('이 기기의 모든 연습 기록, 녹음, 곡과 플레이리스트를 지울까요? 이 작업은 되돌릴 수 없어요.')) return;
@@ -1444,6 +1845,14 @@ root.addEventListener('change', async event => {
   }
 });
 
+// The karaoke file input sits outside the redrawn page (index.html): the song screen redraws whenever a lookup
+// finishes, and a redraw while the phone's file picker is open would leave the chosen file on a detached input.
+document.querySelector('#karaoke-file')?.addEventListener('change', async event => {
+  const picked = event.target.files[0];
+  event.target.value = '';
+  await analyzeKaraokeFile(picked).catch(() => { songUi = { ...songUi, karaoke: { status: 'problem', problem: 'error' } }; render(); });
+});
+
 // Scrolling the full lyrics by hand pauses its follow-along for a moment.
 for (const type of ['wheel', 'touchmove']) root.addEventListener(type, event => { if (event.target.closest?.('#lyrics-full')) lyricsScrollAt = Date.now(); }, { passive: true });
 
@@ -1457,6 +1866,7 @@ root.addEventListener('input', event => {
 });
 
 root.addEventListener('submit', async event => {
+  if (event.target.id === 'invite-form') { event.preventDefault(); return submitInvite(event.target); }
   if (event.target.id === 'voice-direct-form') {
     event.preventDefault();
     const data = new FormData(event.target);
@@ -1486,7 +1896,18 @@ document.addEventListener('visibilitychange', () => {
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && singAlong) { dropSinging(); render(); toast('화면을 벗어나 따라 부르기를 멈췄어요.'); }
 });
-window.addEventListener('pagehide', () => { audio.cancel(); dropSinging(); });
+// A karaoke recording stops when the screen is left (switched off, another app) and what was heard is analysed.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && karaokeRecorder) finishKaraokeRecording('left');
+});
+// Coming back after a while: the server may have fallen asleep meanwhile.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && Date.now() - lastAwake > WAKE_AGAIN_MS) wakeServer();
+});
+window.addEventListener('pagehide', () => { audio.cancel(); dropSinging(); discardKaraokeRecording(); });
 
 render();
 initialize();
+// The app's files are kept on the phone (sw.js) so a sleeping server does not hold the first screen.
+// Only on HTTPS: during development on http://localhost old files would linger.
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('/sw.js').catch(() => {});
