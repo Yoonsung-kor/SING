@@ -144,3 +144,11 @@ test('the history page says what the server itself receives', () => {
   const html = renderView({ page: 'history', state: defaultState(), session: null, busy: false, demo: false });
   assert.match(html, /이 앱의 서버는 하루 사용량을 세려고 기기마다 무작위 번호 하나를 받아요\. 이름이나 연락처와 이어지지 않아요\./);
 });
+
+test('once the steps are on the card (an iPhone, or a browser without its own dialog), the button only puts the card away', () => {
+  const steps = homeWith({ nudge: 'install', installHelp: '공유 버튼을 누르고 ‘홈 화면에 추가’를 골라 주세요.' });
+  assert.match(steps, /<p class="nudge-help">공유 버튼을 누르고 ‘홈 화면에 추가’를 골라 주세요\.<\/p>/);
+  assert.ok(!steps.includes('data-action="install"'), 'no button that cannot add anything');
+  assert.match(steps, /data-action="nudge-later" data-id="install"[^>]*>알겠어요</);
+  assert.ok(!steps.includes('>나중에<'));
+});

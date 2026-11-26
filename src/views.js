@@ -56,7 +56,10 @@ const later = kind => `<button class="text-button" data-action="nudge-later" dat
 /** The one reminder home shows (src/nudges.js picks it). */
 function nudgeCard(v) {
   if (v.nudge === 'feedback') return `<section class="surface nudge-card"><p class="nudge-title">써 보니 어땠나요? 1분이면 돼요.</p><div class="action-row">${button('의견 남기기', 'feedback-open', { class: 'small' })}${later('feedback')}</div></section>`;
-  if (v.nudge === 'install') return `<section class="surface nudge-card"><p class="nudge-title">홈 화면에 추가해 두세요</p><p>앱처럼 바로 열리고, 기록이 더 오래 남아요.</p>${v.installHelp ? `<p class="subtle" role="status">${e(v.installHelp)}</p>` : ''}<div class="action-row">${button('홈 화면에 추가', 'install', { class: 'small' })}${later('install')}</div></section>`;
+  // An iPhone (or a browser without its own dialog) cannot be asked to add the app: the steps are the card, and its
+  // button only puts the card away. Elsewhere the button opens the browser's dialog.
+  if (v.nudge === 'install' && v.installHelp) return `<section class="surface nudge-card"><p class="nudge-title">홈 화면에 추가해 두세요</p><p>앱처럼 바로 열리고, 기록이 더 오래 남아요.</p><p class="nudge-help">${e(v.installHelp)}</p><div class="action-row"><button class="button small" data-action="nudge-later" data-id="install">알겠어요</button></div></section>`;
+  if (v.nudge === 'install') return `<section class="surface nudge-card"><p class="nudge-title">홈 화면에 추가해 두세요</p><p>앱처럼 바로 열리고, 기록이 더 오래 남아요.</p><div class="action-row">${button('홈 화면에 추가', 'install', { class: 'small' })}${later('install')}</div></section>`;
   if (v.nudge === 'backup') return `<section class="surface nudge-card"><p>기록은 이 폰에만 있어요. 백업 파일을 받아 두면 폰을 바꿔도 이어서 쓸 수 있어요.</p><div class="action-row">${button('백업 내려받기', 'export', { class: 'small', disabled: v.demo || Boolean(v.busy) })}${later('backup')}</div></section>`;
   return '';
 }

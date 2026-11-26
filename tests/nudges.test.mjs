@@ -63,8 +63,19 @@ test('one card at a time, the survey first', () => {
 
 test('adding to the home screen: the iPhone words say its home-screen app asks for the invite once more', () => {
   const ios = installHelp('ios');
-  assert.ok(ios.startsWith('아래 공유 버튼을 누르고 ‘홈 화면에 추가’를 골라 주세요.'));
+  assert.ok(ios.startsWith('공유 버튼(네모 위로 화살표)을 누르고 ‘홈 화면에 추가’를 골라 주세요. 사파리는 화면 아래쪽'), ios);
   for (const words of ['초대 코드를 한 번 더', '받은 초대 링크를 그대로 붙여 넣으면 돼요', '기록 백업']) assert.ok(ios.includes(words), words);
   assert.equal(installHelp('android'), '브라우저 메뉴(⋮)에서 ‘홈 화면에 추가’를 골라 주세요.');
   assert.equal(installHelp('other'), installHelp('android'));
+});
+
+test('the survey tag: four characters made from the device number, the same every time, and nothing without a number', async () => {
+  const { deviceTag } = await import('../src/nudges.js');
+  const one = await deviceTag('5f0c2c1e-8d1b-4e0a-9a51-3c2b9f6d7e11');
+  assert.match(one, /^[0-9a-f]{4}$/);
+  assert.equal(await deviceTag('5f0c2c1e-8d1b-4e0a-9a51-3c2b9f6d7e11'), one);
+  assert.notEqual(await deviceTag('0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d'), one);
+  assert.ok(!'5f0c2c1e-8d1b-4e0a-9a51-3c2b9f6d7e11'.includes(one), 'not a piece of the number itself');
+  assert.equal(await deviceTag(''), '');
+  assert.equal(usageSummary(withState({ finished: 1, songs: 2, playlists: 1 }), 'ab12'), '허밍 1회 · 곡 2개 · 플레이리스트 1개 · 기기 ab12');
 });

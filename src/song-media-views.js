@@ -191,6 +191,70 @@ function exerciseBlock(exercise) {
 /** The karaoke report: the top long note against the comfortable top, the limits, the long high notes by time, and a suggestion.
  * With lyric times, it asks once whether the take's first voice is the song's first line; confirmed, each time gets its
  * line (on screen only; the karaoke backing is assumed to keep the original's tempo, so it is an extra, not the anchor). */
+// The karaoke picture's frame in viewBox units: the left margin holds the note labels.
+export const KARAOKE_GRAPH = Object.freeze({ width: 340, height: 170, left: 38, right: 8, top: 14, bottom: 20 });
+const LONG_NOTE = 0.6;
+
+/** Where a tap landed across the picture (0..1 of its width) as a time in the take. */
+export function karaokeGraphTime(fraction, seconds) {
+  const { width, left, right } = KARAOKE_GRAPH;
+  const share = (fraction * width - left) / (width - left - right);
+  return Math.round(Math.min(seconds, Math.max(0, share * seconds)) * 10) / 10;
+}
+
+const minutes = value => {
+  const whole = Math.round(value);
+  if (whole < 60) return `${whole}초`;
+  return whole % 60 ? `${Math.floor(whole / 60)}분 ${whole % 60}초` : `${whole / 60}분`;
+};
+
+/** Three numbers on how the take went, all from the analysis. */
+function karaokeStats(result) {
+  const tile = (label, value, under) => `<div class="stat-tile"><p class="stat-label">${label}</p><p class="stat-value">${e(value)}</p>${under ? `<p class="stat-under">${e(under)}</p>` : ''}</div>`;
+  const { range = {}, highs = [] } = result;
+  const kept = highs.filter(high => high.outcome === 'kept').length;
+  const tiles = [tile('따라간 목소리', minutes(result.voicedSeconds), `${minutes(result.seconds)} 중`)];
+  if (Number.isInteger(range.lowHeld) && Number.isInteger(range.topHeld)) tiles.push(tile('부른 음역', `${koreanNote(range.lowHeld)} ~ ${koreanNote(range.topHeld)}`, '길게 낸 음 기준'));
+  tiles.push(tile('길게 낸 높은 음', `${highs.length}번`, highs.length ? `${kept}번은 끝까지 지켰어요` : ''));
+  return `<div class="stat-row">${tiles.join('')}</div>`;
+}
+
+/** The take as a picture: each note held 0.3 s or more, the comfortable top, the long high notes (chosen ones numbered
+ * like the list). Tapping it plays the recording from there while the recording is still in memory. */
+function karaokeGraph(result, spots, ui) {
+  const { width: W, height: H, left: L, right: R, top: T, bottom: B } = KARAOKE_GRAPH;
+  const contour = result.contour;
+  const pitches = contour.map(note => note[2]).concat(Number.isFinite(ui.comfortHigh) ? [ui.comfortHigh] : []);
+  let lo = Math.floor(Math.min(...pitches)) - 2;
+  let hi = Math.ceil(Math.max(...pitches)) + 3;
+  if (hi - lo < 14) { const middle = (hi + lo) / 2; lo = Math.floor(middle - 7); hi = Math.ceil(middle + 7); }
+  const x = time => (L + (time / result.seconds) * (W - L - R)).toFixed(1);
+  const y = midi => (T + ((hi - midi) / (hi - lo)) * (H - T - B)).toFixed(1);
+  const pitchAt = time => contour.find(note => Math.abs(note[0] - time) < 0.05)?.[2] ?? result.range?.topHeld ?? hi - 3;
+  const parts = [];
+  for (let midi = Math.ceil(lo / 12) * 12; midi < hi; midi += 12) parts.push(`<line class="graph-grid" x1="${L}" x2="${W - R}" y1="${y(midi)}" y2="${y(midi)}"/><text class="graph-label" x="${L - 4}" y="${(Number(y(midi)) + 3).toFixed(1)}" text-anchor="end">${e(koreanNote(midi))}</text>`);
+  const step = result.seconds <= 150 ? 30 : 60;
+  for (let time = 0; time <= result.seconds; time += step) parts.push(`<text class="graph-label" x="${x(time)}" y="${H - 6}" text-anchor="middle">${Math.floor(time / 60)}:${String(time % 60).padStart(2, '0')}</text>`);
+  if (Number.isFinite(ui.comfortHigh)) parts.push(`<line class="graph-comfort" x1="${L}" x2="${W - R}" y1="${y(ui.comfortHigh)}" y2="${y(ui.comfortHigh)}"/>`);
+  for (const [start, end, midi] of contour) parts.push(`<line class="graph-note ${end - start >= LONG_NOTE - 1e-9 ? 'long' : 'short'}" x1="${x(start)}" x2="${Math.max(Number(x(end)), Number(x(start)) + 1.5).toFixed(1)}" y1="${y(midi)}" y2="${y(midi)}"/>`);
+  const chosen = spots.map(spot => spot.time);
+  for (const high of result.highs ?? []) {
+    if (chosen.some(time => Math.abs(time - high.time) < 1e-6)) continue;
+    parts.push(`<circle class="graph-high" cx="${x((high.time + high.end) / 2)}" cy="${(Number(y(pitchAt(high.time))) - 7).toFixed(1)}" r="2.5"/>`);
+  }
+  spots.forEach((spot, i) => {
+    const cx = x((spot.time + spot.end) / 2);
+    const cy = Number(y(pitchAt(spot.time))) - 11;
+    parts.push(`<g class="graph-spot"><circle cx="${cx}" cy="${cy.toFixed(1)}" r="7"/><text x="${cx}" y="${(cy + 3).toFixed(1)}" text-anchor="middle">${i + 1}</text></g>`);
+  });
+  const svg = `<svg viewBox="0 0 ${W} ${H}" aria-hidden="true" focusable="false">${parts.join('')}</svg>`;
+  const picture = ui.karaokeAudio
+    ? `<button type="button" class="pitch-graph" data-action="media-karaoke-graph" aria-label="음높이 그림. 누르면 그 시간부터 내 녹음이 나와요.">${svg}</button>`
+    : `<div class="pitch-graph">${svg}</div>`;
+  const hint = ui.karaokeAudio ? ' 그림을 누르면 그 시간부터 내 녹음이 나와요.' : '';
+  return `${picture}<p class="graph-legend">진한 선은 길게 낸 음, 점선은 편한 최고음이에요. 짧게 스친 음은 그리지 않았어요.${hint}</p>`;
+}
+
 function karaokeReportBlock(ui, lines) {
   const report = ui.karaoke;
   if (report?.status !== 'done') return '';
@@ -221,7 +285,10 @@ function karaokeReportBlock(ui, lines) {
   const name = Number.isInteger(suggestion) ? e(koreanNote(suggestion)) : '';
   const suggest = name && !report.suggestionDone
     ? `<div class="suggest-card"><p>이 노래에서 ${name}까지 길게 지켰어요. 편한 최고음을 여기(${name})로 바꿀까요?</p><div class="action-row"><button class="button small" data-action="media-karaoke-high-yes">바꾸기</button><button class="text-button" data-action="media-karaoke-high-no">그대로 두기</button></div></div>` : '';
-  return `<section class="surface practice-feedback karaoke-report"><h2>노래방 녹음 리포트</h2>${report.notice === 'left' ? LEFT_NOTICE : ''}${summary}<p class="subtle">노래방 녹음에서는 길게 낸 높은 음을 중심으로 봐요. 반주가 섞여 있어서 짧은 음은 정확하지 않을 수 있어요.</p>${polishing}${polish}<h3>이 노래의 어려운 자리</h3>${firstLine}${list}${suggest}</section>`;
+  const result = report.result ?? {};
+  const pictured = Array.isArray(result.contour) && result.contour.length > 0 && result.seconds > 0;
+  const picture = pictured ? `${karaokeStats(result)}${karaokeGraph(result, spots, ui)}` : '';
+  return `<section class="surface practice-feedback karaoke-report"><h2>노래방 녹음 리포트</h2>${report.notice === 'left' ? LEFT_NOTICE : ''}${picture}${summary}<p class="subtle">노래방 녹음에서는 길게 낸 높은 음을 중심으로 봐요. 반주가 섞여 있어서 짧은 음은 정확하지 않을 수 있어요.</p>${polishing}${polish}<h3>이 노래의 어려운 자리</h3>${firstLine}${list}${suggest}</section>`;
 }
 
 /** The sing-along report, once there is one. */
