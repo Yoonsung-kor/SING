@@ -5,6 +5,7 @@ import { createQueue, STALE } from './throttle.mjs';
 import { coreTitle, matchKey, titleMatches } from './title-match.mjs';
 
 const ENDPOINT = 'https://lrclib.net/api/search';
+const GET_ENDPOINT = 'https://lrclib.net/api/get';
 const USER_AGENT = 'SING/0.1 (class project; https://github.com/Yoonsung-kor/SING)';
 const TIMEOUT_MS = 10000;
 const MAX_CHARS = 2 * 1024 * 1024;
@@ -61,35 +62,76 @@ export function searchQueries(title, artist) {
   return queries;
 }
 
-/** One song's sections, or null when no synced timing matches. Throws when LRCLIB cannot answer. */
+const MAX_CANDIDATES = 10;
+const MAX_NAME_CHARS = 120;
+
+/** A synced record as the song screen needs it: sections (times and names) and lyric lines; null without timing. */
+function fromHit(hit) {
+  if (typeof hit?.syncedLyrics !== 'string' || !hit.syncedLyrics.trim()) return null;
+  const timed = parseTimedLines(hit.syncedLyrics);
+  const duration = Number.isFinite(hit.duration) && hit.duration > 0 ? hit.duration : (timed.at(-1)?.t ?? 0) + 5;
+  const sections = computeSections(timed.map(line => ({ t: line.t, key: lineKey(line.text) })), duration).slice(0, MAX_SECTIONS);
+  const lines = timed.slice(0, MAX_LINES).map(line => ({ t: line.t, text: line.text.slice(0, MAX_LINE_CHARS) }));
+  return sections.length ? { duration, sections, lines } : null;
+}
+
+/**
+ * Synced records for the person to choose from: number, title, artist and length only (no lyric text), each record
+ * once (the same title, artist and length is listed by several uploads), at most ten.
+ */
+export function listCandidates(hits) {
+  const seen = new Set();
+  const list = [];
+  for (const hit of Array.isArray(hits) ? hits : []) {
+    if (!Number.isSafeInteger(hit?.id) || hit.id < 1 || typeof hit.syncedLyrics !== 'string' || !hit.syncedLyrics.trim()) continue;
+    const title = String(hit.trackName ?? '').trim().slice(0, MAX_NAME_CHARS);
+    const artist = String(hit.artistName ?? '').trim().slice(0, MAX_NAME_CHARS);
+    const duration = Number.isFinite(hit.duration) && hit.duration > 0 ? Math.round(hit.duration) : 0;
+    const key = `${matchKey(title)}|${matchKey(artist)}|${duration}`;
+    if (!title || seen.has(key)) continue;
+    seen.add(key);
+    list.push({ id: hit.id, title, artist, duration });
+    if (list.length === MAX_CANDIDATES) break;
+  }
+  return list;
+}
+
+/**
+ * findSections({ title, artist, lyricsId? }): one song's sections and lines, or null when no synced timing matches.
+ * With lyricsId (a record the person picked) that record is read by itself; otherwise the title is searched.
+ * findSections.search(q): records to pick from. Both throw when LRCLIB cannot answer.
+ */
 export function createLrclibClient({ fetchImpl = fetch, queue = createQueue(), retryDelayMs = 1000 } = {}) {
   const wait = () => new Promise(resolve => setTimeout(resolve, retryDelayMs));
-  async function ask(q) {
-    const request = () => fetchImpl(`${ENDPOINT}?${new URLSearchParams({ q })}`, { headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+  // A missing record (404) is an answer when 'missing' is given; any other refusal is a failure.
+  async function ask(url, missing = undefined) {
+    const request = () => fetchImpl(url, { headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' }, signal: AbortSignal.timeout(TIMEOUT_MS) });
     let response = await request();
     // LRCLIB often answers 503 ServerOverloaded for a moment; one more try, a pause later, is all it gets.
     if (response.status >= 500) { await wait(); await wait(); response = await request(); }
+    if (response.status === 404 && missing !== undefined) return missing;
     if (!response.ok) throw new Error(`LRCLIB ${response.status}`);
     const text = await response.text();
     if (text.length > MAX_CHARS) throw new Error('LRCLIB answer too large');
     return JSON.parse(text);
   }
-  return async function findSections({ title, artist }) {
-    const result = await queue(async () => {
-      let hit = null;
-      for (const [i, q] of searchQueries(title, artist).entries()) {
-        if (i) await wait();
-        hit = pickHit(await ask(q), title);
-        if (hit) break;
-      }
-      if (!hit) return null;
-      const timed = parseTimedLines(hit.syncedLyrics);
-      const duration = Number.isFinite(hit.duration) && hit.duration > 0 ? hit.duration : (timed.at(-1)?.t ?? 0) + 5;
-      const sections = computeSections(timed.map(line => ({ t: line.t, key: lineKey(line.text) })), duration).slice(0, MAX_SECTIONS);
-      const lines = timed.slice(0, MAX_LINES).map(line => ({ t: line.t, text: line.text.slice(0, MAX_LINE_CHARS) }));
-      return sections.length ? { duration, sections, lines } : null;
-    });
+  const searchUrl = q => `${ENDPOINT}?${new URLSearchParams({ q })}`;
+  async function queued(task) {
+    const result = await queue(task);
     if (result === STALE) throw new Error('LRCLIB request went stale');
     return result;
-  };
+  }
+  async function findSections({ title, artist, lyricsId = null }) {
+    return queued(async () => {
+      if (lyricsId !== null) return fromHit(await ask(`${GET_ENDPOINT}/${lyricsId}`, null));
+      for (const [i, q] of searchQueries(title, artist).entries()) {
+        if (i) await wait();
+        const hit = pickHit(await ask(searchUrl(q)), title);
+        if (hit) return fromHit(hit);
+      }
+      return null;
+    });
+  }
+  findSections.search = q => queued(async () => listCandidates(await ask(searchUrl(q))));
+  return findSections;
 }

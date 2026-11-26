@@ -13,7 +13,7 @@ import { renderView, pageNotice } from './views.js';
 import { songDetailParts } from './song-views.js';
 import { defaultSongUi, currentVideoId, firstLyricLine, karaokeGraphTime } from './song-media-views.js';
 import { createSongPlayer } from './song-player.js';
-import { readMedia, validateMedia, expireMedia, mediaNeeds, withSections, withNoTiming, withPasted, withCandidates, withProvisionalOriginal, upgradeOriginal, canSearchOriginal, dropCandidate, nextCandidate, setStart, canSetStart, startOf, toVideoTime, pinVideoTime, addPin, removePin, currentSectionIndex, lyricIndex, parseYoutubeLink, sameSongQuery } from './song-media.js';
+import { readMedia, validateMedia, expireMedia, mediaNeeds, withSections, withNoTiming, withPasted, withCandidates, withProvisionalOriginal, upgradeOriginal, canSearchOriginal, dropCandidate, nextCandidate, setStart, canSetStart, startOf, toVideoTime, pinVideoTime, addPin, removePin, currentSectionIndex, lyricIndex, parseYoutubeLink, sameSongQuery, lyricsSearchQuery, readLyricsCandidates } from './song-media.js';
 import { createSong, updateSong } from './songs.js';
 import { createPlaylist, renamePlaylist, removeSong, applyMembership, removeSongEverywhere, addSong, setRecommendations, takeRecommendation, rejectRecommendation, isValidRecItem, PLAYLIST_LIMITS } from './playlists.js';
 import { buildRecommendationRequest, suggestKey, sameSong } from './recommend.js';
@@ -169,7 +169,7 @@ function render(focus = false) {
     const parts = songDetailParts(v);
     if (parts) {
       const lyricsScroll = document.querySelector('#lyrics-full')?.scrollTop ?? 0;
-      const typing = document.activeElement?.matches?.('#media-link, #media-pin-form input') ? { id: document.activeElement.id ? '#media-link' : '#media-pin-form input', value: document.activeElement.value, start: document.activeElement.selectionStart, end: document.activeElement.selectionEnd } : null;
+      const typing = document.activeElement?.matches?.('#media-link, #media-pin-form input, #lyrics-q') ? { id: document.activeElement.id ? `#${document.activeElement.id}` : '#media-pin-form input', value: document.activeElement.value, start: document.activeElement.selectionStart, end: document.activeElement.selectionEnd } : null;
       document.querySelector('#song-detail-top').innerHTML = parts.top;
       document.querySelector('#song-detail-rest').innerHTML = parts.rest;
       document.querySelector('#page-notice').innerHTML = pageNotice(v);
@@ -515,13 +515,15 @@ async function loadSections() {
 
 async function lookupSections(song) {
   const query = { title: song.title, artist: song.artist };
+  // Lyrics the person picked by hand are asked for by their number; the song's name alone may not find them.
+  const lyricsId = readMedia(song).sections?.lyricsId;
   const needsSections = readMedia(song).sections === null;
   songUi = { ...songUi, sections: needsSections ? 'loading' : songUi.sections, lyrics: 'loading' };
   render();
   let status = 0;
   let body = null;
   try {
-    const response = await api.request(`/api/song-sections?${new URLSearchParams(query)}`);
+    const response = await api.request(`/api/song-sections?${new URLSearchParams(lyricsId ? { ...query, lyricsId: String(lyricsId) } : query)}`);
     status = response.status;
     if (status === 200) body = await response.json();
   } catch { status = 0; }
@@ -668,6 +670,57 @@ async function savePin(form) {
   await saveMedia(song.id, () => next);
 }
 
+// Finding the lyrics by hand (src/song-media-views.js): the person's words, records to pick, the picked number kept.
+let lyricsSearchToken = 0;
+
+async function searchLyricsBy(form) {
+  const song = selectedSong();
+  if (!song || !onSongScreen(song.id) || songUi.panel !== 'lyrics' || !hasCurrentConsent(state.settings)) return;
+  const q = String(new FormData(form).get('q') ?? '').trim().slice(0, 120);
+  if (!q) return document.querySelector('#lyrics-q')?.focus();
+  const token = ++lyricsSearchToken;
+  songUi = { ...songUi, lyricsSearch: { status: 'loading', query: q, candidates: [] } };
+  render();
+  let candidates = null;
+  try {
+    const response = await api.request(`/api/lyrics-search?${new URLSearchParams({ q })}`);
+    if (response.ok) candidates = readLyricsCandidates(await response.json());
+  } catch { candidates = null; }
+  if (token !== lyricsSearchToken || !onSongScreen(song.id) || songUi.panel !== 'lyrics') return;
+  songUi = { ...songUi, lyricsSearch: { status: candidates ? 'done' : 'busy', query: q, candidates: candidates ?? [] } };
+  render();
+}
+
+/** The picked record's sections and lines; the number is saved with the sections, the lines stay in memory only. */
+async function pickLyrics(index) {
+  const song = selectedSong();
+  const search = songUi.lyricsSearch;
+  const candidate = search?.candidates?.[Number(index)];
+  if (!song || !candidate || ['loading', 'picking'].includes(search.status) || !hasCurrentConsent(state.settings)) return;
+  const token = ++lyricsSearchToken;
+  const query = { title: song.title, artist: song.artist };
+  songUi = { ...songUi, lyricsSearch: { ...search, status: 'picking' } };
+  render();
+  let body = null;
+  try {
+    const response = await api.request(`/api/song-sections?${new URLSearchParams({ ...query, lyricsId: String(candidate.id) })}`);
+    if (response.status === 200) body = await response.json();
+  } catch { body = null; }
+  if (token !== lyricsSearchToken || !sameSongQuery(state.songs.find(s => s.id === song.id), query)) return;
+  let usable = false;
+  try { validateMedia(withSections(readMedia(song), body, new Date(), candidate.id)); usable = true; } catch { usable = false; }
+  const lines = usable && Array.isArray(body.lines) ? body.lines.filter(line => Number.isFinite(line?.t) && typeof line.text === 'string') : [];
+  if (!lines.length) {
+    if (onSongScreen(song.id) && songUi.panel === 'lyrics') { songUi = { ...songUi, lyricsSearch: { ...search, status: 'pick-failed' } }; render(); }
+    return;
+  }
+  songLyrics.set(song.id, lines);
+  if (onSongScreen(song.id)) songUi = { ...songUi, panel: null, lyricsSearch: null, sections: 'idle', lyrics: 'idle' };
+  await saveMedia(song.id, media => withSections(media, body, new Date(), candidate.id));
+  // With a length known now, the original side can look for the audio track.
+  if (onSongScreen(song.id)) loadOriginal(song.id);
+}
+
 async function handleMedia(action, id) {
   const song = selectedSong();
   if (!song || page !== 'song-detail') return;
@@ -773,9 +826,18 @@ async function handleMedia(action, id) {
   }
   if (action === 'media-panel-close' || action === 'media-pin-cancel') {
     pinDraft = null;
-    songUi = { ...songUi, panel: null, pasteError: '', pinError: '' };
+    lyricsSearchToken++;
+    songUi = { ...songUi, panel: null, pasteError: '', pinError: '', lyricsSearch: null };
     return render();
   }
+  if (action === 'media-lyrics-search') {
+    if (!hasCurrentConsent(state.settings)) return;
+    lyricsSearchToken++;
+    songUi = { ...songUi, panel: 'lyrics', pasteError: '', pinError: '', lyricsSearch: { status: 'idle', query: lyricsSearchQuery(song), candidates: [] } };
+    render();
+    return document.querySelector('#lyrics-q')?.focus();
+  }
+  if (action === 'media-lyrics-pick') return pickLyrics(id);
   if (action === 'media-sections-retry') { await loadSections(); return onSongScreen(song.id) ? loadOriginal(song.id) : undefined; }
   if (action === 'media-align') {
     const t = songPlayer.currentTime();
@@ -1887,6 +1949,7 @@ root.addEventListener('submit', async event => {
   }
   if (event.target.id === 'media-paste-form') { event.preventDefault(); return pasteLink(event.target); }
   if (event.target.id === 'media-pin-form') { event.preventDefault(); return savePin(event.target); }
+  if (event.target.id === 'lyrics-search-form') { event.preventDefault(); return searchLyricsBy(event.target); }
   if (event.target.id !== 'song-form') return;
   event.preventDefault();
   await saveSong(event.target);

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   emptyMedia, readMedia, validateMedia, expireMedia, mediaNeeds, withCandidates, dropCandidate, nextCandidate,
-  hasOtherCandidates, withPasted, withSections, withNoTiming, clearAutoMedia, sameSongQuery,
+  hasOtherCandidates, withPasted, withSections, withNoTiming, clearAutoMedia, sameSongQuery, lyricsSearchQuery, readLyricsCandidates,
 } from '../src/song-media.js';
 
 const now = new Date('2026-11-04T00:00:00.000Z');
@@ -251,4 +251,35 @@ test('an original picked without the song length is provisional and searched aga
   validateMedia(media);
   assert.equal(mediaNeeds(media).mv, true);
   assert.deepEqual(withProvisionalOriginal(emptyMedia(), [], now).mv, { none: true, foundAt: now.toISOString() });
+});
+
+test('sections keep the lyrics record the person picked, and nothing else about it', () => {
+  const picked = withSections(emptyMedia(), { duration: 257, sections: nine.items, lines: [{ t: 17.6, text: 'word-a' }] }, now, 4321);
+  assert.deepEqual(picked.sections, { duration: 257, items: nine.items, checkedAt: now.toISOString(), lyricsId: 4321 });
+  assert.doesNotThrow(() => validateMedia(picked));
+  assert.ok(!JSON.stringify(picked).includes('word-'));
+  // Found by the song's own name: no number is kept.
+  assert.deepEqual(Object.keys(withSections(emptyMedia(), { duration: 257, sections: nine.items }, now).sections), ['duration', 'items', 'checkedAt']);
+  for (const bad of [0, -3, 1.5, '4321', null, 2 ** 60]) assert.throws(() => validateMedia({ ...emptyMedia(), sections: { ...nine, lyricsId: bad } }), undefined, String(bad));
+  // A rename forgets the pick with everything else found for the old name.
+  assert.equal(clearAutoMedia(picked).sections, null);
+});
+
+test('the lyrics search starts from the title without its brackets, then the artist', () => {
+  assert.equal(lyricsSearchQuery({ title: '사계 (하루살이)', artist: 'M.C the MAX' }), '사계 M.C the MAX');
+  assert.equal(lyricsSearchQuery({ title: '너의모든순간(별에서온그대OST)', artist: '' }), '너의모든순간');
+  assert.equal(lyricsSearchQuery({ title: '(괄호뿐)', artist: '가수' }), '(괄호뿐) 가수');
+  assert.equal(lyricsSearchQuery({ title: 'x'.repeat(150), artist: '가수' }).length, 120);
+});
+
+test('records to pick are read from the server answer only when well formed', () => {
+  const good = { id: 4321, title: 'One Day Only(사계 (하루살이))', artist: '엠씨더맥스', duration: 257 };
+  assert.deepEqual(readLyricsCandidates({ candidates: [good] }), [good]);
+  assert.deepEqual(readLyricsCandidates({ candidates: [] }), []);
+  const broken = [{ ...good, id: 0 }, { ...good, id: '5' }, { ...good, id: 1e12 }, { ...good, title: '' }, { ...good, title: 'x'.repeat(121) }, { ...good, artist: 3 }, { ...good, duration: -1 }, { ...good, duration: Infinity }, null];
+  assert.deepEqual(readLyricsCandidates({ candidates: [good, ...broken] }), [good]);
+  assert.equal(readLyricsCandidates({ candidates: Array.from({ length: 30 }, (_, i) => ({ ...good, id: i + 1 })) }).length, 10);
+  for (const bad of [null, {}, { candidates: 'x' }, []]) assert.equal(readLyricsCandidates(bad), null);
+  // Only the four fields are kept.
+  assert.deepEqual(Object.keys(readLyricsCandidates({ candidates: [{ ...good, syncedLyrics: 'word-a' }] })[0]), ['id', 'title', 'artist', 'duration']);
 });
