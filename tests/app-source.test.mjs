@@ -60,3 +60,14 @@ test('public docs do not link to the private notes', () => {
     assert.deepEqual(privateLinks(readFileSync(new URL(`../${name}`, import.meta.url), 'utf8')), [], name);
   }
 });
+
+test('the karaoke picture passes where it was tapped and plays the recording from that time', () => {
+  assert.match(app, /\['media-seek', 'media-karaoke-graph'\]\.includes\(target\.dataset\.action\)/);
+  assert.match(app, /action === 'media-karaoke-graph'\) return playKaraokeAt\(karaokeGraphTime\(Number\(id\), songUi\.karaoke\?\.result\?\.seconds\)/);
+});
+
+test('an iPhone sees the home-screen steps from the start, and the survey gets the phone\'s tag (never the number itself)', () => {
+  assert.match(app, /let installHelp = platform\(navigator\.userAgent, \{ maxTouchPoints: navigator\.maxTouchPoints \}\) === 'ios' \? installHelpFor\('ios'\) : null;/);
+  assert.match(app, /deviceTag\(api\.deviceId\(\)\)\.then\(tag => \{ surveyTag = tag; \}\)/);
+  assert.match(app, /usageSummary\(demo && liveState \? liveState : state, surveyTag\)/);
+});

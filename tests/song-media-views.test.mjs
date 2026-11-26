@@ -370,3 +370,45 @@ test('karaoke mode: a recording cut short by leaving the screen says so while an
   assert.ok(karaokeReportOf(karaokePage(karaokeDone({ notice: 'left' }))).includes(text));
   assert.ok(!karaokeReportOf(karaokePage(karaokeDone())).includes(text));
 });
+
+// The picture: three notes (one long), two long high notes (one chosen), 120 s long.
+const withPicture = (extra = {}) => karaokeDone({ result: { ...karaokeDone().result, seconds: 120, voicedSeconds: 75.4, range: { topHeld: 72, keptHigh: 71, lowHeld: 55 },
+  contour: [[10, 10.4, 55.2], [72.4, 73.4, 69.1], [150, 151.2, 71.2]],
+  highs: [{ time: 72.4, end: 73.4, outcome: 'kept' }, { time: 100, end: 101, outcome: 'kept' }, { time: 150, end: 151.2, outcome: 'sag' }] }, ...extra });
+
+test('karaoke report: three numbers on how the take went, from the analysis only', () => {
+  const html = karaokeReportOf(karaokePage(withPicture()));
+  for (const text of ['따라간 목소리', '1분 15초', '2분 중', '부른 음역', '1옥 솔 ~ 3옥 도', '길게 낸 높은 음', '3번', '2번은 끝까지 지켰어요']) assert.ok(html.includes(text), text);
+  const old = karaokeReportOf(karaokePage(karaokeDone()));
+  assert.ok(!old.includes('따라간 목소리') && !old.includes('<svg'), 'a report without the picture data shows neither');
+});
+
+test('karaoke report: the picture draws each note, the comfortable top, and numbers the chosen spots like the list', () => {
+  const html = karaokeReportOf(karaokePage(withPicture()));
+  assert.equal(count(html, 'class="graph-note long"'), 2, 'held 0.6 s or more');
+  assert.equal(count(html, 'class="graph-note short"'), 1);
+  assert.equal(count(html, 'class="graph-comfort"'), 1);
+  assert.equal(count(html, 'class="graph-spot"'), 2, 'the two spots in the list');
+  assert.equal(count(html, 'class="graph-high"'), 1, 'the long high note the report did not choose');
+  assert.ok(html.includes('진한 선은 길게 낸 음, 점선은 편한 최고음이에요.'));
+  assert.ok(!html.includes('style="'));
+  assert.equal(count(karaokeReportOf(karaokePage(withPicture(), { comfortHigh: null })), 'class="graph-comfort"'), 0);
+});
+
+test('karaoke report: tapping the picture plays the recording from there, only while the recording is still here', () => {
+  const html = karaokeReportOf(karaokePage(withPicture()));
+  assert.match(html, /<button type="button" class="pitch-graph" data-action="media-karaoke-graph" aria-label="음높이 그림\. 누르면 그 시간부터 내 녹음이 나와요\.">/);
+  assert.ok(html.includes('그림을 누르면 그 시간부터 내 녹음이 나와요.'));
+  const gone = karaokeReportOf(karaokePage(withPicture(), { karaokeAudio: false }));
+  assert.ok(gone.includes('<svg') && !gone.includes('media-karaoke-graph') && !gone.includes('그림을 누르면'));
+});
+
+test('karaoke picture: a tap\'s place across the picture becomes a time in the take', async () => {
+  const { karaokeGraphTime, KARAOKE_GRAPH } = await import('../src/song-media-views.js');
+  const { width, left, right } = KARAOKE_GRAPH;
+  assert.equal(karaokeGraphTime(left / width, 120), 0);
+  assert.equal(karaokeGraphTime((width - right) / width, 120), 120);
+  assert.equal(karaokeGraphTime((left + (width - left - right) / 2) / width, 120), 60);
+  assert.equal(karaokeGraphTime(0, 120), 0, 'the label area counts as the start');
+  assert.equal(karaokeGraphTime(1, 120), 120);
+});

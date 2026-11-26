@@ -11,7 +11,7 @@ import { AudioEngine, microphoneError } from './audio.js';
 import { noteName, frequencyToMidi } from './pitch.js';
 import { renderView, pageNotice } from './views.js';
 import { songDetailParts } from './song-views.js';
-import { defaultSongUi, currentVideoId, firstLyricLine } from './song-media-views.js';
+import { defaultSongUi, currentVideoId, firstLyricLine, karaokeGraphTime } from './song-media-views.js';
 import { createSongPlayer } from './song-player.js';
 import { readMedia, validateMedia, expireMedia, mediaNeeds, withSections, withNoTiming, withPasted, withCandidates, withProvisionalOriginal, upgradeOriginal, canSearchOriginal, dropCandidate, nextCandidate, setStart, canSetStart, startOf, toVideoTime, pinVideoTime, addPin, removePin, currentSectionIndex, lyricIndex, parseYoutubeLink, sameSongQuery } from './song-media.js';
 import { createSong, updateSong } from './songs.js';
@@ -25,7 +25,7 @@ import { RANGE_BOUNDS, candidateShift } from './vocal-range.js';
 import { createApi, inviteFromHash, inviteFromInput } from './api.js';
 import { createBackTrap } from './back.js';
 import { inAppBrowser, externalUrl, platform, isStandalone } from './environment.js';
-import { nextNudge, usageSummary, feedbackLink, installHelp as installHelpFor } from './nudges.js';
+import { nextNudge, usageSummary, feedbackLink, deviceTag, installHelp as installHelpFor } from './nudges.js';
 
 const root = document.querySelector('#app');
 const audio = new AudioEngine();
@@ -38,8 +38,9 @@ let inviteError = '';
 // Inside KakaoTalk's own browser: the link that asks KakaoTalk to open the page in the default browser.
 let outsideUrl = null;
 // Adding to the home screen: Android Chrome offers its own prompt (kept until the friend taps); elsewhere we explain.
+// An iPhone has no prompt at all, so its card shows the steps from the start.
 let installPrompt = null;
-let installHelp = null;
+let installHelp = platform(navigator.userAgent, { maxTouchPoints: navigator.maxTouchPoints }) === 'ios' ? installHelpFor('ios') : null;
 window.addEventListener('beforeinstallprompt', event => { event.preventDefault(); installPrompt = event; });
 window.addEventListener('appinstalled', () => { installPrompt = null; markNow('installNudgeAt'); });
 const WAKE_AGAIN_MS = 10 * 60 * 1000;
@@ -53,6 +54,9 @@ const api = createApi({
   onLimit: kind => toast(LIMIT_MESSAGES[kind]),
   onInvite: () => inviteRefused(),
 });
+// The survey's tag for this phone (src/nudges.js deviceTag), worked out once: the survey opens without waiting.
+let surveyTag = '';
+deviceTag(api.deviceId()).then(tag => { surveyTag = tag; }).catch(() => {});
 
 // The phone's back button goes back inside the app (the screen's own back button), not out of it.
 const backTrap = createBackTrap({
@@ -714,6 +718,8 @@ async function handleMedia(action, id) {
   if (action === 'media-karaoke-record') return RECORD_IN_APP ? startKaraokeRecording() : undefined;
   if (action === 'media-karaoke-record-stop') return finishKaraokeRecording();
   if (action === 'media-karaoke-play') return playKaraokeAt(Number(id));
+  // The picture: six seconds of the recording from just before the tapped time.
+  if (action === 'media-karaoke-graph') return playKaraokeAt(karaokeGraphTime(Number(id), songUi.karaoke?.result?.seconds), { lead: 0.5, seconds: 6 });
   // The first-line check: "맞아요" ties the take's first voice to the song's first lyric line (a number, not the words).
   if (['media-karaoke-first-play', 'media-karaoke-first-yes', 'media-karaoke-first-no'].includes(action)) {
     const report = songUi.karaoke;
@@ -1571,7 +1577,7 @@ async function markNow(key) {
 }
 
 async function openFeedback() {
-  const link = feedbackLink(appConfig.feedbackUrl, usageSummary(demo && liveState ? liveState : state));
+  const link = feedbackLink(appConfig.feedbackUrl, usageSummary(demo && liveState ? liveState : state, surveyTag));
   if (!link) return;
   // Opened before anything is awaited, so the browser counts it as the tap's own window.
   window.open(link, '_blank', 'noopener');
@@ -1819,7 +1825,7 @@ root.addEventListener('click', async event => {
   if (!target || target.disabled) return;
   let id = target.dataset.id;
   // The song timeline passes where it was tapped, as a fraction of its width.
-  if (target.dataset.action === 'media-seek') { const box = target.getBoundingClientRect(); id = String((event.clientX - box.left) / box.width); }
+  if (['media-seek', 'media-karaoke-graph'].includes(target.dataset.action)) { const box = target.getBoundingClientRect(); id = String((event.clientX - box.left) / box.width); }
   try { await handle(target.dataset.action, id); }
   catch (err) {
     busy = false;

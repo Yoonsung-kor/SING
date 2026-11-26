@@ -55,3 +55,25 @@ test('the first voice is the first sound held 0.3 s; a shorter noise before it i
   assert.equal(firstVoice(framesWith([[1.0, 1.2], [4.0, 4.1]])), null);
   assert.equal(firstVoice([]), null);
 });
+
+test('the sung range also has a low end: the second lowest long note', () => {
+  assert.equal(sungRange([note(52, 1), note(55, 1), note(60, 0.9), note(48, 0.4)]).lowHeld, 55, 'short notes do not count, the lowest one may be a slip');
+  assert.equal(sungRange([note(52, 1)]).lowHeld, null);
+});
+
+test('a karaoke report carries what its picture draws: the length, the notes held 0.3 s or more, and every long high note', () => {
+  const RATE = 16000;
+  const notes = makeMelody({ seed: 21, seconds: 60, low: 52, high: 69 });
+  const { samples } = renderVoice(notes, RATE, { seed: 22, seconds: 60 });
+  const mix = mixAt(karaokeEcho(samples, RATE), renderBacking(60, RATE), RATE, 6);
+  const result = analyzeKaraoke(mix, { comfortableHighMidi: 66 });
+  assert.ok(Math.abs(result.seconds - mix.length / RATE) < 0.1, `seconds ${result.seconds}`);
+  assert.ok(result.contour.length >= 10, `contour ${result.contour.length}`);
+  for (const [start, end, midi] of result.contour) {
+    assert.ok(end - start >= 0.3 - 1e-6, 'short notes are left out of the picture');
+    assert.ok(start >= 0 && end <= result.seconds + 0.1 && midi > 30 && midi < 100);
+  }
+  for (const spot of result.spots) assert.ok(result.highs.some(high => Math.abs(high.time - spot.time) < 1e-6), 'every chosen spot is one of the long high notes');
+  assert.ok(result.highs.every(high => high.end > high.time && typeof high.outcome === 'string'));
+  assert.ok(Number.isInteger(result.range.lowHeld) && result.range.lowHeld <= result.range.topHeld);
+});
