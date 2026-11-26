@@ -99,16 +99,30 @@ function readSongQuery(params) {
   return title && title.length <= 120 && artist.length <= 120 ? { title, artist } : null;
 }
 
+// A lyrics record the person picked from a search: LRCLIB's number, digits only.
+const LYRICS_ID = /^[1-9]\d{0,11}$/;
+
 async function handleSections(req, res, findSections) {
-  const song = readSongQuery(new URL(req.url, 'http://localhost').searchParams);
-  if (!song) return sendJson(res, 400, { error: 'bad-request' });
+  const params = new URL(req.url, 'http://localhost').searchParams;
+  const song = readSongQuery(params);
+  const lyricsId = params.get('lyricsId');
+  if (!song || (lyricsId !== null && !LYRICS_ID.test(lyricsId))) return sendJson(res, 400, { error: 'bad-request' });
   if (!findSections) return sendJson(res, 503, { error: 'not-configured' });
   let result;
-  try { result = await findSections(song); }
+  try { result = await findSections(lyricsId === null ? song : { ...song, lyricsId: Number(lyricsId) }); }
   catch { return sendJson(res, 503, { error: 'busy' }); }
   if (!result) return sendJson(res, 404, { error: 'no-timing' });
   // Lyric lines are passed through to the screen only; the server keeps nothing.
   return sendJson(res, 200, { duration: result.duration, sections: result.sections, lines: Array.isArray(result.lines) ? result.lines : [] });
+}
+
+// The person's own search words (1-120 characters) when the song's name finds no lyrics; records come back to pick from.
+async function handleLyricsSearch(req, res, searchLyrics) {
+  const q = (new URL(req.url, 'http://localhost').searchParams.get('q') ?? '').trim();
+  if (!q || q.length > 120) return sendJson(res, 400, { error: 'bad-request' });
+  if (!searchLyrics) return sendJson(res, 503, { error: 'not-configured' });
+  try { return sendJson(res, 200, { candidates: await searchLyrics(q) }); }
+  catch { return sendJson(res, 503, { error: 'busy' }); }
 }
 
 async function handleVideos(req, res, findVideos) {
@@ -129,7 +143,7 @@ async function handleVideos(req, res, findVideos) {
 }
 
 /** access: scripts/access.mjs (invite code, pace, daily caps), or null for no checks. config.feedbackUrl: the survey link. */
-export function createHandler({ root, recommend, lookupRange = null, searchSongs = null, findSections = null, findVideos = null, practiceFeedback = null, access = null, config = {} }) {
+export function createHandler({ root, recommend, lookupRange = null, searchSongs = null, findSections = null, searchLyrics = null, findVideos = null, practiceFeedback = null, access = null, config = {} }) {
   // The report's spots come back as { words }; humming feedback as { feedback }.
   const practiceRun = practiceFeedback && (async body => {
     const result = await practiceFeedback(body);
@@ -165,6 +179,7 @@ export function createHandler({ root, recommend, lookupRange = null, searchSongs
       if (req.method === 'POST' && pathname === '/api/song-range') return await handleJson(req, res, { maxBody: RANGE_MAX_BODY, validate: validateRangeRequest, run: rangeRun });
       if (req.method === 'GET' && pathname === '/api/song-search') return await handleSearch(req, res, searchSongs);
       if (req.method === 'GET' && pathname === '/api/song-sections') return await handleSections(req, res, findSections);
+      if (req.method === 'GET' && pathname === '/api/lyrics-search') return await handleLyricsSearch(req, res, searchLyrics);
       if (req.method === 'GET' && pathname === '/api/song-videos') return await handleVideos(req, res, findVideos);
       if (pathname.startsWith('/api/')) return sendJson(res, 404, { error: 'not-found' });
       if (!['GET', 'HEAD'].includes(req.method)) { res.writeHead(405).end(); return; }

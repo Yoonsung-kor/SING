@@ -105,3 +105,47 @@ test('a title that is one syllable without its brackets is matched with the brac
   assert.equal(titleMatches('꽃길', '꽃'), false);
   assert.equal(titleMatches('꽃', '꽃'), true);
 });
+
+test('a picked lyrics number is fetched by itself, not searched', async () => {
+  const run = task => task({ isStale: () => false });
+  let asked;
+  const fetchImpl = async (url, options) => { asked = { url: new URL(url), options }; return json(200, hit({ id: 4321, trackName: 'One Day Only(사계 (하루살이))', artistName: '엠씨더맥스' })); };
+  const result = await createLrclibClient({ fetchImpl, queue: run })({ title: '사계', artist: 'M.C the MAX', lyricsId: 4321 });
+  assert.equal(asked.url.href, 'https://lrclib.net/api/get/4321');
+  assert.equal(asked.options.headers['User-Agent'], 'SING/0.1 (class project; https://github.com/Yoonsung-kor/SING)');
+  assert.deepEqual(Object.keys(result), ['duration', 'sections', 'lines']);
+  assert.equal(result.sections.length, 9);
+  // Gone or without timing: nothing found (not a failure); an overloaded service still fails.
+  assert.equal(await createLrclibClient({ fetchImpl: async () => json(404, { code: 404 }), queue: run })({ title: '사계', artist: '', lyricsId: 4321 }), null);
+  assert.equal(await createLrclibClient({ fetchImpl: async () => json(200, hit({ syncedLyrics: null })), queue: run })({ title: '사계', artist: '', lyricsId: 4321 }), null);
+  await assert.rejects(createLrclibClient({ fetchImpl: async () => json(503, {}), queue: run, retryDelayMs: 0 })({ title: '사계', artist: '', lyricsId: 4321 }));
+});
+
+test('a search lists synced records once each, as number, title, artist and length', async () => {
+  const run = task => task({ isStale: () => false });
+  let asked;
+  const hits = [
+    hit({ id: 1, trackName: '사계', artistName: '가수A', duration: 188.2 }),
+    hit({ id: 2, trackName: '사계', artistName: '가수A', duration: 188.4 }),
+    hit({ id: 3, trackName: '사계(Always)', artistName: '가수B', duration: 241, syncedLyrics: null }),
+    hit({ id: 4, trackName: 'One Day Only(사계 (하루살이))', artistName: '엠씨더맥스', duration: 257 }),
+    hit({ id: 5, trackName: 'x'.repeat(300), artistName: '가수C', duration: 200 }),
+    hit({ id: 'bad', trackName: '사계', artistName: '가수D', duration: 190 }),
+  ];
+  const search = createLrclibClient({ fetchImpl: async (url, options) => { asked = { url: new URL(url), options }; return json(200, hits); }, queue: run }).search;
+  const found = await search('사계 엠씨더맥스');
+  assert.equal(asked.url.origin + asked.url.pathname, 'https://lrclib.net/api/search');
+  assert.equal(asked.url.searchParams.get('q'), '사계 엠씨더맥스');
+  assert.equal(asked.options.headers['User-Agent'], 'SING/0.1 (class project; https://github.com/Yoonsung-kor/SING)');
+  assert.deepEqual(found.slice(0, 2), [
+    { id: 1, title: '사계', artist: '가수A', duration: 188 },
+    { id: 4, title: 'One Day Only(사계 (하루살이))', artist: '엠씨더맥스', duration: 257 },
+  ]);
+  assert.equal(found.length, 3);
+  assert.equal(found[2].title.length, 120);
+  // No lyric text leaves this function.
+  assert.ok(!JSON.stringify(found).includes('word-'));
+  const many = Array.from({ length: 20 }, (_, i) => hit({ id: i + 1, artistName: `가수${i}` }));
+  assert.equal((await createLrclibClient({ fetchImpl: async () => json(200, many), queue: run }).search('너의 모든 순간')).length, 10);
+  await assert.rejects(createLrclibClient({ fetchImpl: async () => json(503, {}), queue: run, retryDelayMs: 0 }).search('사계'));
+});

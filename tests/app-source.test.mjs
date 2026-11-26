@@ -71,3 +71,14 @@ test('an iPhone sees the home-screen steps from the start, and the survey gets t
   assert.match(app, /deviceTag\(api\.deviceId\(\)\)\.then\(tag => \{ surveyTag = tag; \}\)/);
   assert.match(app, /usageSummary\(demo && liveState \? liveState : state, surveyTag\)/);
 });
+
+test('the lyrics search: the form, the pick by number, the number reused, the words kept while redrawing', () => {
+  assert.match(app, /event\.target\.id === 'lyrics-search-form'\) \{ event\.preventDefault\(\); return searchLyricsBy\(event\.target\); \}/);
+  assert.match(app, /api\.request\(`\/api\/lyrics-search\?\$\{new URLSearchParams\(\{ q \}\)\}`\)/);
+  assert.match(app, /readLyricsCandidates\(await response\.json\(\)\)/);
+  assert.match(app, /action === 'media-lyrics-pick'\) return pickLyrics\(id\)/);
+  // The picked record's number is saved with the sections and asked for again next time.
+  assert.match(app, /withSections\(media, body, new Date\(\), candidate\.id\)/);
+  assert.match(app, /const lyricsId = readMedia\(song\)\.sections\?\.lyricsId;/);
+  assert.match(app, /matches\?\.\('#media-link, #media-pin-form input, #lyrics-q'\)/);
+});

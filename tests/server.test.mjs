@@ -122,6 +122,36 @@ test('song-sections endpoint validates the song and maps the answers', async () 
   } finally { s.close(); off.close(); }
 });
 
+test('song-sections takes a picked lyrics number; lyrics-search lists records to pick', async () => {
+  const get = (port, path, query) => fetch(`http://127.0.0.1:${port}/api/${path}?${new URLSearchParams(query)}`);
+  const sections = [{ t: 17.6, label: '노래 시작 · 1절', kind: 'start' }];
+  const candidates = [{ id: 4321, title: 'One Day Only(사계 (하루살이))', artist: '엠씨더맥스', duration: 257 }];
+  let asked;
+  let searched;
+  let failing = false;
+  const s = await start({
+    recommend: null,
+    findSections: async args => { asked = args; return { duration: 257, sections, lines: [] }; },
+    searchLyrics: async q => { searched = q; if (failing) throw new Error('overloaded'); return candidates; },
+  });
+  const off = await start({ recommend: null });
+  try {
+    for (const bad of ['0', '-1', '1.5', 'abc', '1e3', ' ', '12345678901234']) assert.equal((await get(s.port, 'song-sections', { title: '사계', lyricsId: bad })).status, 400, bad);
+    assert.equal((await get(s.port, 'song-sections', { title: '사계', artist: 'M.C the MAX', lyricsId: '4321' })).status, 200);
+    assert.deepEqual(asked, { title: '사계', artist: 'M.C the MAX', lyricsId: 4321 });
+    assert.equal((await get(s.port, 'lyrics-search', { q: '  ' })).status, 400);
+    assert.equal((await get(s.port, 'lyrics-search', { q: 'x'.repeat(121) })).status, 400);
+    const ok = await get(s.port, 'lyrics-search', { q: ' 사계 엠씨더맥스 ' });
+    assert.deepEqual([ok.status, await ok.json()], [200, { candidates }]);
+    assert.equal(searched, '사계 엠씨더맥스');
+    failing = true;
+    const busy = await get(s.port, 'lyrics-search', { q: '사계' });
+    assert.deepEqual([busy.status, await busy.json()], [503, { error: 'busy' }]);
+    const missing = await get(off.port, 'lyrics-search', { q: '사계' });
+    assert.deepEqual([missing.status, await missing.json()], [503, { error: 'not-configured' }]);
+  } finally { s.close(); off.close(); }
+});
+
 test('song-videos endpoint validates the side and maps YouTube failures', async () => {
   const { YoutubeError } = await import('../scripts/youtube.mjs');
   const get = (port, query) => fetch(`http://127.0.0.1:${port}/api/song-videos?${new URLSearchParams(query)}`);
@@ -200,11 +230,11 @@ test('health, config and hello answer without an access guard; usage stays hidde
 test('every API path but health and config needs the invite code', async () => {
   const { createAccess } = await import('../scripts/access.mjs');
   const access = createAccess({ inviteCodes: ['abc12345'], adminKey: 'k'.repeat(16) });
-  const s = await start({ recommend: async () => ({ items: [], intent: 'any', fallback: false }), lookupRange: async () => null, searchSongs: async () => ({}), findSections: async () => null, findVideos: async () => ({ candidates: [] }), practiceFeedback: async () => null, access });
+  const s = await start({ recommend: async () => ({ items: [], intent: 'any', fallback: false }), lookupRange: async () => null, searchSongs: async () => ({}), findSections: async () => null, searchLyrics: async () => [], findVideos: async () => ({ candidates: [] }), practiceFeedback: async () => null, access });
   const url = path => `http://127.0.0.1:${s.port}${path}`;
   const json = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' };
   try {
-    for (const [path, init] of [['/api/hello'], ['/api/song-search?q=a'], ['/api/song-sections?title=a'], ['/api/song-videos?title=a&side=mv'], ['/api/recommend', json], ['/api/song-range', json], ['/api/practice-feedback', json], ['/api/nothing']]) {
+    for (const [path, init] of [['/api/hello'], ['/api/song-search?q=a'], ['/api/song-sections?title=a'], ['/api/lyrics-search?q=a'], ['/api/song-videos?title=a&side=mv'], ['/api/recommend', json], ['/api/song-range', json], ['/api/practice-feedback', json], ['/api/nothing']]) {
       const response = await fetch(url(path), init);
       assert.deepEqual([response.status, await response.json()], [401, { error: 'invite' }], path);
     }

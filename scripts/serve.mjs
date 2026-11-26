@@ -48,7 +48,7 @@ if (problem) {
   console.error(problem);
   process.exitCode = 1;
 } else {
-  const server = http.createServer(createHandler({ root, recommend, lookupRange, searchSongs, findSections, findVideos, practiceFeedback, access, config: { feedbackUrl } }));
+  const server = http.createServer(createHandler({ root, recommend, lookupRange, searchSongs, findSections, searchLyrics: findSections.search, findVideos, practiceFeedback, access, config: { feedbackUrl } }));
   server.listen(port, host, () => console.log(`SING is ready at http://${host}:${port} · AI 추천: ${recommend ? '켜짐' : '꺼짐'} · 영상 찾기: ${findVideos ? '켜짐' : '꺼짐'} · 초대: ${access.inviteRequired ? '켜짐' : '꺼짐'}`));
   server.on('error', error => { console.error(error.message); process.exitCode = 1; });
 }

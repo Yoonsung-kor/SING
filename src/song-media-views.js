@@ -24,7 +24,7 @@ const VIDEO_STATUS = {
   failed: '영상을 찾지 못했어요. 잠시 후 다시 열어 주세요.',
 };
 
-export const defaultSongUi = () => ({ side: 'mv', consent: false, videos: { mv: 'idle', karaoke: 'idle' }, sections: 'idle', lyrics: 'idle', lyricsStyle: 'karaoke', panel: null, pasteError: '', pinError: '', playerError: null, singing: false, singReport: null, karaoke: null });
+export const defaultSongUi = () => ({ side: 'mv', consent: false, videos: { mv: 'idle', karaoke: 'idle' }, sections: 'idle', lyrics: 'idle', lyricsStyle: 'karaoke', panel: null, pasteError: '', pinError: '', playerError: null, singing: false, singReport: null, karaoke: null, lyricsSearch: null });
 
 export function currentVideoId(song, side) {
   const entry = readMedia(song)[side];
@@ -79,7 +79,7 @@ function sectionsBlock(media, ui, videoId) {
     const chips = items.map((item, i) => `<button class="media-chip ${item.kind}" data-action="media-section" data-id="${i}">${e(item.label)}<small>${formatTime(item.t)}</small></button>`).join('');
     return `${align}<svg class="media-timeline" viewBox="0 0 1000 24" preserveAspectRatio="none" data-action="media-seek" role="img" aria-label="곡 전체 흐름">${segs}${pins}<line id="media-head" class="head" x1="0" x2="0" y1="0" y2="24"/></svg><div class="media-times"><span>0:00</span><span>${formatTime(duration)}</span></div><div class="media-sections">${chips}</div>`;
   }
-  if (sections?.none) return '<p class="media-status">이 곡은 구간을 찾지 못했어요. 신경 쓰이는 곳은 메모로 표시해 보세요.</p>';
+  if (sections?.none) return `<p class="media-status">이 곡은 구간을 찾지 못했어요. 신경 쓰이는 곳은 메모로 표시해 보세요.${ui.consent && ui.lyrics !== 'none' && ui.panel !== 'lyrics' ? ` · ${FIND_LYRICS('가사 직접 찾기')}` : ''}</p>`;
   // A pasted video plays without consent; say what consent would add (the no-video prompt already asks).
   if (!ui.consent && videoId) return '<p class="media-status">구간과 가사를 보려면 동의가 필요해요 · <button class="text-button" data-action="media-consent">동의하고 찾기</button></p>';
   if (ui.sections === 'loading') return '<p class="media-status">구간을 찾고 있어요…</p>';
@@ -96,10 +96,34 @@ function pinsBlock(media, ui, videoId) {
   return `<section class="surface media-pins"><h2>구간 메모</h2>${videoId ? '<button class="button secondary small" data-action="media-pin-open">＋ 지금 위치에 메모</button>' : ''}${form}<ul class="media-pin-list">${list}</ul></section>`;
 }
 
+// Opens the search for the lyrics by hand (the song's name can differ from the lyrics record's, e.g. the artist's).
+const FIND_LYRICS = label => `<button class="text-button" data-action="media-lyrics-search">${label}</button>`;
+
+const SEARCH_NOTES = {
+  loading: '찾고 있어요…',
+  busy: '지금은 찾을 수 없어요. 잠시 뒤에 다시 해 주세요.',
+  picking: '가사를 가져오고 있어요…',
+  'pick-failed': '이 가사는 가져오지 못했어요. 다른 걸 골라 주세요.',
+};
+
+/** The search panel: the person's words, then records to pick (title, artist, length); the one in use is marked. */
+function lyricsSearchBlock(media, search) {
+  const candidates = Array.isArray(search.candidates) ? search.candidates : [];
+  const waiting = search.status === 'loading' || search.status === 'picking';
+  const off = waiting ? ' disabled' : '';
+  const note = SEARCH_NOTES[search.status] ?? (search.status === 'done' && !candidates.length ? '맞는 가사가 없어요. 제목만 넣거나 가수 이름을 바꿔 보세요.' : '');
+  const current = media.sections?.lyricsId;
+  const list = candidates.length
+    ? `<ul class="lyrics-candidates">${candidates.map((c, i) => `<li><button class="lyrics-candidate" data-action="media-lyrics-pick" data-id="${i}"${off}><span>${e(c.title)}</span><small>${[c.artist, c.duration ? formatTime(c.duration) : '', c.id === current ? '지금 가사' : ''].filter(Boolean).map(e).join(' · ')}</small></button></li>`).join('')}</ul>`
+    : '';
+  return `<div class="lyrics-search"><form id="lyrics-search-form" class="lyrics-search-form"><input id="lyrics-q" name="q" maxlength="120" value="${e(search.query)}" autocomplete="off" aria-label="가사를 찾을 제목과 가수"><button class="button small" type="submit"${off}>찾기</button><button class="text-button" type="button" data-action="media-panel-close">닫기</button></form><p class="lyrics-search-hint">제목과 가수로 찾아요. 안 나오면 가수 이름을 한글이나 영어로 바꿔 보세요.</p>${note ? `<p class="media-status" role="status">${note}</p>` : ''}${list}</div>`;
+}
+
 function lyricsBlock(media, ui, lines) {
+  if (ui.panel === 'lyrics' && ui.lyricsSearch) return lyricsSearchBlock(media, ui.lyricsSearch);
   if (!lines?.length) {
     if (ui.lyrics === 'loading') return '<p class="media-status">가사를 불러오고 있어요…</p>';
-    if (ui.lyrics === 'none') return '<p class="media-status">이 곡은 가사 시간 정보를 찾지 못했어요.</p>';
+    if (ui.lyrics === 'none') return `<p class="media-status">이 곡은 가사 시간 정보를 찾지 못했어요.${ui.consent ? ` · ${FIND_LYRICS('가사 직접 찾기')}` : ''}</p>`;
     if (ui.lyrics === 'busy') return `<p class="media-status">가사를 불러오지 못했어요${ui.sections === 'busy' ? '' : ' · <button class="text-button" data-action="media-sections-retry">다시 시도</button>'}</p>`;
     return '';
   }
@@ -113,7 +137,7 @@ function lyricsBlock(media, ui, lines) {
     if (line.text) list += `<button class="lyric-line" data-action="media-lyric" data-id="${i}">${e(line.text)}</button>`;
   });
   // The current line is filled in by the app's timer (text and classes only), so the player is never redrawn.
-  return `<div class="lyrics"><div class="lyrics-styles" role="group" aria-label="가사 보기 방식">${button('karaoke', '노래방 자막형')}${button('full', '전체 가사형')}</div><div class="lyrics-karaoke"${style === 'karaoke' ? '' : ' hidden'}><p id="lyric-section" class="lyric-section"></p><p id="lyric-cur" class="lyric-cur">재생하면 가사가 흘러가요.</p><p id="lyric-next" class="lyric-next"></p></div><div class="lyrics-full" id="lyrics-full"${style === 'full' ? '' : ' hidden'}>${list}</div></div>`;
+  return `<div class="lyrics"><div class="lyrics-styles" role="group" aria-label="가사 보기 방식">${button('karaoke', '노래방 자막형')}${button('full', '전체 가사형')}</div>${ui.consent ? FIND_LYRICS('다른 가사 찾기') : ''}<div class="lyrics-karaoke"${style === 'karaoke' ? '' : ' hidden'}><p id="lyric-section" class="lyric-section"></p><p id="lyric-cur" class="lyric-cur">재생하면 가사가 흘러가요.</p><p id="lyric-next" class="lyric-next"></p></div><div class="lyrics-full" id="lyrics-full"${style === 'full' ? '' : ' hidden'}>${list}</div></div>`;
 }
 
 /** Sing along with earphones: offered whenever a video is shown (the report needs no lyrics or sections; they only

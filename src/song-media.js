@@ -50,7 +50,8 @@ function checkSections(sections) {
   if (sections === null) return;
   if (!isObject(sections)) fail();
   if (sections.none === true) { if (!keysAre(sections, ['none', 'checkedAt']) || !isTime(sections.checkedAt)) fail(); return; }
-  if (!keysAre(sections, ['duration', 'items', 'checkedAt']) || !inRange(sections.duration, 0, MAX_TIME) || !isTime(sections.checkedAt)) fail();
+  if (!keysAre(sections, ['duration', 'items', 'checkedAt'], ['lyricsId']) || !inRange(sections.duration, 0, MAX_TIME) || !isTime(sections.checkedAt)) fail();
+  if ('lyricsId' in sections && !isLyricsId(sections.lyricsId)) fail();
   if (!Array.isArray(sections.items) || sections.items.length > MAX_SECTIONS) fail();
   for (const item of sections.items) {
     if (!isObject(item) || !keysAre(item, ['t', 'label', 'kind']) || !inRange(item.t, 0, MAX_TIME)) fail();
@@ -142,7 +143,31 @@ export function withPasted(media, side, videoId, now) {
   return { ...media, [side]: { videoId, ...(side === 'karaoke' ? { kind: 'unknown' } : {}), source: 'pasted', foundAt: now.toISOString(), candidates: [{ videoId }] } };
 }
 
-export const withSections = (media, { duration, sections }, now) => ({ ...media, sections: { duration, items: sections, checkedAt: now.toISOString() } });
+// A lyrics record the person picked (LRCLIB's number, as the server accepts it); only the number is kept.
+const isLyricsId = value => Number.isSafeInteger(value) && value >= 1 && value < 1e12;
+
+/** Sections from a lookup; lyricsId when the person picked the lyrics record (later lookups read that record). */
+export const withSections = (media, { duration, sections }, now, lyricsId = null) => ({
+  ...media,
+  sections: { duration, items: sections, checkedAt: now.toISOString(), ...(lyricsId === null ? {} : { lyricsId }) },
+});
+
+/** Records to pick from the server's answer (at most ten, four fields each); null when the answer is malformed. */
+export function readLyricsCandidates(body) {
+  if (!isObject(body) || !Array.isArray(body.candidates)) return null;
+  const name = value => typeof value === 'string' && value.length <= 120;
+  return body.candidates
+    .filter(c => isObject(c) && isLyricsId(c.id) && name(c.title) && c.title && name(c.artist) && inRange(c.duration, 0, MAX_TIME))
+    .slice(0, 10)
+    .map(({ id, title, artist, duration }) => ({ id, title, artist, duration }));
+}
+
+/** The words a lyrics search starts from: the title without its (…) and […] parts, then the artist. */
+export function lyricsSearchQuery({ title, artist }) {
+  const whole = String(title ?? '').trim();
+  const core = whole.replace(/\([^)]*\)|\[[^\]]*\]/gu, ' ').replace(/\s+/gu, ' ').trim() || whole;
+  return `${core} ${String(artist ?? '').trim()}`.trim().slice(0, 120);
+}
 export const withNoTiming = (media, now) => ({ ...media, sections: { none: true, checkedAt: now.toISOString() } });
 
 /** After a rename, what was found for the old name goes; pasted videos, start offsets and pins stay. */

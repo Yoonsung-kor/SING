@@ -412,3 +412,49 @@ test('karaoke picture: a tap\'s place across the picture becomes a time in the t
   assert.equal(karaokeGraphTime(0, 120), 0, 'the label area counts as the start');
   assert.equal(karaokeGraphTime(1, 120), 120);
 });
+
+// --- Finding the lyrics by hand ---
+const pickable = [
+  { id: 4321, title: 'One Day Only(사계 (하루살이))', artist: '엠씨더맥스', duration: 257 },
+  { id: 77, title: '<i>사계</i>', artist: '가수&B', duration: 188 },
+];
+
+test('a song without lyrics offers to find them by hand, with consent only', () => {
+  const none = songMediaBelow(songWith({ mv: mvEntry(), sections: { none: true, checkedAt: when } }), ui());
+  assert.equal(count(none, 'data-action="media-lyrics-search"'), 1);
+  assert.ok(none.includes('가사 직접 찾기'));
+  assert.equal(count(songMediaBelow(songWith({ mv: mvEntry(), sections: { none: true, checkedAt: when } }), ui({ consent: false })), 'data-action="media-lyrics-search"'), 0);
+  // Right after the lookup both lines say nothing was found; the button is offered once.
+  assert.equal(count(songMediaBelow(songWith({ mv: mvEntry(), sections: { none: true, checkedAt: when } }), ui({ lyrics: 'none' })), 'data-action="media-lyrics-search"'), 1);
+  const notTimed = songMediaBelow(songWith({ mv: mvEntry(), sections: twoSections }), ui({ lyrics: 'none' }));
+  assert.equal(count(notTimed, 'data-action="media-lyrics-search"'), 1);
+  // Lyrics that came up but look wrong can be swapped.
+  const shown = songMediaBelow(songWith({ mv: audioEntry, sections: twoSections }), ui(), lyricLines);
+  assert.ok(shown.includes('data-action="media-lyrics-search">다른 가사 찾기</button>'));
+});
+
+test('the lyrics search panel: the words, the states, and records to pick', () => {
+  const song = songWith({ mv: mvEntry(), sections: { ...twoSections, lyricsId: 77 } });
+  const open = (lyricsSearch, lines = null) => songMediaBelow(song, ui({ panel: 'lyrics', lyricsSearch }), lines);
+  const idle = open({ status: 'idle', query: '사계 "M.C" the MAX', candidates: [] });
+  assert.ok(idle.includes('<form id="lyrics-search-form"'));
+  assert.ok(idle.includes('id="lyrics-q"') && idle.includes('value="사계 &quot;M.C&quot; the MAX"') && idle.includes('maxlength="120"'));
+  assert.ok(idle.includes('가수 이름을 한글이나 영어로 바꿔 보세요'));
+  assert.ok(idle.includes('data-action="media-panel-close"'));
+  // The panel stands in for the lyrics while it is open.
+  assert.equal(count(songMediaBelow(songWith({ mv: mvEntry(), sections: { none: true, checkedAt: when } }), ui({ panel: 'lyrics', lyricsSearch: { status: 'idle', query: '', candidates: [] } })), 'data-action="media-lyrics-search"'), 0);
+  assert.ok(!open({ status: 'idle', query: '', candidates: [] }, lyricLines).includes('lyrics-karaoke'));
+  assert.ok(open({ status: 'loading', query: 'x', candidates: [] }).includes('찾고 있어요…'));
+  assert.ok(open({ status: 'busy', query: 'x', candidates: [] }).includes('지금은 찾을 수 없어요'));
+  assert.ok(open({ status: 'done', query: 'x', candidates: [] }).includes('맞는 가사가 없어요'));
+  assert.ok(open({ status: 'picking', query: 'x', candidates: pickable }).includes('가사를 가져오고 있어요…'));
+  assert.ok(open({ status: 'pick-failed', query: 'x', candidates: pickable }).includes('이 가사는 가져오지 못했어요'));
+  const done = open({ status: 'done', query: 'x', candidates: pickable });
+  assert.equal(count(done, 'data-action="media-lyrics-pick"'), 2);
+  assert.ok(done.includes('data-action="media-lyrics-pick" data-id="1"'));
+  assert.ok(done.includes('One Day Only(사계 (하루살이))') && done.includes('엠씨더맥스 · 4:17'));
+  assert.ok(done.includes('&lt;i&gt;사계&lt;/i&gt;') && done.includes('가수&amp;B · 3:08') && !done.includes('<i>사계'));
+  // The record the song uses now is marked.
+  assert.equal(count(done, '지금 가사'), 1);
+  assert.ok(/data-id="1"[^>]*>[\s\S]*?지금 가사/.test(done));
+});
