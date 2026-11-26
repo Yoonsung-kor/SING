@@ -133,8 +133,10 @@ export function spotCandidates(notes, { comfortableHighMidi = null, source = 'cl
     const high = note.midi >= highFrom - EPS;
     const above = comfort !== null ? Math.round(note.midi) - comfort : null;
     const over = above !== null && above >= rules.overComfort && length >= (above > rules.overFar ? rules.overFarFor : OVER_FOR) - EPS ? above : null;
-    let kind = leap ? 'leap' : high && length >= rules.held - EPS ? 'high-hold' : over !== null ? 'over' : null;
-    if (source === 'karaoke' && kind !== 'high-hold') kind = null;
+    const highHold = high && length >= rules.held - EPS;
+    // A karaoke take has long high notes only: a leap is not trusted in the mix, but the long high note it lands on is.
+    const kind = source === 'karaoke' ? (highHold ? 'high-hold' : null)
+      : leap ? 'leap' : highHold ? 'high-hold' : over !== null ? 'over' : null;
     if (!kind) return;
     candidates.push({ kind, outcome: outcomeOf(note, { kind, high, length, source, rules }), time: note.start, end: note.end, from: kind === 'leap' ? nameOf(prev.midi) : null, to: nameOf(note.midi), over, rise, length, repeated: false });
   });

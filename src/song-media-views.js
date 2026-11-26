@@ -173,7 +173,7 @@ function spotsReportBlock(ui, lines) {
   const allKept = spots.length > 0 && spots.every(spot => spot.outcome === 'kept');
   const polishing = report.polish === 'busy' ? '<p class="media-status" role="status">설명을 다듬고 있어요…</p>' : '';
   const polish = !ui.consent && spots.length && report.polish !== 'busy' ? '<button class="text-button" data-action="media-polish">AI로 설명 다듬기</button>' : '';
-  const list = spots.length ? `<ol class="spot-list">${spots.map(item).join('')}</ol>` : '<p class="subtle">이번에는 크게 올라가거나 높이 올라가는 자리를 찾지 못했어요.</p>';
+  const list = spots.length ? `<ol class="spot-list">${spots.map(item).join('')}</ol>` : '<p class="subtle">이번에는 크게 뛰어오르는 자리나 높은 음을 길게 낸 자리를 찾지 못했어요.</p>';
   return `<section class="surface practice-feedback sing-report"><h2>따라 부르기 리포트</h2>${allKept ? '<p class="spot-summary">어려운 자리를 모두 잘 넘겼어요.</p>' : ''}${polishing}${polish}<h3>이 노래의 어려운 자리</h3>${list}</section>`;
 }
 
@@ -185,9 +185,6 @@ const KARAOKE_PROBLEMS = {
   unsupported: '이 브라우저에서는 노래방 녹음 분석을 쓸 수 없어요.',
   error: '이 파일은 읽지 못했어요. 다른 녹음 파일로 해 보세요.',
 };
-// "2옥 라예요" but "2옥 솔이에요" / "2옥 도♯이에요" (솔 and ♯ end in a consonant).
-const isWhat = name => `${name}${/[솔♯]$/.test(name) ? '이에요' : '예요'}`;
-
 const LEFT_NOTICE = '<p class="subtle">화면을 벗어나 녹음을 멈췄어요. 여기까지 분석할게요.</p>';
 const clock = seconds => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 
@@ -212,7 +209,7 @@ function exerciseBlock(exercise) {
   return `<div class="spot-exercise"><h4>이렇게 연습해 봐요</h4><p><strong>${e(exercise.title)}</strong> ${e(exercise.steps)}</p>${exercise.caution ? `<p class="subtle">${e(exercise.caution)}</p>` : ''}${exercise.columnId ? `<button class="text-button" data-action="spot-column" data-id="${e(exercise.columnId)}">알아두기에서 읽기</button>` : ''}</div>`;
 }
 
-/** The karaoke report: the top long note against the comfortable top, the limits, the long high notes by time, and a suggestion.
+/** The karaoke report: one sentence on how the long high notes went, the picture, the limits, the spots to hear again, and a suggestion.
  * With lyric times, it asks once whether the take's first voice is the song's first line; confirmed, each time gets its
  * line (on screen only; the karaoke backing is assumed to keep the original's tempo, so it is an extra, not the anchor). */
 // The karaoke picture's frame in viewBox units: the left margin holds the note labels.
@@ -226,21 +223,18 @@ export function karaokeGraphTime(fraction, seconds) {
   return Math.round(Math.min(seconds, Math.max(0, share * seconds)) * 10) / 10;
 }
 
-const minutes = value => {
-  const whole = Math.round(value);
-  if (whole < 60) return `${whole}초`;
-  return whole % 60 ? `${Math.floor(whole / 60)}분 ${whole % 60}초` : `${whole / 60}분`;
-};
-
-/** Three numbers on how the take went, all from the analysis. */
-function karaokeStats(result) {
-  const tile = (label, value, under) => `<div class="stat-tile"><p class="stat-label">${label}</p><p class="stat-value">${e(value)}</p>${under ? `<p class="stat-under">${e(under)}</p>` : ''}</div>`;
-  const { range = {}, highs = [] } = result;
+/**
+ * The sentence on top: how many long high notes there were and how many were kept to the end. Every long high note
+ * counts, not only the ones listed; a result without them (made before the picture) counts the listed spots.
+ */
+function karaokeHeadline(result, spots) {
+  const highs = Array.isArray(result.highs) ? result.highs : spots;
+  const all = highs.length;
   const kept = highs.filter(high => high.outcome === 'kept').length;
-  const tiles = [tile('따라간 목소리', minutes(result.voicedSeconds), `${minutes(result.seconds)} 중`)];
-  if (Number.isInteger(range.lowHeld) && Number.isInteger(range.topHeld)) tiles.push(tile('부른 음역', `${koreanNote(range.lowHeld)} ~ ${koreanNote(range.topHeld)}`, '길게 낸 음 기준'));
-  tiles.push(tile('길게 낸 높은 음', `${highs.length}번`, highs.length ? `${kept}번은 끝까지 지켰어요` : ''));
-  return `<div class="stat-row">${tiles.join('')}</div>`;
+  if (!all) return '이번 녹음에서는 길게 낸 높은 음을 찾지 못했어요.';
+  if (kept === all) return all === 1 ? '길게 낸 높은 음 1번을 끝까지 지켰어요.' : `길게 낸 높은 음 ${all}번을 모두 끝까지 지켰어요.`;
+  if (kept) return `길게 낸 높은 음 ${all}번 중 ${kept}번은 끝까지 지켰어요.`;
+  return `길게 낸 높은 음이 ${all}번 있었어요. 다음엔 끝까지 같은 높이로 지켜 봐요.`;
 }
 
 /** The take as a picture: each note held 0.3 s or more, the comfortable top, the long high notes (chosen ones numbered
@@ -275,29 +269,26 @@ function karaokeGraph(result, spots, ui) {
   const picture = ui.karaokeAudio
     ? `<button type="button" class="pitch-graph" data-action="media-karaoke-graph" aria-label="음높이 그림. 누르면 그 시간부터 내 녹음이 나와요.">${svg}</button>`
     : `<div class="pitch-graph">${svg}</div>`;
-  const hint = ui.karaokeAudio ? ' 그림을 누르면 그 시간부터 내 녹음이 나와요.' : '';
-  return `${picture}<p class="graph-legend">진한 선은 길게 낸 음, 점선은 편한 최고음이에요. 짧게 스친 음은 그리지 않았어요.${hint}</p>`;
+  const legend = ['위로 갈수록 높은 음이고, 진한 선은 길게 낸 음이에요.'];
+  if (Number.isFinite(ui.comfortHigh)) legend.push('점선은 편한 최고음이에요.');
+  if (spots.length) legend.push('번호는 아래 자리예요.');
+  if (ui.karaokeAudio) legend.push('그림을 누르면 그 시간부터 내 녹음이 나와요.');
+  return `${picture}<p class="graph-legend">${legend.join(' ')}</p>`;
 }
 
 function karaokeReportBlock(ui, lines) {
   const report = ui.karaoke;
   if (report?.status !== 'done') return '';
-  const { spots = [], range = {}, suggestion = null, firstVoice = null } = report.result ?? {};
+  const { spots = [], suggestion = null, firstVoice = null } = report.result ?? {};
   const asking = !report.firstLine && spots.length > 0 && Number.isFinite(firstVoice) && firstLyricLine(lines) && ui.karaokeAudio;
   const firstLine = asking
-    ? '<div class="suggest-card first-line"><p>여기가 노래의 첫 소절이 맞나요?</p><div class="action-row"><button class="button secondary small" data-action="media-karaoke-first-play">들어 보기</button><button class="button small" data-action="media-karaoke-first-yes">맞아요</button><button class="text-button" data-action="media-karaoke-first-no">아니에요, 시간으로만 볼게요</button></div></div>' : '';
+    ? '<div class="suggest-card first-line"><p>자리마다 가사 줄을 붙여 드릴게요. 녹음에서 처음 나온 목소리가 노래의 첫 소절이 맞나요?</p><div class="action-row"><button class="button secondary small" data-action="media-karaoke-first-play">들어 보기</button><button class="button small" data-action="media-karaoke-first-yes">맞아요</button><button class="text-button" data-action="media-karaoke-first-no">아니에요, 시간으로만 볼게요</button></div></div>' : '';
   const lineOf = spot => {
     if (report.firstLine !== 'yes' || !Number.isFinite(report.lineOffset)) return '';
     const text = lines?.[lineAt(lines, spot.time - report.lineOffset)]?.text;
     return text ? ` · “${e(text)}”` : '';
   };
   const exercises = exercisesFor(spots, report.answers ?? {});
-  let summary = '';
-  if (Number.isInteger(range.topHeld)) {
-    const diff = Number.isFinite(ui.comfortHigh) ? range.topHeld - ui.comfortHigh : null;
-    const tail = diff === null ? '' : diff > 0 ? ` 편한 최고음보다 반음 ${diff}개 높아요.` : diff === 0 ? ' 편한 최고음과 같아요.' : ' 편한 최고음 안쪽이에요.';
-    summary = `<p class="spot-summary">가장 높게 길게 낸 음은 ${e(isWhat(koreanNote(range.topHeld)))}.${tail}</p>`;
-  }
   const item = spot => {
     const badge = OUTCOME_BADGES[spot.outcome] ? `<span class="spot-badge spot-${spot.outcome}">${OUTCOME_BADGES[spot.outcome]}</span>` : '';
     const play = ui.karaokeAudio ? `<button class="text-button" data-action="media-karaoke-play" data-id="${e(spot.time)}">내 녹음 듣기</button>` : '';
@@ -305,14 +296,15 @@ function karaokeReportBlock(ui, lines) {
   };
   const polishing = report.polish === 'busy' ? '<p class="media-status" role="status">설명을 다듬고 있어요…</p>' : '';
   const polish = !ui.consent && spots.length && report.polish !== 'busy' ? '<button class="text-button" data-action="media-polish" data-id="karaoke">AI로 설명 다듬기</button>' : '';
-  const list = spots.length ? `<ol class="spot-list">${spots.map(item).join('')}</ol>` : '<p class="subtle">이번에는 크게 올라가거나 높이 올라가는 자리를 찾지 못했어요.</p>';
+  const list = spots.length ? `<h3>다시 들어 볼 자리</h3>${firstLine}<ol class="spot-list">${spots.map(item).join('')}</ol>` : '';
   const name = Number.isInteger(suggestion) ? e(koreanNote(suggestion)) : '';
   const suggest = name && !report.suggestionDone
-    ? `<div class="suggest-card"><p>이 노래에서 ${name}까지 길게 지켰어요. 편한 최고음을 여기(${name})로 바꿀까요?</p><div class="action-row"><button class="button small" data-action="media-karaoke-high-yes">바꾸기</button><button class="text-button" data-action="media-karaoke-high-no">그대로 두기</button></div></div>` : '';
+    ? `<div class="suggest-card"><p>이 노래에서 ${name}까지는 두 번 이상 길게 지켰어요. 편한 최고음을 여기(${name})로 바꿀까요?</p><div class="action-row"><button class="button small" data-action="media-karaoke-high-yes">바꾸기</button><button class="text-button" data-action="media-karaoke-high-no">그대로 두기</button></div></div>` : '';
   const result = report.result ?? {};
   const pictured = Array.isArray(result.contour) && result.contour.length > 0 && result.seconds > 0;
-  const picture = pictured ? `${karaokeStats(result)}${karaokeGraph(result, spots, ui)}` : '';
-  return `<section class="surface practice-feedback karaoke-report"><h2>노래방 녹음 리포트</h2>${report.notice === 'left' ? LEFT_NOTICE : ''}${picture}${summary}<p class="subtle">노래방 녹음에서는 길게 낸 높은 음을 중심으로 봐요. 반주가 섞여 있어서 짧은 음은 정확하지 않을 수 있어요.</p>${polishing}${polish}<h3>이 노래의 어려운 자리</h3>${firstLine}${list}${suggest}</section>`;
+  const picture = pictured ? karaokeGraph(result, spots, ui) : '';
+  const headline = `<p class="spot-summary">${karaokeHeadline(result, spots)}</p>`;
+  return `<section class="surface practice-feedback karaoke-report"><h2>노래방 녹음 리포트</h2>${report.notice === 'left' ? LEFT_NOTICE : ''}${headline}${picture}<p class="subtle">노래방 녹음에서는 길게 낸 높은 음만 봐요. 반주가 섞여 있어서 짧은 음과 낮은 음은 정확하지 않을 수 있어요.</p>${polishing}${polish}${list}${suggest}</section>`;
 }
 
 /** The sing-along report, once there is one. */
