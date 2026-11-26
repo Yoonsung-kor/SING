@@ -122,6 +122,13 @@ test('a karaoke take reports long high notes only', () => {
   assert.deepEqual([held.kind, held.outcome], ['high-hold', 'kept']);
 });
 
+test('a karaoke take keeps a long high note reached by a big leap, as a long high note', () => {
+  // The leap itself is not trusted in the mix, but the long high note it lands on is (the 2026-11-17 experiment).
+  const spots = spotsAfter([{ d: 0.5, midi: 60 }, { d: 1.2, midi: 69 }], { source: 'karaoke' });
+  assert.equal(spots.length, 1);
+  assert.deepEqual([spots[0].kind, spots[0].outcome, spots[0].from, spots[0].to], ['high-hold', 'kept', null, koreanNote(69)]);
+});
+
 test('three spots at most, two of a kind, five seconds apart', () => {
   const five = Array.from({ length: 5 }, () => [...saggedLeap, rest(8.5)]).flat();
   const spots = spotsAfter(five);

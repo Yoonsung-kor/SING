@@ -234,7 +234,7 @@ test('spots report: a break is asked about first, and only a yes brings its exer
 test('spots report: all went well, nothing found, and the AI touches', () => {
   assert.ok(spotsPage(spotsReport([spotOf('s1', 'high-hold', 'kept'), spotOf('s2', 'leap', 'kept', { time: 60 })])).includes('어려운 자리를 모두 잘 넘겼어요.'));
   assert.ok(!spotsPage(spotsReport([spotOf('s1', 'high-hold', 'kept'), spotOf('s2', 'leap', 'sag', { time: 60 })])).includes('모두 잘 넘겼어요'));
-  assert.ok(spotsPage(spotsReport([])).includes('이번에는 크게 올라가거나 높이 올라가는 자리를 찾지 못했어요.'));
+  assert.ok(spotsPage(spotsReport([])).includes('이번에는 크게 뛰어오르는 자리나 높은 음을 길게 낸 자리를 찾지 못했어요.'));
   assert.ok(spotsPage(spotsReport([spotOf('s1', 'leap', 'sag')], { polish: 'busy' })).includes('설명을 다듬고 있어요…'));
   const noConsent = spotsPage(spotsReport([spotOf('s1', 'leap', 'sag')]), { consent: false });
   assert.match(noConsent, /data-action="media-polish"[^>]*>AI로 설명 다듬기/);
@@ -294,7 +294,7 @@ test('karaoke mode: each problem has its own words, and a take with too little v
 
 test('karaoke report: the top long note, the limits, each spot by time with a way to hear it, and the range suggestion', () => {
   const html = karaokeReportOf(karaokePage(karaokeDone()));
-  for (const text of ['노래방 녹음 리포트', '가장 높게 길게 낸 음은 3옥 도예요.', '편한 최고음보다 반음 3개 높아요.', '노래방 녹음에서는 길게 낸 높은 음을 중심으로 봐요. 반주가 섞여 있어서 짧은 음은 정확하지 않을 수 있어요.', '이 노래의 어려운 자리', '1분 12초쯤', '2분 30초쯤', 's1 문장', 's2 문장', '잘 넘겼어요', '음이 내려왔어요', '노래방 키 낮추기', '이 노래에서 2옥 시까지 길게 지켰어요. 편한 최고음을 여기(2옥 시)로 바꿀까요?']) assert.ok(html.includes(text), text);
+  for (const text of ['노래방 녹음 리포트', '길게 낸 높은 음 2번 중 1번은 끝까지 지켰어요.', '노래방 녹음에서는 길게 낸 높은 음만 봐요. 반주가 섞여 있어서 짧은 음과 낮은 음은 정확하지 않을 수 있어요.', '다시 들어 볼 자리', '1분 12초쯤', '2분 30초쯤', 's1 문장', 's2 문장', '잘 넘겼어요', '음이 내려왔어요', '노래방 키 낮추기', '이 노래에서 2옥 시까지는 두 번 이상 길게 지켰어요. 편한 최고음을 여기(2옥 시)로 바꿀까요?']) assert.ok(html.includes(text), text);
   assert.equal(count(html, 'data-action="media-karaoke-play"'), 2);
   assert.match(html, /data-action="media-karaoke-play" data-id="72.4"[^>]*>내 녹음 듣기/);
   assert.match(html, /data-action="media-karaoke-high-yes"[^>]*>바꾸기/);
@@ -304,23 +304,29 @@ test('karaoke report: the top long note, the limits, each spot by time with a wa
   assert.ok(!karaokeReportOf(karaokePage(karaokeDone(), { karaokeAudio: false })).includes('내 녹음 듣기'), 'the recording is gone');
 });
 
-test('karaoke report: the summary\'s second half follows the comfortable top', () => {
-  const summary = comfortHigh => karaokeReportOf(karaokePage(karaokeDone(), { comfortHigh }));
-  assert.ok(summary(72).includes('편한 최고음과 같아요.'));
-  assert.ok(summary(74).includes('편한 최고음 안쪽이에요.'));
-  // Without a comfortable top there is nothing to compare with, and no suggestion either (suggestHigh needs one).
-  const unknown = karaokeReportOf(karaokePage(karaokeDone({ result: { ...karaokeDone().result, suggestion: null } }), { comfortHigh: null }));
-  assert.ok(unknown.includes('가장 높게 길게 낸 음은 3옥 도예요.') && !unknown.includes('편한 최고음'));
-  const sol = karaokeReportOf(karaokePage(karaokeDone({ result: { ...karaokeDone().result, range: { topHeld: 67, keptHigh: null }, suggestion: null } })));
-  assert.ok(sol.includes('가장 높게 길게 낸 음은 2옥 솔이에요.'), 'a note ending in a consonant takes 이에요');
-  const none = karaokeReportOf(karaokePage(karaokeDone({ result: { ...karaokeDone().result, spots: [], range: { topHeld: null, keptHigh: null }, suggestion: null } })));
-  assert.ok(none.includes('이번에는 크게 올라가거나 높이 올라가는 자리를 찾지 못했어요.') && !none.includes('가장 높게'));
+test('karaoke report: one sentence on top says how the long high notes went, the same with or without a comfortable top', () => {
+  const highs = outcomes => ({ ...karaokeDone().result, highs: outcomes.map((outcome, i) => ({ time: 20 + i * 10, end: 21 + i * 10, outcome })) });
+  const top = (result, comfortHigh = 69) => karaokeReportOf(karaokePage(karaokeDone({ result }), { comfortHigh })).match(/<p class="spot-summary">([^<]*)<\/p>/)?.[1];
+  assert.equal(top(highs(['kept', 'kept', 'sag'])), '길게 낸 높은 음 3번 중 2번은 끝까지 지켰어요.');
+  assert.equal(top(highs(['kept', 'kept'])), '길게 낸 높은 음 2번을 모두 끝까지 지켰어요.');
+  assert.equal(top(highs(['kept'])), '길게 낸 높은 음 1번을 끝까지 지켰어요.');
+  assert.equal(top(highs(['sag', null])), '길게 낸 높은 음이 2번 있었어요. 다음엔 끝까지 같은 높이로 지켜 봐요.');
+  assert.equal(top(highs(['kept', 'kept', 'sag']), null), '길게 낸 높은 음 3번 중 2번은 끝까지 지켰어요.', 'no comfortable top changes nothing');
+  // No numbers that disagree with the list: no range, no "highest long note", no time tracked.
+  for (const comfortHigh of [69, null]) {
+    const html = karaokeReportOf(karaokePage(karaokeDone({ result: { ...highs(['kept']), range: { topHeld: 74, keptHigh: 71, lowHeld: 45 } } }), { comfortHigh }));
+    for (const text of ['가장 높게', '부른 음역', '따라간 목소리', '편한 최고음보다', '0옥', 'stat-tile']) assert.ok(!html.includes(text), text);
+  }
+  const none = karaokeReportOf(karaokePage(karaokeDone({ result: { ...highs([]), spots: [], range: { topHeld: null, keptHigh: null }, suggestion: null } })));
+  assert.ok(none.includes('<p class="spot-summary">이번 녹음에서는 길게 낸 높은 음을 찾지 못했어요.</p>'));
+  assert.equal(count(none, '찾지 못했어요'), 1, 'said once');
+  assert.ok(!none.includes('다시 들어 볼 자리'), 'no empty list under a heading');
 });
 
 test('karaoke report: with lyric times it asks once whether the first voice is the first line, then adds the lines', () => {
   const withVoice = extra => karaokeDone({ result: { ...karaokeDone().result, firstVoice: 7 }, ...extra });
   const ask = karaokeReportOf(karaokePage(withVoice()));
-  assert.ok(ask.includes('여기가 노래의 첫 소절이 맞나요?'));
+  assert.ok(ask.includes('자리마다 가사 줄을 붙여 드릴게요. 녹음에서 처음 나온 목소리가 노래의 첫 소절이 맞나요?'));
   assert.match(ask, /data-action="media-karaoke-first-play"[^>]*>들어 보기/);
   assert.match(ask, /data-action="media-karaoke-first-yes"[^>]*>맞아요/);
   assert.match(ask, /data-action="media-karaoke-first-no"[^>]*>아니에요, 시간으로만 볼게요/);
@@ -376,11 +382,11 @@ const withPicture = (extra = {}) => karaokeDone({ result: { ...karaokeDone().res
   contour: [[10, 10.4, 55.2], [72.4, 73.4, 69.1], [150, 151.2, 71.2]],
   highs: [{ time: 72.4, end: 73.4, outcome: 'kept' }, { time: 100, end: 101, outcome: 'kept' }, { time: 150, end: 151.2, outcome: 'sag' }] }, ...extra });
 
-test('karaoke report: three numbers on how the take went, from the analysis only', () => {
+test('karaoke report: the sentence on top counts every long high note, and only a report with the picture data draws it', () => {
   const html = karaokeReportOf(karaokePage(withPicture()));
-  for (const text of ['따라간 목소리', '1분 15초', '2분 중', '부른 음역', '1옥 솔 ~ 3옥 도', '길게 낸 높은 음', '3번', '2번은 끝까지 지켰어요']) assert.ok(html.includes(text), text);
-  const old = karaokeReportOf(karaokePage(karaokeDone()));
-  assert.ok(!old.includes('따라간 목소리') && !old.includes('<svg'), 'a report without the picture data shows neither');
+  assert.ok(html.includes('<p class="spot-summary">길게 낸 높은 음 3번 중 2번은 끝까지 지켰어요.</p>'));
+  assert.ok(html.indexOf('spot-summary') < html.indexOf('<svg'), 'the sentence comes before the picture');
+  assert.ok(!karaokeReportOf(karaokePage(karaokeDone())).includes('<svg'), 'a report without the picture data has none');
 });
 
 test('karaoke report: the picture draws each note, the comfortable top, and numbers the chosen spots like the list', () => {
@@ -390,9 +396,11 @@ test('karaoke report: the picture draws each note, the comfortable top, and numb
   assert.equal(count(html, 'class="graph-comfort"'), 1);
   assert.equal(count(html, 'class="graph-spot"'), 2, 'the two spots in the list');
   assert.equal(count(html, 'class="graph-high"'), 1, 'the long high note the report did not choose');
-  assert.ok(html.includes('진한 선은 길게 낸 음, 점선은 편한 최고음이에요.'));
+  assert.ok(html.includes('위로 갈수록 높은 음이고, 진한 선은 길게 낸 음이에요. 점선은 편한 최고음이에요. 번호는 아래 자리예요.'));
   assert.ok(!html.includes('style="'));
-  assert.equal(count(karaokeReportOf(karaokePage(withPicture(), { comfortHigh: null })), 'class="graph-comfort"'), 0);
+  const plain = karaokeReportOf(karaokePage(withPicture({ result: { ...withPicture().result, spots: [] } }), { comfortHigh: null }));
+  assert.equal(count(plain, 'class="graph-comfort"'), 0);
+  assert.ok(!plain.includes('점선') && !plain.includes('번호는'), 'the legend names only what is drawn');
 });
 
 test('karaoke report: tapping the picture plays the recording from there, only while the recording is still here', () => {
